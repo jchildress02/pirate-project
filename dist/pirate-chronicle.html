@@ -113,6 +113,8 @@ p { margin: 0 0 0.8em; }
   .sheet { border-right: 0; border-bottom: 1px solid var(--rule); order: 2; }
   .stage { padding: 1.2em 1em; order: 1; }
 }
+
+.savetext { width: 100%; height: 8em; font-family: monospace; font-size: 0.75em; background: #fffaf0; border: 1px solid var(--rule); padding: 0.5em; }
 </style>
 </head>
 <body>
@@ -1509,40 +1511,82 @@ p { margin: 0 0 0.8em; }
       "</div></div>";
   }
 
-  // ---- Files -----------------------------------------------------------
+  // ---- Save files (in-page dialogs: some hosts block downloads and pop-ups) ----
 
-  function exportSave() {
-    var blob = new Blob([PC.state.serialize(state)], { type: "application/json" });
-    var a = document.createElement("a");
+  function saveFileName() {
     var c = state.captain;
-    a.href = URL.createObjectURL(blob);
-    a.download = "pirate-chronicle-" + (c.first + "-" + c.last).toLowerCase().replace(/[^a-z0-9]+/g, "-") +
+    return "pirate-chronicle-" + (c.first + "-" + c.last).toLowerCase().replace(/[^a-z0-9]+/g, "-") +
       "-" + PC.state.seasonName(state).toLowerCase() + "-" + state.time.year + ".json";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
-    toast("Save file downloaded.");
   }
 
-  function importSave() {
-    var input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json,application/json";
-    input.onchange = function () {
-      var f = input.files && input.files[0];
-      if (!f) return;
-      var reader = new FileReader();
-      reader.onload = function () {
-        try {
-          state = PC.state.deserialize(String(reader.result));
-          PC.state.saveToBrowser(state);
-          toast("Save loaded.");
-        } catch (e) { toast("Couldn't load that file: " + e.message); }
-        draw();
-      };
-      reader.readAsText(f);
-    };
-    input.click();
+  function downloadSave() {
+    try {
+      var blob = new Blob([PC.state.serialize(state)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = saveFileName();
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      toast("Save file downloaded. (If nothing appeared, use Copy instead.)");
+    } catch (e) { toast("Downloads are blocked here. Use Copy instead."); }
+  }
+
+  function copySave() {
+    var text = PC.state.serialize(state);
+    var done = function () { toast("Save copied. Paste it into a text file to keep it."); };
+    try {
+      navigator.clipboard.writeText(text).then(done, function () { selectSaveText(); });
+    } catch (e) { selectSaveText(); }
+  }
+
+  function selectSaveText() {
+    var ta = document.querySelector(".savetext");
+    if (ta) { ta.focus(); ta.select(); }
+    toast("Select all the text in the box and copy it.");
+  }
+
+  function loadSaveText(text) {
+    try {
+      state = PC.state.deserialize(String(text).trim());
+      PC.state.saveToBrowser(state);
+      dialog = null;
+      toast("Save loaded.");
+    } catch (e) { toast("Couldn't load that save: " + e.message); }
+    draw();
+  }
+
+  function pickSaveFile(input) {
+    var f = input.files && input.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () { loadSaveText(reader.result); };
+    reader.readAsText(f);
+  }
+
+  function dialogHtml() {
+    if (dialog === "export") {
+      return '<div class="modal" data-act="closedialog"><div class="panel" onclick="event.stopPropagation()">' +
+        "<h2>Save file</h2><p>Keep your game outside this browser. Download it, or copy it and paste it into a text file.</p>" +
+        '<textarea class="savetext" readonly>' + esc(PC.state.serialize(state)) + "</textarea>" +
+        '<div class="actions"><button data-act="download" class="primary">Download</button><button data-act="copy">Copy</button><button data-act="closedialog">Close</button></div>' +
+        "</div></div>";
+    }
+    if (dialog === "import") {
+      return '<div class="modal" data-act="closedialog"><div class="panel" onclick="event.stopPropagation()">' +
+        "<h2>Load a save</h2><p>Choose a save file, or paste a copied save into the box.</p>" +
+        '<p><input type="file" accept=".json,.txt,application/json,text/plain" data-act="pickfile"></p>' +
+        '<textarea class="savetext pastebox" placeholder="Paste a save here"></textarea>' +
+        '<div class="actions"><button data-act="loadpasted" class="primary">Load pasted save</button><button data-act="closedialog">Cancel</button></div>' +
+        "</div></div>";
+    }
+    if (dialog === "confirmnew") {
+      return '<div class="modal" data-act="closedialog"><div class="panel" onclick="event.stopPropagation()">' +
+        "<h2>Start a new game?</h2><p>The game saved in this browser will be replaced. Use Save file first if you want to keep it.</p>" +
+        '<div class="actions"><button data-act="newconfirmed" class="primary">Start a new game</button><button data-act="closedialog">Cancel</button></div>' +
+        "</div></div>";
+    }
+    return "";
   }
 
   function toast(msg) {
@@ -1558,13 +1602,22 @@ p { margin: 0 0 0.8em; }
   var handlers = {
     "continue": function () { state = PC.state.loadFromBrowser(); },
     "new": function () {
-      if (PC.state.loadFromBrowser() && !confirm("Start a new game? Your current browser save will be replaced. (Download a save file first if you want to keep it.)")) return;
+      if (PC.state.loadFromBrowser()) { dialog = "confirmnew"; return; }
+      handlers.newconfirmed();
+    },
+    "newconfirmed": function () {
+      dialog = null;
       state = PC.state.newGame(PC.data.testCaptain);
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; },
-    "export": exportSave,
-    "import": importSave,
+    "export": function () { dialog = "export"; },
+    "import": function () { dialog = "import"; },
+    "closedialog": function () { dialog = null; },
+    "download": downloadSave,
+    "copy": copySave,
+    "pickfile": pickSaveFile,
+    "loadpasted": function () { var t = document.querySelector(".pastebox").value; if (t.trim()) loadSaveText(t); else toast("Paste a save first."); },
     "choose": function (el) {
       PC.scenes.choose(state, Number(el.dataset.i));
       // A beat's "carry on" with nothing to show goes straight through.
@@ -1587,9 +1640,11 @@ p { margin: 0 0 0.8em; }
   };
 
   var showDev = false;
+  var dialog = null;
 
   function wire() {
     if (showDev && state) root.insertAdjacentHTML("beforeend", devPanel());
+    if (dialog) root.insertAdjacentHTML("beforeend", dialogHtml());
     root.querySelectorAll("[data-act]").forEach(function (el) {
       var name = el.dataset.act;
       var h = handlers[name];
@@ -1597,7 +1652,9 @@ p { margin: 0 0 0.8em; }
       var evt = el.tagName === "INPUT" ? "change" : "click";
       el.addEventListener(evt, function (ev) {
         if (el.classList.contains("modal") && ev.target !== el) return;
-        if (name === "export" || name === "import") { h(); return; }
+        // These redraw (or not) themselves: file reads finish later, and
+        // copy/download must not rebuild the dialog under the user.
+        if (name === "pickfile" || name === "loadpasted" || name === "copy" || name === "download") { h(el); return; }
         act(h)(el);
       });
     });
