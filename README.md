@@ -12,6 +12,17 @@ The game saves itself in your browser after every action. **Save file** download
 
 ## Where things stand
 
+**Milestone 2: the Ocracoke shell** (§17.2, §37.8). After the creator you sail into Ocracoke:
+
+- the town screen with its five places (Tavern, Docks, Merchant, Lilyhook's Graveyard, the Ship) and the first-visit locks: only the Tavern is open until your first visit there ends;
+- the Tavern keeper, shipwright and provisioner are new people in every world, named from the §36 pools with the gender weights by role (§15.1) and two traits each; pronoun tokens like {keeper.he} follow them;
+- the plain services: provisions and the seasonal stock (Spring 1754's is fixed), selling clean treasure and goods to the provisioner and dirty ones to Bobby Rats's fence, repairs (which fix the frayed rigging), level 2 upgrades and guns, the crew pool and paying off hands, and shore leave;
+- the harbor due on every arrival, with its shortfall rules, and the arrival popup;
+- the Ship layer: the Articles (sign, loosen, never tighten), the Crew tab (Rally, Drill, Give to the crew, Make an Example, rationing), officers, cargo (jettison, open the stores) and the captain;
+- random name buttons in the creator.
+
+The first-visit scenes and the Startup quests are short PLACEHOLDER beats that fire at the right moments and pay the real rewards; Milestone 3 writes them in. Menu entries for later milestones show what's coming.
+
 **Milestone 1: the character creator** (§12). **New game** opens it:
 
 - ten steps: name and age, portrait, origin (home city, profession and its free point, what was lost), stats, training, traits and flaw, tags and debuffs, the mentor, the ship's name, and a review;
@@ -21,11 +32,11 @@ The game saves itself in your browser after every action. **Save file** download
 - every trait, flaw, tag and debuff now changes checks (rerolls, +1s and -1s, with their conditions), and the mentor's Old Lessons reroll works;
 - **Surprise me** fills a random captain; a half-made captain survives a refresh.
 
-The scenes after the creator are still Milestone 0's placeholders. **Quick start with the test captain** (on the title screen) skips the creator.
+**Quick start with the test captain** (on the title screen) skips the creator.
 
 **Milestone 0: the engine.** The check system, seeded dice, the scene runner, effects, pronoun tokens, seasons and actions, autosave and save files, the content checker and the Developer panel.
 
-Next: Ocracoke's first visit and the startup quests, then a prize hunt and selling loot (the prototype loop).
+Next: Milestone 3, Ocracoke's scenes and quests (§37.8).
 
 ## Folders
 
