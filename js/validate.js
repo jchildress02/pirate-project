@@ -11,7 +11,7 @@
 
   var KINDS = ["check", "choice", "beat"];
   var EFFECT_KEYS = ["gold", "provisions", "treasure", "hull", "morale", "pressure", "dread", "standing", "heat",
-    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace"];
+    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace", "minigame"];
   var FACTIONS = ["frisia", "avalon", "pirates"];
 
   function validate(sampleState) {

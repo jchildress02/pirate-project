@@ -10,7 +10,7 @@
  *     with the answer shown above the choices;
  *   carry: true opens the next scene with this result's text as its setup;
  *   info: true marks an information step (no approval tags, §33.1.3).
- * "PLACEHOLDER" marks the one stand-in: the salvage dive (Milestone 4).
+ * The Miranda dive hands over to the salvage minigame (js/salvage.js, §18.2).
  */
 (function () {
   "use strict";
@@ -1732,9 +1732,13 @@
           "label": "Dive for the mermaid.",
           "approval": [],
           "result": {
-            "text": "You take a deep breath and plunge into the depths below.\n\nA brig sits upright on the bottom, in relatively good condition compared to the other wrecks, save for the gaping holes in her hull.\n\nPLACEHOLDER (Milestone 4): the salvage dive is played here, on the *Miranda* only. For now, the ivory mermaid comes up on the first try.\n\nYou break the surface, gasping for air.",
-            "effects": [],
-            "exit": "ocr_dpw_shark"
+            "text": "",
+            "effects": [
+              {
+                "minigame": "miranda"
+              }
+            ],
+            "exit": "hub"
           }
         }
       ],

@@ -194,7 +194,7 @@
     return ["tavern", "docks", "merchant", "graveyard", "ship"].map(function (p) {
       var out = { id: p, name: nd.locations[p].name, locked: false, why: null };
       if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Visit the Tavern first"; }
-      else if (p === "graveyard" && !flag(state, F.dyingWish)) { out.locked = true; out.why = "Locked until A Dying Pirate's Wish"; }
+      else if (p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.why = "Locked until A Dying Pirate's Wish"; }
       return out;
     });
   }

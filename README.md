@@ -12,10 +12,16 @@ The game saves itself in your browser after every action. **Save file** download
 
 ## Where things stand
 
+**Milestone 4: the minigames** (§18, §32.15). The three Year 1 minigames are playable:
+
+- **The salvage dive** at Lilyhook's Graveyard: three seeded wrecks a season (sloop, brig or frigate), once a season for an action. Grab (a Dive check), Scout or Surface; breath, the hazard deck (snag, current, the shark, something moving below), blackouts that keep half the haul, the Giant Tooth relic, and a Quick Dive. A Dying Pirate's Wish now plays the real dive on the *Miranda*, with retries from the Graveyard at an action each.
+- **Under the Table**, the drinking match in the Tavern: Wits against a pirate's hidden Tolerance, Size him up, one taunt a match, the strong stuff, four mishaps, the tab, the Hangover, the Heavy Drinker's "One more round". A win pays a rumor, or the loss quest's drinking lead.
+- **Liar's Dice**: up to five games a sitting against a dockhand, stakes from your purse, Size them up and Cheat (with Loaded Dice), Card Sharp after 500 gold won.
+
 **Milestone 3: scenes and quests** (§17.2, §30, §25.7, §37.9). Ocracoke's opening is the author's real scenes now:
 
 - the first visit: the sandbar (pilot her, give the mentor the helm, or full sail), the mentor on the beach, and Arthur Twopenny's harbor due (pay, flatter, donate, refuse, or shove him into the sand), with his pointer to your first lead;
-- both Startup quests: Welcome to the Underworld (Bobby Rats's "debt") and A Dying Pirate's Wish (Ollie, Geezer, the *Miranda* and the shark). The dive itself is a stand-in until Milestone 4: the mermaid always comes up;
+- both Startup quests: Welcome to the Underworld (Bobby Rats's "debt") and A Dying Pirate's Wish (Ollie, Geezer, the *Miranda* and the shark). the *Miranda* dive is the real salvage dive since Milestone 4;
 - Restless & Ruined at the Docks: sign Davey Dell, pay his tab, or send him to the Tavern, where he waits in an officer seat;
 - the one-armed pirate (Variants A and C), with his price and the *Trident* lead;
 - the tavern keeper's rumors, with the Tavern Talk check, the scripted Frisian posture rumor (rolled when the world is made) and the rest of Ocracoke's prototype rumor lines; Node rumors reveal an NPC's trait;
@@ -47,7 +53,7 @@ Menu entries for later milestones show what's coming.
 
 **Milestone 0: the engine.** The check system, seeded dice, the scene runner, effects, pronoun tokens, seasons and actions, autosave and save files, the content checker and the Developer panel.
 
-Next: Milestone 4, the minigames: the salvage dive, the drinking match and Liar's Dice (§37.8).
+Next: Milestone 5, the prize hunt and combat (§37.8).
 
 ## Folders
 

@@ -29,7 +29,13 @@
         bald_man: { node: "ocracoke", variants: ["B"], journal: {
           B: P + "Bobby Rats sold your jewels to a tall, thin, bald man heading home to Edenton.",
         } },
-        drinking: { node: null, journal: { any: P + "A lead won over drinks (Milestone 4)." } },
+        // The drinking lead (§30.6, lead 5): any drinking win at any Tavern.
+        drinking: { node: null, journal: {
+          A: P + "A pirate you drank under the table knows the *Trident*'s hunting waters.",
+          B: P + "A pirate you drank under the table bragged about a chest of jewels aboard the *Trident*.",
+          C: P + "A pirate you drank under the table knows the waters Gregoire's *Trident* works.",
+          any: P + "A lead won over drinks.",
+        } },
       },
     },
     hidden_haven: {

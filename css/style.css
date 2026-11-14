@@ -232,3 +232,15 @@ button.big { font-size: 1.15em; padding: 0.6em 1.6em; }
 .candidate { border-top: 1px solid #e3dccb; padding-top: 0.5em; margin-top: 0.5em; }
 .candidate p { margin: 0.3em 0; }
 .notice { color: #8a4b00; }
+
+/* Milestone 4: the minigames */
+.minigame .meter { margin: .4rem 0; }
+.minigame .meter i { display: inline-block; width: .8rem; height: .8rem; border-radius: 50%; margin-right: 2px; border: 1px solid #6b5a3e; vertical-align: middle; }
+.minigame .meter i.on { background: #2f6f8f; }
+.mg-drink .meter i.on { background: #8f5a2f; }
+.mglog { border-left: 3px solid #d8cdb5; padding-left: .7rem; margin: .6rem 0; }
+.mglog p { margin: .25rem 0; }
+.wreck { border: 1px solid #d8cdb5; border-radius: 6px; padding: .5rem .7rem; margin: .5rem 0; }
+.wreck h4 { margin: 0 0 .2rem; text-transform: capitalize; }
+.cups .die { font-size: 1.8rem; line-height: 1; margin-right: .2rem; }
+.cups .die.hidden { font-size: 1rem; display: inline-block; width: 1.6rem; text-align: center; border: 1px dashed #999; border-radius: 4px; }

@@ -28,7 +28,7 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 - Meter modifiers on checks (Dread and Standing, §11.8.5): `meterModifier()` in `js/checks.js` is a stub.
 - Social retries at DR -1 (§11.10); clocks (§11.9); approval tags are recorded on choices but not yet read by anything.
 - Modifier `note` fields (economy cuts, Gunnery, Dread and morale floors) are recorded but not applied; the systems that read them come later.
-- The minigames (Milestone 4): A Dying Pirate's Wish uses a stand-in dive (the mermaid always comes up), and the loss quest's drinking lead waits for the drinking match. The hunt (Milestone 5). Their menu entries show "Arrives in Milestone N".
+- The hunt (Milestone 5): its menu entry shows "Arrives in Milestone 5". The minigames are built (Milestone 4: `js/salvage.js`, `js/drinking.js`, `js/liarsdice.js`, shared plumbing in `js/minigames.js`, numbers and lines in `content/minigames.js`); not yet: displays (the Giant Tooth and the Kingly Goblet count while carried), the Gambler flaw's stake temptation, item selling, and the giant shark's own cryptid scenes (PLACEHOLDER lines).
 - Rumors: only the base Patrol danger spot rolls (Heat-driven spots, Hunter's Waters and the Frisian Sweep wait for Heat and the hunt); a Prize rumor is recorded but adds no ship until Milestone 5; the Hidden Haven's chart reveal waits for the map.
 - Officers: approval points, barks, bonds, the Quartermaster vote and officer events. Officers join, show their traits and can be replaced (dismissed); nothing reads their likes yet.
 - The journal's wording (the UI chat): its lines are marked PLACEHOLDER.

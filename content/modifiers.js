@@ -118,6 +118,20 @@
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
   add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  // The minigames' tags and items (§14.5, §14.4, §32.12).
+  add("Hangover", { edge: plus(["Keep Watch", "Notice Danger", "Read People"], -1) });
+  add("Waterlogged", { edge: plus(["Endure"], -1) }); // placeholder (§14.5)
+  add("Card Sharp", { reroll: reroll(["Cards & Dice"]) });
+  add("Hip Flask", { reroll: reroll(["Cast-Iron Stomach"]) });
+  add("Loaded Dice", { note: "One reroll of the Cheat roll per Liar's Dice session (§18.3)." });
+  add("Diver's Mask", { note: "+1 breath on a dive (§18.2)." });
+  add("Diving Barrel", { note: "+2 breath on a dive (§18.2)." });
+  add("Velvet Buccaneer Coat", { edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Tin Whistle", { note: "Morale floor +5 (§32.12)." });
+  add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
+  add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
+  add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
+  add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
   add("Weak Chest", { edge: plus(["Endure", "Haul & Labor", "Dive"], -1).concat([{ any: true, value: -1, when: { condition: "Cold" } }]) });
   add("Bad Back", { edge: [{ group: "Heavy Labor", value: -1 }] });
   add("Rheumy Hands", { edge: [{ group: "Fine Work", value: -1 }] });

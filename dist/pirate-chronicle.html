@@ -239,6 +239,18 @@ button.big { font-size: 1.15em; padding: 0.6em 1.6em; }
 .candidate { border-top: 1px solid #e3dccb; padding-top: 0.5em; margin-top: 0.5em; }
 .candidate p { margin: 0.3em 0; }
 .notice { color: #8a4b00; }
+
+/* Milestone 4: the minigames */
+.minigame .meter { margin: .4rem 0; }
+.minigame .meter i { display: inline-block; width: .8rem; height: .8rem; border-radius: 50%; margin-right: 2px; border: 1px solid #6b5a3e; vertical-align: middle; }
+.minigame .meter i.on { background: #2f6f8f; }
+.mg-drink .meter i.on { background: #8f5a2f; }
+.mglog { border-left: 3px solid #d8cdb5; padding-left: .7rem; margin: .6rem 0; }
+.mglog p { margin: .25rem 0; }
+.wreck { border: 1px solid #d8cdb5; border-radius: 6px; padding: .5rem .7rem; margin: .5rem 0; }
+.wreck h4 { margin: 0 0 .2rem; text-transform: capitalize; }
+.cups .die { font-size: 1.8rem; line-height: 1; margin-right: .2rem; }
+.cups .die.hidden { font-size: 1rem; display: inline-block; width: 1.6rem; text-align: center; border: 1px dashed #999; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -562,7 +574,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 4;
+  var SAVE_VERSION = 5;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -602,7 +614,16 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     };
     addMilestone2Fields(state, startNode);
     addMilestone3Fields(state);
+    addMilestone4Fields(state);
     return state;
+  }
+
+  // Milestone 4: the minigames (§18). The game in play (state.minigame) and
+  // what carries across sessions: Liar's Dice winnings toward Card Sharp,
+  // the Heavy Drinker's "One more round" count, session counters.
+  function addMilestone4Fields(state) {
+    state.minigames = state.minigames || { diceWinnings: 0, oneMoreRounds: 0, drinkSessions: 0, diceSessions: 0 };
+    if (state.minigame === undefined) state.minigame = null;
   }
 
   // Milestone 3: Frisia's posture, rolled at world creation (§8; equal odds
@@ -715,6 +736,12 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
       if (data.current && STUB_TO_SCENE[data.current.sceneId]) data.current = { screen: "scene", sceneId: STUB_TO_SCENE[data.current.sceneId], phase: "choosing" };
       if (data.location && data.location.queue) data.location.queue = data.location.queue.map(function (q) { return STUB_TO_SCENE[q] || q; });
       data.saveVersion = 4;
+    }
+    if (data.saveVersion === 4) {
+      // Version 5 (Milestone 4): the minigames. Nothing a version 4 save holds
+      // changes; a captain standing at the stand-in dive plays the real one.
+      addMilestone4Fields(data);
+      data.saveVersion = 5;
     }
     return data;
   }
@@ -1848,7 +1875,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     return ["tavern", "docks", "merchant", "graveyard", "ship"].map(function (p) {
       var out = { id: p, name: nd.locations[p].name, locked: false, why: null };
       if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Visit the Tavern first"; }
-      else if (p === "graveyard" && !flag(state, F.dyingWish)) { out.locked = true; out.why = "Locked until A Dying Pirate's Wish"; }
+      else if (p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.why = "Locked until A Dying Pirate's Wish"; }
       return out;
     });
   }
@@ -2652,7 +2679,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     var after = [];
     var live = (o.effects || []).filter(function (e) { return test(state, e.when); }); // judged before any applies
     live.forEach(function (e) {
-      if ("goPlace" in e) { after.push(e); return; }
+      if ("goPlace" in e || "minigame" in e) { after.push(e); return; }
       var line = applyEffect(state, e, pot);
       if (line) PC.state.addLog(state, "  " + line);
     });
@@ -2668,7 +2695,17 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
       if (o.carry && state.current.screen === "scene") state.current.again = text;
     }
     // Walk the captain somewhere once the scene ends (Twopenny's exit: to the Tavern).
-    after.forEach(function (e) { if (PC.node && state.current.screen === "node") PC.node.enter(state, e.goPlace, { quiet: false }); });
+    after.forEach(function (e) {
+      if ("minigame" in e) { startMinigame(state, e.minigame); return; }
+      if (PC.node && state.current.screen === "node") PC.node.enter(state, e.goPlace, { quiet: false });
+    });
+  }
+
+  // A scene that hands over to a minigame (A Dying Pirate's Wish's dive on
+  // the Miranda, §18.2). The minigame decides where the story goes next.
+  function startMinigame(state, mg) {
+    if (mg === "miranda") return PC.salvage.start(state, { miranda: true, back: "node" });
+    throw new Error("Unknown minigame: " + mg);
   }
 
   function labelFor(outcome) {
@@ -3424,6 +3461,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     fenceDealRumor: fenceDealRumor,
     askFrench: askFrench,
     render: render,
+    draw: drawOne, // one rumor by type weights, for the minigames (§18.2, §18.4.6)
   };
 })();
 </script>
@@ -3441,7 +3479,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
 
   var KINDS = ["check", "choice", "beat"];
   var EFFECT_KEYS = ["gold", "provisions", "treasure", "hull", "morale", "pressure", "dread", "standing", "heat",
-    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace"];
+    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace", "minigame"];
   var FACTIONS = ["frisia", "avalon", "pirates"];
 
   function validate(sampleState) {
@@ -4033,6 +4071,1272 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   };
 })();
 </script>
+  <script>
+/* Pirate Chronicle — what the three minigames share (§18.1).
+ *
+ * A minigame in play lives in state.minigame, and the screen shows it while
+ * state.current.screen is "minigame". Each game (js/salvage.js,
+ * js/drinking.js, js/liarsdice.js) registers an engine here with:
+ *   settle(state, game)  apply the roll waiting in game.pending
+ *   view(state, game)    what the screen shows
+ * Rolls go through roll() below, so a setback can be rerolled the usual way
+ * (a tag, an item or the Drunkard's once a season, §5.7), plus any reroll
+ * the game itself grants for one session (Loaded Dice, §32.12).
+ *
+ * Every roll is seeded (§18.1): world seed, season, the game's own key and a
+ * counter, so reloading never changes a result. No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  var engines = {};
+  function register(kind, engine) { engines[kind] = engine; }
+  function engine(game) { var e = engines[game.kind]; if (!e) throw new Error("Unknown minigame: " + game.kind); return e; }
+
+  function current(state) { return state.current && state.current.screen === "minigame" ? state.minigame : null; }
+
+  // Open a game. `back` says where the player goes when it ends: a scene
+  // id, or "node" (back to the place he left). The place is kept, so the
+  // Tavern or the Graveyard is where he returns.
+  function start(state, game, back) {
+    game.back = back || "node";
+    game.n = 0;
+    game.log = game.log || [];
+    state.minigame = game;
+    state.current = { screen: "minigame" };
+    return game;
+  }
+
+  // A fresh seeded key for the next draw (dice, a deck, a loot slot).
+  function key(state, game, what) {
+    game.n = (game.n || 0) + 1;
+    return [state.world.seed, PC.state.stamp(state), game.key, what, game.n].join("|");
+  }
+
+  function rand(state, game, what) { return PC.rng.fromKey(key(state, game, what)); }
+
+  function pick(r, list) { return list[Math.floor(r() * list.length)]; }
+
+  function weighted(r, weights) { return PC.npcs.weighted(r, weights); }
+
+  function between(r, lo, hi) { return lo + Math.floor(r() * (hi - lo + 1)); }
+
+  function say(state, game, line) { if (line) game.log.push(PC.text.render(line, state)); }
+
+  // A reroll the captain could use on this roll right now: his own (once a
+  // season, PC.checks) or one the game grants for this session.
+  function rerollFor(state, game, p) {
+    if (!p || p.outcome === "clean" || p.rerolled) return null;
+    var own = PC.checks.availableReroll(state, p.check, p.outcome, { conditions: p.conditions });
+    if (own) return own;
+    var extra = (game.sessionRerolls || []).filter(function (s) { return !s.used && s.types.indexOf(p.check.type) >= 0 && (!s.op || s.op === p.op); })[0];
+    return extra ? { id: "session:" + extra.name, name: extra.name, session: true } : null;
+  }
+
+  // Roll a check for a game action. The result waits in game.pending; if no
+  // reroll is open, it settles at once, otherwise the screen asks first.
+  function roll(state, game, check, op, data, conditions) {
+    var k = key(state, game, op);
+    var res = PC.checks.resolve(state, check, k, { conditions: conditions || [] });
+    game.pending = {
+      op: op, data: data || {}, check: check, conditions: conditions || [], key: k,
+      outcome: res.outcome, roll: { dice: res.dice, total: res.total, edge: res.assessment.edge, tier: res.assessment.tier, type: check.type },
+    };
+    if (!rerollFor(state, game, game.pending)) return settle(state);
+    return game.pending;
+  }
+
+  function settle(state) {
+    var game = state.minigame;
+    if (!game || !game.pending) throw new Error("Nothing to settle.");
+    var p = game.pending;
+    game.pending = null;
+    game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null };
+    return engine(game).settle(state, game, p);
+  }
+
+  function reroll(state) {
+    var game = state.minigame, p = game && game.pending;
+    var r = rerollFor(state, game, p);
+    if (!r) throw new Error("No reroll available.");
+    if (r.session) (game.sessionRerolls || []).filter(function (s) { return "session:" + s.name === r.id; })[0].used = true;
+    else state.rerollsUsed[r.id] = (state.rerollsUsed[r.id] || 0) + 1;
+    var res = PC.checks.resolve(state, p.check, p.key + "|reroll", { conditions: p.conditions });
+    p.outcome = res.outcome; // the new result stands
+    p.roll = { dice: res.dice, total: res.total, edge: res.assessment.edge, tier: res.assessment.tier, type: p.check.type };
+    p.rerolled = true;
+    p.rerolledWith = r.name;
+    return settle(state);
+  }
+
+  // What the screen shows for the roll waiting on a reroll decision.
+  function pendingView(state) {
+    var game = state.minigame, p = game && game.pending;
+    if (!p) return null;
+    var r = rerollFor(state, game, p);
+    return { type: p.check.type, outcome: p.outcome, roll: p.roll, reroll: r ? r.name : null };
+  }
+
+  // The game is over and the player has read the end: back where he came
+  // from (a scene, or the place in town).
+  function leave(state) {
+    var game = state.minigame;
+    if (!game) throw new Error("No minigame in play.");
+    if (!game.over) throw new Error("The game isn't over yet.");
+    var e = engine(game);
+    var to = e.exit ? e.exit(state, game) : game.back;
+    state.minigame = null;
+    if (to && to !== "node" && to !== "hub") return PC.scenes.enterScene(state, to);
+    state.current = { screen: "node" };
+    var next = PC.node.nextQueued(state);
+    if (next) PC.scenes.enterScene(state, next);
+  }
+
+  function view(state) {
+    var game = state.minigame;
+    var v = engine(game).view(state, game);
+    v.kind = game.kind;
+    v.pending = pendingView(state);
+    v.over = !!game.over;
+    v.log = game.log.slice();
+    return v;
+  }
+
+  // Edge for a check, for the screen ("Easy", the odds).
+  function assess(state, check, conditions) { return PC.checks.assess(state, check, { conditions: conditions || [] }); }
+
+  PC.minigames = {
+    register: register,
+    current: current,
+    start: start,
+    key: key,
+    rand: rand,
+    pick: pick,
+    weighted: weighted,
+    between: between,
+    roll: roll,
+    settle: settle,
+    reroll: reroll,
+    leave: leave,
+    view: view,
+    assess: assess,
+    say: say,
+  };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — the salvage dive (§18.2; loot §32.15).
+ *
+ * Lilyhook's Graveyard offers three wrecks a season (seeded). The captain
+ * picks one and dives it: each turn he Grabs from a zone (a Dive check),
+ * Scouts a zone (1 breath, no roll), or Surfaces. Breath runs out, a shark
+ * or the cryptid can black him out, and a blackout keeps half the haul.
+ * A Quick Dive skips the loop with one Dive check.
+ *
+ * The *Miranda* (A Dying Pirate's Wish) runs on the same loop: the only
+ * wreck offered, the ivory mermaid first in her Hull, only Snag and Current.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  function D() { return PC.data.minigames.salvage; }
+  function M() { return PC.minigames; }
+  function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  var COND = ["Underwater"];
+
+  // ---- What's on offer ------------------------------------------------------
+
+  // Three wrecks a season, seeded by the world and the season (§18.2).
+  function wrecksOnOffer(state, site) {
+    var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), site, "wrecks"].join("|"));
+    var out = [];
+    for (var i = 0; i < D().WRECKS_OFFERED; i++) {
+      var type = M().weighted(r, D().WRECK_WEIGHTS);
+      out.push({ id: site + "-" + PC.state.stamp(state) + "-" + i, type: type, flavor: M().pick(r, D().flavor[type]) });
+    }
+    return out;
+  }
+
+  // The Miranda is the only wreck until the mermaid comes up (§18.2).
+  function mirandaPending(state) { return !state.flags.ocr_dpw_done && !state.flags.dpw_mermaid; }
+
+  // Once a season at 1 AP after A Dying Pirate's Wish (§18.2). The quest's
+  // own dives don't use it up (DEFAULT).
+  function canDive(state) {
+    if (!state.flags.ocr_dpw_done) return { ok: false, why: "Locked until A Dying Pirate's Wish" };
+    if (PC.crew.usedThisSeason(state, "dive")) return { ok: false, why: D().lines.already };
+    if (state.ap.left < 1) return { ok: false, why: "Not enough time this season" };
+    return { ok: true };
+  }
+
+  function canRetryMiranda(state) {
+    if (!state.flags.dpw_retry || !mirandaPending(state)) return { ok: false, why: "" };
+    if (state.ap.left < 1) return { ok: false, why: "Not enough time this season" };
+    return { ok: true };
+  }
+
+  // ---- Loot ----------------------------------------------------------------
+
+  function tableFor(zone, type) { return zone === "cabin" ? zone + "_" + (type === "frigate" ? "frigate" : "brig") : zone; }
+
+  function rollItem(r, zone, type) {
+    var t = tableFor(zone, type);
+    var tier = M().weighted(r, D().TIERS[t]);
+    var y = D().YIELDS[t] || {};
+    if (tier === "junk") return { tier: "junk", line: M().pick(r, D().junk) };
+    if (tier === "supplies") return { tier: "supplies", provisions: M().between(r, y.supplies[0], y.supplies[1]) };
+    if (tier === "goods") {
+      var w = {}; y.goods.forEach(function (g, i) { w[i] = g[3]; });
+      var g = y.goods[M().weighted(r, w)];
+      return { tier: "goods", good: g[0], n: M().between(r, g[1], g[2]) };
+    }
+    if (tier === "treasure") return { tier: "treasure", treasure: M().between(r, y.treasure[0], y.treasure[1]), gold: M().between(r, y.gold[0], y.gold[1]) };
+    var rare = r() < (y.rare || 0);
+    return { tier: "item", item: M().pick(r, D().ITEMS[rare ? "rare" : "uncommon"]), rare: rare };
+  }
+
+  function worth(it) {
+    var W = D().WORTH;
+    if (it.tier === "quest") return Infinity;
+    if (it.tier === "treasure") return it.treasure * W.treasureUnit + it.gold;
+    if (it.tier === "goods") return ((PC.data.goods[it.good] || {}).base || 0) * it.n;
+    if (it.tier === "supplies") return it.provisions * W.provisions;
+    if (it.tier === "item") return it.rare ? W.rare : W.uncommon;
+    return 0;
+  }
+
+  function describe(it) {
+    if (it.tier === "junk") return it.line;
+    if (it.tier === "supplies") return it.provisions + " provisions lot" + (it.provisions > 1 ? "s" : "");
+    if (it.tier === "goods") return it.n + " " + it.good;
+    if (it.tier === "treasure") return it.treasure + " treasure and " + it.gold + " gold";
+    if (it.tier === "item") return it.item;
+    if (it.tier === "quest") return "the " + it.item;
+    return "?";
+  }
+
+  // ---- Starting a dive -----------------------------------------------------
+
+  function breathMax(state) {
+    var best = 0;
+    (state.captain.items || []).forEach(function (i) { best = Math.max(best, D().GEAR[i] || 0); });
+    return D().BREATH + best;
+  }
+
+  // opts: { site, wreck } for an ordinary dive, or { miranda: true }.
+  function newDive(state, opts) {
+    var site = opts.site || "ocracoke";
+    var w = opts.miranda ? D().miranda : opts.wreck;
+    var key = "dive|" + (opts.miranda ? "miranda-" + ((state.rolls.miranda = (state.rolls.miranda || 0) + 1)) : w.id);
+    var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), key, "loot"].join("|"));
+    var zones = {};
+    D().ZONES[w.type].forEach(function (z) {
+      var items = [];
+      for (var i = 0; i < D().SLOTS; i++) items.push(rollItem(r, z, w.type));
+      zones[z] = { dr: (w.zoneDr && w.zoneDr[z] != null) ? w.zoneDr[z] : D().ZONE_DR[z], mod: 0, items: items, next: 0, scouted: -1 };
+    });
+    if (opts.miranda) zones[D().miranda.quest.zone].items[0] = { tier: "quest", item: D().miranda.quest.item };
+    var bm = breathMax(state);
+    return {
+      kind: "dive", key: key, site: site, miranda: !!opts.miranda,
+      wreck: { id: w.id, type: w.type, name: w.name || null, flavor: w.flavor },
+      hazards: w.hazards || D().HAZARDS,
+      breath: bm, breathMax: bm, zones: zones, haul: [], over: false, blackout: false, result: null,
+      quick: false, log: [],
+    };
+  }
+
+  function start(state, opts) {
+    var game = newDive(state, opts);
+    M().start(state, game, opts.back);
+    M().say(state, game, D().lines.goingUnder);
+    if (game.wreck.flavor) M().say(state, game, game.wreck.flavor);
+    return game;
+  }
+
+  // From the Graveyard menu: pay the action and mark the season's dive.
+  function startGraveyardDive(state, wreckId, quick) {
+    var c = canDive(state);
+    if (!c.ok) throw new Error(c.why);
+    var w = wrecksOnOffer(state, "ocracoke").filter(function (x) { return x.id === wreckId; })[0];
+    if (!w) throw new Error("No such wreck.");
+    PC.crew.spendAP(state, 1);
+    PC.crew.markUsed(state, "dive");
+    var game = start(state, { site: "ocracoke", wreck: w, back: "node" });
+    if (quick) quickDive(state);
+    return game;
+  }
+
+  // A retry on the Miranda (1 AP each, §18.2).
+  function retryMiranda(state) {
+    var c = canRetryMiranda(state);
+    if (!c.ok) throw new Error(c.why || "Not now.");
+    PC.crew.spendAP(state, 1);
+    return start(state, { miranda: true, back: "node" });
+  }
+
+  // ---- The loop ------------------------------------------------------------
+
+  function zoneDr(game, z) { return clamp(game.zones[z].dr + game.zones[z].mod, 0, D().DR_MAX); }
+  function grabCheck(game, z) { return { type: "Dive", dr: zoneDr(game, z) }; }
+
+  function act(state, op, zone) {
+    var game = state.minigame;
+    if (!game || game.kind !== "dive") throw new Error("Not diving.");
+    if (game.over) throw new Error("The dive is over.");
+    if (game.pending) throw new Error("Finish the last roll first.");
+    if (op === "surface") return endDive(state, game, false);
+    var z = game.zones[zone];
+    if (!z) throw new Error("No such zone.");
+    if (op === "scout") {
+      if (z.next >= z.items.length) throw new Error("Nothing left there.");
+      game.breath = Math.max(0, game.breath - 1);
+      z.mod = clamp(z.mod - 1, -D().ZONE_MOD_CLAMP, D().ZONE_MOD_CLAMP);
+      z.scouted = z.next;
+      M().say(state, game, D().lines.scout);
+      M().say(state, game, "You make out " + describe(z.items[z.next]) + " in the " + D().ZONE_NAMES[zone] + ".");
+      return afterAction(state, game);
+    }
+    if (op === "grab") {
+      if (z.next >= z.items.length) throw new Error("Nothing left there.");
+      return M().roll(state, game, grabCheck(game, zone), "grab", { zone: zone }, COND);
+    }
+    throw new Error("Unknown dive action: " + op);
+  }
+
+  function take(state, game, zone) {
+    var z = game.zones[zone];
+    var it = z.items[z.next];
+    z.next += 1;
+    game.haul.push(it);
+    if (it.tier === "quest") { game.questFound = true; M().say(state, game, D().lines.mermaid); }
+    else if (it.tier !== "junk") M().say(state, game, "You come up with " + describe(it) + ".");
+    // Junk prints on surfacing: "You surface with [line]." (S17 appendix §8).
+  }
+
+  function settle(state, game, p) {
+    if (p.op === "grab") {
+      var z = p.data.zone;
+      M().say(state, game, D().lines.grab[p.outcome]);
+      if (p.outcome === "clean") { take(state, game, z); game.breath = Math.max(0, game.breath - 1); }
+      else if (p.outcome === "partial") { take(state, game, z); game.breath = Math.max(0, game.breath - 2); }
+      else { game.breath = Math.max(0, game.breath - 2); drawHazard(state, game, z); }
+      return afterAction(state, game);
+    }
+    if (p.op === "shark") {
+      M().say(state, game, D().lines.shark[p.outcome]);
+      if (p.outcome === "partial") game.breath = Math.max(0, game.breath - 1);
+      if (p.outcome === "setback") {
+        PC.scenes.applyEffect(state, { tag: "Wounded", untilSeasonEnd: true }); // never the mortal-wound check (§18.2)
+        return endDive(state, game, true);
+      }
+      return afterAction(state, game);
+    }
+    if (p.op === "cryptid") {
+      var L = D().lines.cryptid;
+      M().say(state, game, L[p.outcome]);
+      if (p.outcome === "clean") cryptidReward(state, game);
+      if (p.outcome === "setback") return endDive(state, game, true);
+      return afterAction(state, game);
+    }
+    if (p.op === "quick") return settleQuick(state, game, p);
+    throw new Error("Unknown dive roll: " + p.op);
+  }
+
+  // Hazards draw only on a setback (§18.2).
+  function drawHazard(state, game, zone) {
+    var r = M().rand(state, game, "hazard");
+    var h = M().weighted(r, game.hazards);
+    if (h === "snag") { M().say(state, game, D().lines.snag); game.breath = Math.max(0, game.breath - 1); return; }
+    if (h === "current") {
+      M().say(state, game, D().lines.current);
+      var z = game.zones[zone];
+      z.mod = clamp(z.mod + 1, -D().ZONE_MOD_CLAMP, D().ZONE_MOD_CLAMP);
+      return;
+    }
+    if (h === "shark") { M().say(state, game, D().lines.shark.draw); game.hazardRoll = "shark"; return; }
+    if (h === "cryptid") { M().say(state, game, D().lines.cryptid.draw); game.hazardRoll = "cryptid"; return; }
+  }
+
+  // The site's relic if not held (40%), otherwise a Legend rumor (§35.4).
+  function cryptidReward(state, game) {
+    var site = D().sites[game.site];
+    var r = M().rand(state, game, "relic");
+    var held = (state.captain.items || []).indexOf(site.relic) >= 0;
+    if (!held && r() < D().RELIC_CHANCE) {
+      M().say(state, game, D().lines.cryptid.relic);
+      game.haul.push({ tier: "item", item: site.relic, relic: true });
+      return;
+    }
+    var rec = PC.rumors.draw(state, { "Legend": 1 }, M().key(state, game, "legend"), "the dive", "Legend");
+    if (rec) { game.rumors = (game.rumors || []).concat([rec]); M().say(state, game, rec.text); }
+  }
+
+  function afterAction(state, game) {
+    if (game.over) return game;
+    if (game.hazardRoll) {
+      var h = game.hazardRoll; game.hazardRoll = null;
+      var check = h === "shark" ? D().SHARK_CHECK : D().CRYPTID_CHECK;
+      return M().roll(state, game, check, h, {}, h === "cryptid" ? COND.concat(["Uncanny"]) : COND);
+    }
+    if (game.breath <= 0) return endDive(state, game, true);
+    var left = Object.keys(game.zones).some(function (z) { return game.zones[z].next < game.zones[z].items.length; });
+    if (!left) return endDive(state, game, false);
+    return game;
+  }
+
+  // ---- Quick Dive (§18.2) --------------------------------------------------
+  // One Dive check at the wreck's Hold DR. DEFAULT: clean brings up four
+  // grabs' worth (the Hold, Hull, Hold, then the Cabin or the Hull), partial
+  // two (the Hold and the Hull); junk is left behind. A setback is a blackout
+  // with nothing banked. No hazards, never a relic.
+
+  function quickDive(state) {
+    var game = state.minigame;
+    if (game.miranda) throw new Error("Not on the Miranda.");
+    if (game.haul.length || game.over) throw new Error("Too late for a Quick Dive.");
+    game.quick = true;
+    return M().roll(state, game, { type: "Dive", dr: game.zones.hold.dr }, "quick", {}, COND);
+  }
+
+  function settleQuick(state, game, p) {
+    if (p.outcome === "setback") return endDive(state, game, true, true);
+    var order = p.outcome === "clean" ? ["hold", "hull", "hold", game.zones.cabin ? "cabin" : "hull"] : ["hold", "hull"];
+    order.forEach(function (z) {
+      var zz = game.zones[z];
+      if (zz.next >= zz.items.length) return;
+      var it = zz.items[zz.next++];
+      if (it.tier !== "junk") game.haul.push(it);
+    });
+    M().say(state, game, D().lines.quick);
+    return endDive(state, game, false);
+  }
+
+  // ---- Ending: surface or black out ----------------------------------------
+
+  function endDive(state, game, blackout, nothing) {
+    game.over = true;
+    game.blackout = !!blackout;
+    var kept = game.haul.slice();
+    if (blackout) {
+      // Half the haul, rounded down; the most valuable half (§18.2
+      // proposal). The quest keepsake is never lost.
+      var quest = kept.filter(function (i) { return i.tier === "quest"; });
+      var rest = nothing ? [] : kept.filter(function (i) { return i.tier !== "quest"; }).sort(function (a, b) { return worth(b) - worth(a); });
+      kept = quest.concat(rest.slice(0, Math.floor(rest.length / 2)));
+      M().say(state, game, D().lines.blackout);
+      PC.scenes.applyEffect(state, { tag: "Waterlogged", untilSeasonEnd: true });
+    } else {
+      M().say(state, game, D().lines.surface);
+    }
+    game.kept = kept;
+    kept.filter(function (i) { return i.tier === "junk"; }).forEach(function (i) { M().say(state, game, D().lines.junkPrefix + i.line + "."); });
+    var valuable = kept.filter(function (i) { return i.tier === "treasure" || i.tier === "item" || i.tier === "goods"; }).length;
+    if (!game.miranda) M().say(state, game, valuable ? D().lines.goodHaul : D().lines.poorHaul);
+    if (game.miranda && !game.questFound) M().say(state, game, D().lines.mermaidMissed);
+    game.gold = kept.reduce(function (s, i) { return s + (i.gold || 0); }, 0);
+    if (!game.gold) bank(state, game, null);
+    return game;
+  }
+
+  // Bank what was kept. Gold takes the purse-or-crew choice (§33.1.4;
+  // DEFAULT for salvage). Whatever won't fit in the hold stays on the beach.
+  function bank(state, game, pot) {
+    if (game.banked) return game.bankedReport;
+    var report = [], left = [];
+    game.kept.forEach(function (it) {
+      if (it.tier === "treasure") {
+        var room = PC.crew.treasureRoom(state);
+        var n = Math.min(room, it.treasure);
+        state.cargo.treasure.clean += n;
+        if (n < it.treasure) left.push((it.treasure - n) + " treasure");
+      } else if (it.tier === "supplies") {
+        var p = Math.min(PC.crew.slotsFree(state), it.provisions);
+        state.provisions += p;
+        if (p < it.provisions) left.push((it.provisions - p) + " provisions");
+      } else if (it.tier === "goods") {
+        var g = Math.min(PC.crew.slotsFree(state), it.n);
+        if (g) PC.crew.addGood(state, it.good, g, false);
+        if (g < it.n) left.push((it.n - g) + " " + it.good);
+      } else if (it.tier === "item") {
+        state.captain.items.push(it.item);
+      } else if (it.tier === "quest") {
+        state.flags.dpw_mermaid = true;
+      }
+      if (it.tier !== "junk") report.push(describe(it));
+    });
+    if (game.gold) {
+      var to = pot === "purse" ? "purse" : "crew";
+      state.money[to] += game.gold;
+    }
+    game.banked = true;
+    game.bankedReport = { got: report, left: left, gold: game.gold || 0, pot: pot || null };
+    PC.state.addLog(state, "Salvage dive" + (game.wreck.name ? " on " + game.wreck.name : " (" + game.wreck.type + ")") + ": " +
+      (report.length ? report.join(", ") : "nothing") + (game.blackout ? " (blacked out)" : "") + ".");
+    if (left.length) M().say(state, game, "No room in the hold for " + left.join(", ") + ". You leave it on the beach.");
+    return game.bankedReport;
+  }
+
+  // Where the player goes when he leaves the dive screen.
+  function exit(state, game) {
+    if (!game.banked) bank(state, game, "crew");
+    if (game.miranda) {
+      if (state.flags.dpw_mermaid) { state.flags.dpw_retry = false; return "ocr_dpw_shark"; }
+      state.flags.dpw_retry = true; // Ollie waits on the beach; each retry is 1 AP
+      state.location.place = "graveyard";
+      return "node";
+    }
+    return game.back;
+  }
+
+  function view(state, game) {
+    var zones = Object.keys(game.zones).map(function (z) {
+      var zz = game.zones[z];
+      var check = grabCheck(game, z);
+      return {
+        id: z, name: D().ZONE_NAMES[z], dr: check.dr, left: zz.items.length - zz.next, mod: zz.mod,
+        assess: M().assess(state, check, COND),
+        scouted: zz.scouted === zz.next && zz.next < zz.items.length ? describe(zz.items[zz.next]) : null,
+      };
+    });
+    return {
+      title: game.wreck.name ? game.wreck.name.replace(/^the /, "The ") : "A " + game.wreck.type,
+      wreckType: game.wreck.type,
+      breath: game.breath, breathMax: game.breathMax, zones: zones,
+      haul: game.haul.map(describe), kept: game.kept ? game.kept.map(describe) : null,
+      blackout: game.blackout, quick: game.quick, miranda: game.miranda, questFound: !!game.questFound,
+      needsPot: game.over && !game.banked && game.gold > 0, gold: game.gold || 0,
+      banked: game.bankedReport || null,
+      canQuick: !game.miranda && !game.haul.length && !game.over && !game.quick,
+    };
+  }
+
+  M().register("dive", { settle: settle, view: view, exit: exit });
+
+  PC.salvage = {
+    wrecksOnOffer: wrecksOnOffer,
+    canDive: canDive,
+    canRetryMiranda: canRetryMiranda,
+    mirandaPending: mirandaPending,
+    start: start,
+    startGraveyardDive: startGraveyardDive,
+    retryMiranda: retryMiranda,
+    act: act,
+    quickDive: quickDive,
+    bank: bank,
+    describe: describe,
+    worth: worth,
+    breathMax: breathMax,
+  };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — the drinking minigame, Under the Table (§18.4).
+ *
+ * The captain drinks against one opponent: each Drink is a Cast-Iron
+ * Stomach check at the ladder DR (1 + drinks poured, capped at 5) that costs
+ * Wits, while the opponent's hidden Tolerance ticks down. One taunt a match
+ * goads him into drinking alone. Setbacks draw a mishap. A win pays a rumor
+ * by his role (or the loss quest's drinking lead, §30.6) and a 10% item.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  function D() { return PC.data.minigames.drinking; }
+  function M() { return PC.minigames; }
+  var COND = ["Harbor"];
+
+  function traitOf(opp) { return D().traits[opp.trait] || {}; }
+
+  // ---- Who's drinking ---------------------------------------------------------
+
+  // Once a season at each Tavern, not on the first visit (§18.4.1, §17.2).
+  function canDrink(state) {
+    var id = PC.node.here(state);
+    var c = PC.node.tavernServiceCheck(state, 1);
+    if (!c.ok) return c;
+    if (!D().pools[id]) return { ok: false, why: "No drinking contest here" };
+    if (PC.crew.usedThisSeason(state, "drinking")) return { ok: false, why: "Once a season" };
+    return { ok: true };
+  }
+
+  // An ephemeral opponent, seeded by node, season and session (§18.1).
+  function opponent(state, node, n) {
+    var pool = D().pools[node];
+    var key = [state.world.seed, PC.state.stamp(state), node, "drinker", n].join("|");
+    var r = PC.rng.fromKey(key + "|trait");
+    var trait = M().pick(r, pool.traits);
+    var t = D().traits[trait] || {};
+    var range = D().TOLERANCE[pool.role];
+    var tol = Math.max(1, range[0] + Math.floor(r() * (range[1] - range[0] + 1)) + (t.tolerance || 0));
+    var rec = PC.npcs.generate(state, { id: "drinker", role: pool.role, pool: "master", node: null, key: key, gender: "m" }); // minigame opponents are men (§15.1)
+    return { name: rec.full, role: pool.role, trait: trait, tolerance: tol, tolMax: tol,
+      // Proud, Reckless and Wild call for the strong stuff once, on a seeded round (2 or 3).
+      strongRound: t.strongOnce ? 2 + Math.floor(r() * 2) : null };
+  }
+
+  function newMatch(state, n, wits) {
+    var node = PC.node.here(state);
+    var opp = opponent(state, node, n);
+    var hung = (state.captain.tags || []).indexOf("Hangover") >= 0;
+    var start = wits != null ? wits : D().WITS - (hung ? 1 : 0) + ((state.captain.items || []).indexOf("Kingly Goblet") >= 0 ? 1 : 0);
+    return {
+      kind: "drink", key: "drink|" + node + "|" + n, node: node, n: 0, opp: opp,
+      wits: start, witsMax: Math.max(start, D().WITS), poured: 0, round: 1,
+      sized: null, sizeKnown: null, taunted: false, harder: 0, mustStrong: false,
+      hairOfTheDog: hung, insult: false, bottleClean: false, over: false, result: null, log: [],
+    };
+  }
+
+  function start(state) {
+    var c = canDrink(state);
+    if (!c.ok) throw new Error(c.why);
+    PC.crew.spendAP(state, 1);
+    PC.crew.markUsed(state, "drinking");
+    PC.node.tavernVisit(state); // a drinking session counts as a Tavern visit (§18.4.1)
+    state.minigames.drinkSessions = (state.minigames.drinkSessions || 0) + 1;
+    var game = newMatch(state, state.minigames.drinkSessions);
+    M().start(state, game, "node");
+    opening(state, game);
+    return game;
+  }
+
+  function opening(state, game) {
+    var t = traitOf(game.opp);
+    M().say(state, game, D().lines.setup + (t.hint || "PLACEHOLDER (setup hint)."));
+    if (game.hairOfTheDog) M().say(state, game, "Your head is still pounding from last time.");
+  }
+
+  // His state line (§18.4.2): Steady above half his Tolerance, Wobbling at
+  // half or less, Done For at 1.
+  function stateName(opp) {
+    if (opp.tolerance <= 1) return "doneFor";
+    if (opp.tolerance <= opp.tolMax / 2) return "wobbling";
+    return "steady";
+  }
+
+  function tellLine(state, game) {
+    var t = traitOf(game.opp)[stateName(game.opp)];
+    if (!t) return { line: "PLACEHOLDER (tell line)", insult: false };
+    if (typeof t === "string") return { line: t, insult: false };
+    return { line: state.captain.gender === "f" && t.lineF ? t.lineF : t.line, insult: !!t.insult };
+  }
+
+  function showTell(state, game) {
+    var t = tellLine(state, game);
+    M().say(state, game, t.line);
+    if (t.insult) game.insult = true;
+  }
+
+  // ---- The checks --------------------------------------------------------------
+
+  function ladder(game) { return 1 + game.poured; }
+
+  function drinkCheck(game, strong) {
+    var t = traitOf(game.opp);
+    var dr = ladder(game) + (strong ? 1 : 0) + game.harder + (t.drinkDr || 0);
+    return { type: "Cast-Iron Stomach", dr: Math.max(0, Math.min(D().DR_CAP, dr)) };
+  }
+
+  function shift(base, by) { return Math.max(0, Math.min(8, base + Math.max(-2, Math.min(2, by)))); }
+
+  function sizeCheck(game) { var c = D().SIZE_CHECK; return { type: c.type, dr: shift(c.dr, traitOf(game.opp).sizeDr || 0) }; }
+  function mockCheck(game) { var t = traitOf(game.opp), c = D().MOCK_CHECK; return { type: c.type, dr: shift(c.dr, (t.mockDr || 0) + (t.tauntDr || 0)) }; }
+  function leanCheck(game) { var t = traitOf(game.opp), c = D().LEAN_CHECK; return { type: c.type, dr: shift(c.dr, (t.leanDr || 0) + (t.tauntDr || 0)) }; }
+
+  // What the captain can do this round.
+  function options(state, game) {
+    if (game.over || game.pending) return [];
+    var out = [];
+    var first = game.poured === 0 && game.round === 1;
+    if (!game.mustStrong) out.push({ op: "drink", label: "Drink", check: drinkCheck(game, false) });
+    out.push({ op: "strong", label: "Call for the strong stuff", check: drinkCheck(game, true) });
+    if (first && !game.sized && !game.mustStrong) out.push({ op: "size", label: "Size him up", check: sizeCheck(game) });
+    if (!game.taunted && !game.mustStrong) {
+      out.push({ op: "mock", label: "Mock him", check: mockCheck(game) });
+      out.push({ op: "lean", label: "Lean on him", check: leanCheck(game) });
+    }
+    // The Hot-Tempered flaw's temptation (§18.4.7), when his line is an insult.
+    if ((state.captain.flaws || []).indexOf("Hot-Tempered") >= 0 && game.insult) out.push({ op: "throw", label: "Throw your drink in his face.", check: D().BRAWL_CHECK, temptation: true });
+    out.push({ op: "callit", label: "Call it a night", check: null });
+    return out.map(function (o) { if (o.check) o.assess = M().assess(state, o.check, COND); return o; });
+  }
+
+  function act(state, op) {
+    var game = state.minigame;
+    if (!game || game.kind !== "drink") throw new Error("Not drinking.");
+    if (game.over) throw new Error("The match is over.");
+    if (game.pending) throw new Error("Finish the last roll first.");
+    var o = options(state, game).filter(function (x) { return x.op === op; })[0];
+    if (!o) throw new Error("You can't do that now.");
+    if (op === "callit") return finish(state, game, "callit");
+    if (op === "throw") { game.insult = false; M().say(state, game, D().lines.brawl.start); return M().roll(state, game, D().BRAWL_CHECK, "brawl", { thrown: true }, COND); }
+    if (op === "size") game.sized = true;
+    if (op === "mock" || op === "lean") game.taunted = true;
+    game.insult = false;
+    return M().roll(state, game, o.check, op, {}, COND);
+  }
+
+  function settle(state, game, p) {
+    var L = D().lines;
+    if (p.op === "size") {
+      var s = L.size[p.outcome];
+      M().say(state, game, typeof s === "string" ? s : s.line);
+      if (p.outcome === "clean") game.sizeKnown = { trait: game.opp.trait, tolerance: game.opp.tolerance };
+      else if (p.outcome === "partial") game.sizeKnown = { band: game.opp.tolerance >= 5 ? "high" : game.opp.tolerance >= 4 ? "middling" : "low" };
+      else { game.mustStrong = true; game.insult = !!s.insult; }
+      return game;
+    }
+    if (p.op === "drink" || p.op === "strong") return settleDrink(state, game, p);
+    if (p.op === "mock" || p.op === "lean") return settleTaunt(state, game, p);
+    if (p.op === "brawl") return settleBrawl(state, game, p);
+    if (p.op === "bottle") return settleBottle(state, game, p);
+    if (p.op === "hangover") return settleHangover(state, game, p);
+    throw new Error("Unknown drinking roll: " + p.op);
+  }
+
+  // Drink: clean 0 Wits, partial 1, setback 2 and a mishap. The strong
+  // stuff: two drinks for him, the ladder up two; 0 / 2 / 3 Wits.
+  function settleDrink(state, game, p) {
+    var strong = p.op === "strong";
+    var cost = strong ? { clean: 0, partial: 2, setback: 3 } : { clean: 0, partial: 1, setback: 2 };
+    game.wits = Math.max(0, game.wits - cost[p.outcome]);
+    game.opp.tolerance = Math.max(0, game.opp.tolerance - (strong ? 2 : 1));
+    game.poured += strong ? 2 : 1;
+    game.harder = 0;
+    game.mustStrong = false;
+    if (strong) M().say(state, game, "You both throw back the strong stuff.");
+    // Hair of the dog: a clean Drink on round 1 clears the Hangover (§18.4.4).
+    if (game.hairOfTheDog && game.round === 1 && p.outcome === "clean") {
+      PC.scenes.applyEffect(state, { tag: "Hangover", remove: true });
+      game.hairOfTheDog = false;
+      M().say(state, game, "The first one clears your head.");
+    }
+    if (game.wits <= 0 && game.opp.tolerance <= 0) return finish(state, game, "draw");
+    if (game.wits <= 0) return finish(state, game, "under");
+    if (game.opp.tolerance <= 0) return finish(state, game, "win");
+    if (p.outcome === "setback") { var m = mishap(state, game); if (m) return m; }
+    return nextRound(state, game);
+  }
+
+  function settleTaunt(state, game, p) {
+    var L = D().lines, t = traitOf(game.opp);
+    if (p.outcome === "setback") {
+      M().say(state, game, L.tauntSetback.line);
+      if (t.tauntSetbackBrawl) { M().say(state, game, L.brawl.start); return M().roll(state, game, D().BRAWL_CHECK, "brawl", {}, COND); }
+      game.mustStrong = true;
+      game.insult = true;
+      return game;
+    }
+    M().say(state, game, p.outcome === "clean" ? (p.op === "mock" ? L.mockClean : L.leanClean) : L.tauntPartial);
+    game.opp.tolerance = Math.max(0, game.opp.tolerance - 1);
+    game.poured += 1;
+    if (p.outcome === "partial") game.harder += 1;
+    if (game.opp.tolerance <= 0) return finish(state, game, "win");
+    return nextRound(state, game);
+  }
+
+  // One card on each Drink or strong-stuff setback (§18.4.3).
+  function mishap(state, game) {
+    var t = traitOf(game.opp), L = D().lines;
+    var w = JSON.parse(JSON.stringify(D().MISHAPS));
+    w.brawl *= t.brawlWeight || 1;
+    w.bottle *= t.bottleWeight || 1;
+    var card = M().weighted(M().rand(state, game, "mishap"), w);
+    if (card === "wrongPipe") {
+      M().say(state, game, L.wrongPipe);
+      game.wits = Math.max(0, game.wits - 1);
+      if (game.wits <= 0) return finish(state, game, "under");
+      return null;
+    }
+    if (card === "spins") { M().say(state, game, L.spins); game.harder += 1; return null; }
+    if (card === "brawl") { M().say(state, game, L.brawl.start); return M().roll(state, game, D().BRAWL_CHECK, "brawl", {}, COND); }
+    M().say(state, game, L.bottle.start);
+    return M().roll(state, game, D().BOTTLE_CHECK, "bottle", {}, COND.concat(["Uncanny"]));
+  }
+
+  // Any brawl costs the tavern keeper a rung, whoever wins it (§18.4.3).
+  function settleBrawl(state, game, p) {
+    M().say(state, game, D().lines.brawl[p.outcome]);
+    PC.npcs.moveRung(state, PC.node.slotNpc(game.node, "keeper"), -1);
+    if (p.outcome === "clean") return finish(state, game, "brawlWin");
+    if (p.outcome === "setback") return finish(state, game, "thrown");
+    return nextRound(state, game);
+  }
+
+  function settleBottle(state, game, p) {
+    M().say(state, game, D().lines.bottle[p.outcome]);
+    if (p.outcome === "clean") game.bottleClean = true;
+    if (p.outcome === "setback") return finish(state, game, "under");
+    return nextRound(state, game);
+  }
+
+  function nextRound(state, game) {
+    if (game.over) return game;
+    game.round += 1;
+    var t = traitOf(game.opp);
+    if (t.quitsAtDoneFor && game.opp.tolerance <= 1) { M().say(state, game, D().lines.timidQuits); return finish(state, game, "win"); }
+    showTell(state, game);
+    if (game.opp.strongRound && game.round === game.opp.strongRound && !game.mustStrong) {
+      M().say(state, game, D().lines.heCallsStrong);
+      game.mustStrong = true;
+    }
+    return game;
+  }
+
+  // ---- Endings (§18.4.4) -------------------------------------------------------
+
+  var ENDINGS = {
+    win: { won: true, tab: 0, hangover: "low", line: "win" },
+    brawlWin: { won: true, tab: 0, hangover: null, line: null },
+    draw: { won: false, tab: 0.5, hangover: 3, line: "draw" },   // DEFAULT: "each pays his own" is half the tab
+    callit: { won: false, tab: 1, hangover: "low", line: "callIt" },
+    under: { won: false, tab: 2, hangover: 3, line: "under" },
+    thrown: { won: false, tab: 1, hangover: null, line: null },
+  };
+
+  function tabFor(state, game) { return D().TAB[PC.node.nodeData(game.node).tier] || 10; }
+
+  // The tab comes from the purse (§18.4.1). DEFAULT: what the purse can't
+  // cover comes out of crew gold.
+  function payTab(state, n) {
+    var fromPurse = Math.min(state.money.purse, n);
+    state.money.purse -= fromPurse;
+    state.money.crew = Math.max(0, state.money.crew - (n - fromPurse));
+    return n;
+  }
+
+  function finish(state, game, how) {
+    var E = ENDINGS[how];
+    game.result = { how: how, won: E.won, tab: 0, rumor: null, lead: null, item: null, legend: null };
+    if (E.line) M().say(state, game, D().lines[E.line]);
+    if (E.tab) game.result.tab = payTab(state, Math.round(tabFor(state, game) * E.tab));
+    if (E.won) reward(state, game);
+    // The Heavy Drinker's "One more round" (§18.4.7), before the morning.
+    if (E.won && (state.captain.flaws || []).indexOf("Heavy Drinker") >= 0 && game.wits >= D().ONE_MORE_AT) {
+      game.offerOneMore = true;
+      game.hangoverDue = E.hangover;
+      return game;
+    }
+    return morning(state, game, E.hangover);
+  }
+
+  // A win pays a rumor by his role, or the loss quest's drinking lead in its
+  // place (§30.6), a Legend rumor on a clean Something in the bottle, and a
+  // 10% item (§18.4.6). Never gold.
+  function reward(state, game) {
+    var r = game.result;
+    if (lossQuestActive(state) && !PC.quests.hasLead(state, "what_was_lost", "drinking")) {
+      PC.quests.addLead(state, "what_was_lost", "drinking");
+      r.lead = PC.data.quests.what_was_lost.leads.drinking.journal[state.captain.loss] || PC.data.quests.what_was_lost.leads.drinking.journal.any;
+      M().say(state, game, r.lead);
+    } else {
+      var rec = PC.rumors.draw(state, D().RUMORS[game.opp.role], M().key(state, game, "rumor"), "a drinking match");
+      if (rec) { r.rumor = rec; M().say(state, game, rec.text); }
+    }
+    if (game.bottleClean) {
+      var lg = PC.rumors.draw(state, { "Legend": 1 }, M().key(state, game, "legend"), "a drinking match", "Legend");
+      if (lg) { r.legend = lg; M().say(state, game, lg.text); }
+    }
+    var ir = M().rand(state, game, "item");
+    if (ir() < D().ITEM_CHANCE) {
+      var table = D().ITEMS[game.opp.role];
+      if (table) {
+        var rare = table.rare.length && ir() < 0.1;
+        var item = M().pick(ir, rare ? table.rare : table.uncommon);
+        state.captain.items.push(item);
+        r.item = item;
+        M().say(state, game, "He leaves something behind: " + item + ".");
+      }
+    }
+    PC.state.addLog(state, "Won a drinking match against " + game.opp.name + ".");
+  }
+
+  function lossQuestActive(state) {
+    var q = state.quests && state.quests.what_was_lost;
+    return !!state.captain.loss && (!q || q.status !== "done");
+  }
+
+  // Heavy Drinker: play again on the same action, at the Wits he has left.
+  function oneMore(state, accept) {
+    var game = state.minigame;
+    if (!game || !game.offerOneMore) throw new Error("No one's offering.");
+    game.offerOneMore = false;
+    if (!accept) return morning(state, game, game.hangoverDue);
+    state.minigames.oneMoreRounds = (state.minigames.oneMoreRounds || 0) + 1;
+    // The ratchet: the third time, Drunkard replaces the flaw (§5.8).
+    if (state.minigames.oneMoreRounds >= D().DRUNKARD_AFTER && (state.captain.flaws || []).indexOf("Heavy Drinker") >= 0) {
+      state.captain.flaws = state.captain.flaws.filter(function (f) { return f !== "Heavy Drinker"; });
+      if (state.captain.tags.indexOf("Drunkard") < 0) state.captain.tags.push("Drunkard");
+      PC.state.addLog(state, "Drunkard replaces the Heavy Drinker flaw.");
+    }
+    state.minigames.drinkSessions += 1;
+    var next = newMatch(state, state.minigames.drinkSessions, game.wits);
+    next.log = game.log.concat(["", D().lines.oneMore]);
+    next.back = game.back;
+    next.earlier = (game.earlier || []).concat([game.result]);
+    state.minigame = next;
+    opening(state, next);
+    if ((state.captain.flaws || []).indexOf("Heavy Drinker") < 0) next.ratcheted = true;
+    return next;
+  }
+
+  // The Hangover roll (Cast-Iron Stomach): a partial or setback gives the
+  // Hangover until the next season (§18.4.4).
+  function morning(state, game, hang) {
+    var dr = hang === "low" ? (game.wits <= D().HANGOVER_AT ? 2 : null) : hang;
+    if (dr == null) return done(state, game);
+    return M().roll(state, game, { type: "Cast-Iron Stomach", dr: dr }, "hangover", {}, COND);
+  }
+
+  function settleHangover(state, game, p) {
+    if (p.outcome !== "clean") {
+      M().say(state, game, D().lines.hangover);
+      PC.scenes.applyEffect(state, { tag: "Hangover", untilSeasonEnd: true });
+      game.result.hangover = true;
+    }
+    return done(state, game);
+  }
+
+  function done(state, game) {
+    game.over = true;
+    return game;
+  }
+
+  function view(state, game) {
+    var opp = game.opp;
+    return {
+      opponent: opp.name, role: opp.role,
+      trait: game.sizeKnown && game.sizeKnown.trait ? game.sizeKnown.trait : null,
+      tolerance: game.sizeKnown ? (game.sizeKnown.tolerance != null ? game.sizeKnown.tolerance + " to start" : game.sizeKnown.band) : null,
+      state: { steady: "Steady", wobbling: "Wobbling", doneFor: "Done For" }[stateName(opp)],
+      wits: game.wits, witsMax: game.witsMax, ladder: Math.min(D().DR_CAP, ladder(game)), round: game.round,
+      mustStrong: game.mustStrong, options: options(state, game), result: game.result, offerOneMore: !!game.offerOneMore,
+      tab: tabFor(state, game),
+    };
+  }
+
+  M().register("drink", { settle: settle, view: view });
+
+  PC.drinking = { canDrink: canDrink, start: start, act: act, oneMore: oneMore, options: options, opponent: opponent };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — Liar's Dice, the Tavern's gambling (§18.3).
+ *
+ * One session costs 1 AP and holds up to five games against one ephemeral
+ * opponent (a Dockhand at Ocracoke). Each game: three dice each under a
+ * cup; bid "at least N dice showing X" across both cups, or call Liar. The
+ * loser of a call loses a die; the last with dice takes the pot. Stakes come
+ * from the purse (§18.1). The Cards & Dice layer: Size them up once a
+ * session, Cheat (peek at one of his dice) once a game.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  function D() { return PC.data.minigames.dice; }
+  function M() { return PC.minigames; }
+  var COND = ["Harbor"];
+
+  function stakes(state, node) { return D().STAKES[PC.node.nodeData(node || PC.node.here(state)).tier] || [25, 50]; }
+
+  function canPlay(state) {
+    var id = PC.node.here(state);
+    var c = PC.node.tavernServiceCheck(state, 1);
+    if (!c.ok) return c;
+    if (!D().pools[id]) return { ok: false, why: "No one's gambling here" };
+    if (state.money.purse < stakes(state)[0]) return { ok: false, why: "Stakes come from your purse (" + stakes(state)[0] + " gold at least)" };
+    return { ok: true };
+  }
+
+  function play(opp) {
+    var P = D().PLAY, out = { callBelow: P.base.callBelow, bold: false, chases: false, checkDr: 0, sizeDr: 0 };
+    (opp.traits || []).forEach(function (t) {
+      var p = P[t]; if (!p) return;
+      Object.keys(p).forEach(function (k) { out[k] = p[k]; });
+    });
+    return out;
+  }
+
+  function start(state) {
+    var c = canPlay(state);
+    if (!c.ok) throw new Error(c.why);
+    PC.crew.spendAP(state, 1);
+    PC.node.tavernVisit(state);
+    state.minigames.diceSessions = (state.minigames.diceSessions || 0) + 1;
+    var node = PC.node.here(state);
+    var key = [state.world.seed, PC.state.stamp(state), node, "gambler", state.minigames.diceSessions].join("|");
+    var rec = PC.npcs.generate(state, { id: "gambler", role: D().pools[node].role, pool: "master", node: null, key: key, gender: "m" });
+    var game = {
+      kind: "dice", key: "dice|" + node + "|" + state.minigames.diceSessions, node: node,
+      opp: { name: rec.full, traits: rec.traits || [] },
+      games: 0, won: 0, lost: 0, net: 0, sized: null, marks: 0, round: null, over: false, log: [],
+      sessionRerolls: (state.captain.items || []).indexOf("Loaded Dice") >= 0 ? [{ name: "Loaded Dice", types: ["Cards & Dice"], op: "cheat" }] : [],
+    };
+    M().start(state, game, "node");
+    M().say(state, game, D().lines.sit);
+    return game;
+  }
+
+  // ---- A game -----------------------------------------------------------------
+
+  function rollCup(state, game, n) {
+    var r = M().rand(state, game, "cup");
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(1 + Math.floor(r() * 6));
+    return out.sort();
+  }
+
+  function newGame(state, stake) {
+    var game = state.minigame;
+    if (game.round) throw new Error("A game is already on.");
+    var lim = stakes(state, game.node);
+    stake = Math.round(stake);
+    if (stake < lim[0] || stake > lim[1]) throw new Error("Stakes here are " + lim[0] + "-" + lim[1] + " gold.");
+    if (state.money.purse < stake) throw new Error(D().lines.broke);
+    if (game.games >= D().GAMES_PER_SESSION) throw new Error("That's enough for one sitting.");
+    state.money.purse -= stake;
+    game.games += 1;
+    game.round = { stake: stake, myN: D().DICE, hisN: D().DICE, opener: "me", peeked: [], cheated: false, history: [] };
+    newRound(state, game, "me");
+    return game;
+  }
+
+  function newRound(state, game, opener) {
+    var g = game.round;
+    g.mine = rollCup(state, game, g.myN);
+    g.his = rollCup(state, game, g.hisN);
+    g.peeked = [];
+    g.bid = null;
+    g.turn = opener;
+    g.revealed = null;
+    if (opener === "him") hisTurn(state, game);
+  }
+
+  function valid(g, q, f) {
+    var total = g.myN + g.hisN;
+    if (!(q >= 1 && q <= total && f >= 1 && f <= 6)) return false;
+    if (!g.bid) return true;
+    return q > g.bid.q || (q === g.bid.q && f > g.bid.f);
+  }
+
+  function count(list, f) { return list.filter(function (d) { return d === f; }).length; }
+
+  // P(at least `need` of `n` unknown dice show a face), each 1 in 6.
+  function atLeast(need, n) {
+    if (need <= 0) return 1;
+    if (need > n) return 0;
+    var p = 0;
+    for (var k = need; k <= n; k++) p += choose(n, k) * Math.pow(1 / 6, k) * Math.pow(5 / 6, n - k);
+    return p;
+  }
+  function choose(n, k) { var r = 1; for (var i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; }
+
+  // How likely a bid is from his side: his dice, plus what he's peeked of
+  // yours (a sharper opponent after a setback Size up knows one).
+  function hisOdds(game, q, f) {
+    var g = game.round;
+    var known = count(g.his, f), unknown = g.myN;
+    if (g.hisPeek != null && g.hisPeek < g.mine.length) { known += g.mine[g.hisPeek] === f ? 1 : 0; unknown -= 1; }
+    return atLeast(q - known, unknown);
+  }
+
+  function hisTurn(state, game) {
+    var g = game.round, P = play(game.opp);
+    if (game.sized === "setback" && g.hisPeek == null) g.hisPeek = 0; // he reads you: plays sharper this game
+    if (g.bid && hisOdds(game, g.bid.q, g.bid.f) < P.callBelow) return call(state, game, "him");
+    // Raise: the likeliest valid bid; bold or chasing players push past it.
+    var r = M().rand(state, game, "bid");
+    var best = null;
+    for (var f = 1; f <= 6; f++) {
+      var q = g.bid ? (f > g.bid.f ? g.bid.q : g.bid.q + 1) : 1;
+      if (!valid(g, q, f)) continue;
+      var pr = hisOdds(game, q, f);
+      if (!best || pr > best.p || (pr === best.p && r() < 0.5)) best = { q: q, f: f, p: pr };
+    }
+    if (!best) return call(state, game, "him");
+    var push = (P.bold && r() < 0.5) || (P.chases && game.lost > game.won && r() < 0.5);
+    if (push && valid(g, best.q + 1, best.f)) best = { q: best.q + 1, f: best.f, p: hisOdds(game, best.q + 1, best.f) };
+    g.bid = { q: best.q, f: best.f, by: "him", bluff: best.p < 0.5 };
+    var line = game.opp.name.split(" ")[0] + " bids " + best.q + " " + face(best.f) + (best.q > 1 ? "s" : "") + ".";
+    if (g.bid.bluff && game.sized === "clean") line += " " + D().lines.tell;
+    else if (g.bid.bluff && game.sized === "partial" && r() < 0.6) line += " " + D().lines.vague;
+    g.history.push(line);
+    g.turn = "me";
+    return game;
+  }
+
+  var FACES = ["", "one", "two", "three", "four", "five", "six"];
+  function face(f) { return FACES[f]; }
+
+  function bid(state, q, f) {
+    var game = state.minigame, g = game && game.round;
+    if (!g || g.turn !== "me" || g.revealed) throw new Error("Not your turn.");
+    q = Math.round(q); f = Math.round(f);
+    if (!valid(g, q, f)) throw new Error("A raise must bid more dice, or the same number of a higher face.");
+    g.bid = { q: q, f: f, by: "me" };
+    g.history.push("You bid " + q + " " + face(f) + (q > 1 ? "s" : "") + ".");
+    g.turn = "him";
+    return hisTurn(state, game);
+  }
+
+  function call(state, game, who) {
+    var g = game.round;
+    if (!g.bid) throw new Error("There's no bid to call.");
+    var have = count(g.mine, g.bid.f) + count(g.his, g.bid.f);
+    var holds = have >= g.bid.q;
+    var loser = holds ? who : g.bid.by;
+    g.history.push((who === "me" ? "You call" : game.opp.name.split(" ")[0] + " calls") + " Liar! The cups lift: " + have + " " + face(g.bid.f) + (have === 1 ? "" : "s") + ". " +
+      (loser === "me" ? "You lose a die." : "He loses a die."));
+    g.revealed = { mine: g.mine.slice(), his: g.his.slice(), loser: loser };
+    if (loser === "me") g.myN -= 1; else g.hisN -= 1;
+    g.turn = null;
+    if (g.myN <= 0) return endGame(state, game, false);
+    if (g.hisN <= 0) return endGame(state, game, true);
+    g.nextOpener = loser; // the loser opens the next round
+    return game;
+  }
+
+  function callLiar(state) {
+    var game = state.minigame, g = game && game.round;
+    if (!g || g.turn !== "me" || !g.bid) throw new Error("Nothing to call.");
+    return call(state, game, "me");
+  }
+
+  function nextRound(state) {
+    var game = state.minigame, g = game.round;
+    if (!g || !g.revealed || g.over) throw new Error("No round to move on from.");
+    g.history = [];
+    newRound(state, game, g.nextOpener);
+    return game;
+  }
+
+  function endGame(state, game, won) {
+    var g = game.round;
+    g.over = true;
+    g.won = won;
+    if (won) {
+      state.money.purse += g.stake * 2;
+      game.won += 1; game.net += g.stake;
+      // Card Sharp counts gross winnings, not net of losses (§18.3 proposal).
+      state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) + g.stake;
+      M().say(state, game, D().lines.win);
+      if (state.minigames.diceWinnings >= D().CARD_SHARP_AT && state.captain.tags.indexOf("Card Sharp") < 0) {
+        state.captain.tags.push("Card Sharp");
+        M().say(state, game, "New tag: Card Sharp.");
+        PC.state.addLog(state, "New tag: Card Sharp.");
+      }
+    } else {
+      game.lost += 1; game.net -= g.stake;
+      M().say(state, game, D().lines.lose);
+    }
+    return game;
+  }
+
+  function closeGame(state) {
+    var game = state.minigame;
+    if (!game.round || !game.round.over) throw new Error("The game isn't over.");
+    game.round = null;
+    if (game.games >= D().GAMES_PER_SESSION) M().say(state, game, "That's enough for one sitting.");
+    return game;
+  }
+
+  // ---- The Cards & Dice layer ---------------------------------------------------
+
+  function checkFor(game, base) { var p = play(game.opp); return { type: base.type, dr: Math.max(0, base.dr + p.checkDr + (base === D().SIZE_CHECK ? p.sizeDr : 0)) }; }
+
+  function sizeUp(state) {
+    var game = state.minigame;
+    if (game.sized) throw new Error("Once a sitting.");
+    if (game.round) throw new Error("Before a game starts.");
+    game.sized = "rolling";
+    return M().roll(state, game, checkFor(game, D().SIZE_CHECK), "size", {}, COND);
+  }
+
+  function cheat(state, index) {
+    var game = state.minigame, g = game.round;
+    if (!g || g.revealed || g.turn !== "me") throw new Error("Not now.");
+    if (g.cheated) throw new Error("Once a game.");
+    g.cheated = true;
+    return M().roll(state, game, checkFor(game, D().CHEAT_CHECK), "cheat", { index: Math.max(0, Math.min(g.his.length - 1, index || 0)) }, COND);
+  }
+
+  function settle(state, game, p) {
+    if (p.op === "size") {
+      game.sized = p.outcome;
+      M().say(state, game, D().lines.size[p.outcome]);
+      return game;
+    }
+    if (p.op === "cheat") {
+      var g = game.round;
+      if (p.outcome === "setback") return caught(state, game);
+      g.peeked.push(p.data.index);
+      M().say(state, game, D().lines.cheat[p.outcome]);
+      if (p.outcome === "partial") {
+        game.marks += 1;
+        if (game.marks >= D().MARKS_TO_CATCH) return caught(state, game);
+      }
+      return game;
+    }
+    throw new Error("Unknown dice roll: " + p.op);
+  }
+
+  // Caught: the game ends, the pot is forfeit, and Standing with the node's
+  // faction drops (black Standing at Ocracoke, §18.3).
+  function caught(state, game) {
+    var g = game.round;
+    M().say(state, game, D().lines.caught);
+    var faction = PC.node.nodeData(game.node).faction;
+    PC.scenes.applyEffect(state, { standing: { faction: faction, delta: D().CAUGHT_STANDING } });
+    g.over = true; g.won = false; g.caught = true;
+    game.lost += 1; game.net -= g.stake;
+    PC.state.addLog(state, "Caught cheating at Liar's Dice: Standing with the pirates " + D().CAUGHT_STANDING + ".");
+    return game;
+  }
+
+  function stop(state) {
+    var game = state.minigame;
+    if (game.round && !game.round.over) throw new Error("Finish the game first.");
+    game.round = null;
+    game.over = true;
+    PC.state.addLog(state, "Liar's Dice: " + game.won + " won, " + game.lost + " lost (" + (game.net >= 0 ? "+" : "") + game.net + " gold).");
+    return game;
+  }
+
+  function view(state, game) {
+    var g = game.round;
+    var lim = stakes(state, game.node);
+    return {
+      opponent: game.opp.name, games: game.games, maxGames: D().GAMES_PER_SESSION, won: game.won, lost: game.lost, net: game.net,
+      stakes: lim, purse: state.money.purse, sized: game.sized, marks: game.marks,
+      canSize: !game.sized && !g, sizeAssess: M().assess(state, checkFor(game, D().SIZE_CHECK), COND),
+      cheatAssess: M().assess(state, checkFor(game, D().CHEAT_CHECK), COND),
+      canStart: !g && game.games < D().GAMES_PER_SESSION && state.money.purse >= lim[0],
+      round: g ? {
+        stake: g.stake, mine: g.mine, myN: g.myN, hisN: g.hisN, bid: g.bid, turn: g.turn, history: g.history.slice(),
+        his: g.his.map(function (d, i) { return g.revealed || g.peeked.indexOf(i) >= 0 ? d : null; }),
+        revealed: !!g.revealed, over: !!g.over, won: g.won, caught: !!g.caught, cheated: g.cheated,
+        total: g.myN + g.hisN,
+      } : null,
+    };
+  }
+
+  M().register("dice", { settle: settle, view: view });
+
+  PC.liarsdice = {
+    canPlay: canPlay, start: start, stakes: stakes, newGame: newGame, bid: bid, callLiar: callLiar,
+    nextRound: nextRound, closeGame: closeGame, sizeUp: sizeUp, cheat: cheat, stop: stop,
+    valid: valid, atLeast: atLeast,
+  };
+})();
+</script>
 
   <!-- Content (data the engine reads) -->
   <script>
@@ -4195,6 +5499,20 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
   add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  // The minigames' tags and items (§14.5, §14.4, §32.12).
+  add("Hangover", { edge: plus(["Keep Watch", "Notice Danger", "Read People"], -1) });
+  add("Waterlogged", { edge: plus(["Endure"], -1) }); // placeholder (§14.5)
+  add("Card Sharp", { reroll: reroll(["Cards & Dice"]) });
+  add("Hip Flask", { reroll: reroll(["Cast-Iron Stomach"]) });
+  add("Loaded Dice", { note: "One reroll of the Cheat roll per Liar's Dice session (§18.3)." });
+  add("Diver's Mask", { note: "+1 breath on a dive (§18.2)." });
+  add("Diving Barrel", { note: "+2 breath on a dive (§18.2)." });
+  add("Velvet Buccaneer Coat", { edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Tin Whistle", { note: "Morale floor +5 (§32.12)." });
+  add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
+  add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
+  add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
+  add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
   add("Weak Chest", { edge: plus(["Endure", "Haul & Labor", "Dive"], -1).concat([{ any: true, value: -1, when: { condition: "Cold" } }]) });
   add("Bad Back", { edge: [{ group: "Heavy Labor", value: -1 }] });
   add("Rheumy Hands", { edge: [{ group: "Fine Work", value: -1 }] });
@@ -4797,6 +6115,11 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     "French wine": { base: 50, kind: "drink", stores: 7 },
     "French brandy": { base: 70, kind: "drink", stores: 7 },
     "Indigo": { base: 40, kind: "fine" },
+    // Salvage goods (§32.15; prices §20.9).
+    "Ming porcelain": { base: 250, kind: "fine" },
+    "Ambergris": { base: 400, kind: "fine" },
+    "Pearls": { base: 600, kind: "fine" },
+    "Silver bars": { base: 150, kind: "precious" },
   };
 })();
 </script>
@@ -5257,7 +6580,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
  *     with the answer shown above the choices;
  *   carry: true opens the next scene with this result's text as its setup;
  *   info: true marks an information step (no approval tags, §33.1.3).
- * "PLACEHOLDER" marks the one stand-in: the salvage dive (Milestone 4).
+ * The Miranda dive hands over to the salvage minigame (js/salvage.js, §18.2).
  */
 (function () {
   "use strict";
@@ -6979,9 +8302,13 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
           "label": "Dive for the mermaid.",
           "approval": [],
           "result": {
-            "text": "You take a deep breath and plunge into the depths below.\n\nA brig sits upright on the bottom, in relatively good condition compared to the other wrecks, save for the gaping holes in her hull.\n\nPLACEHOLDER (Milestone 4): the salvage dive is played here, on the *Miranda* only. For now, the ivory mermaid comes up on the first try.\n\nYou break the surface, gasping for air.",
-            "effects": [],
-            "exit": "ocr_dpw_shark"
+            "text": "",
+            "effects": [
+              {
+                "minigame": "miranda"
+              }
+            ],
+            "exit": "hub"
           }
         }
       ],
@@ -8047,7 +9374,13 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
         bald_man: { node: "ocracoke", variants: ["B"], journal: {
           B: P + "Bobby Rats sold your jewels to a tall, thin, bald man heading home to Edenton.",
         } },
-        drinking: { node: null, journal: { any: P + "A lead won over drinks (Milestone 4)." } },
+        // The drinking lead (§30.6, lead 5): any drinking win at any Tavern.
+        drinking: { node: null, journal: {
+          A: P + "A pirate you drank under the table knows the *Trident*'s hunting waters.",
+          B: P + "A pirate you drank under the table bragged about a chest of jewels aboard the *Trident*.",
+          C: P + "A pirate you drank under the table knows the waters Gregoire's *Trident* works.",
+          any: P + "A lead won over drinks.",
+        } },
       },
     },
     hidden_haven: {
@@ -8302,6 +9635,225 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   };
 })();
 </script>
+  <script>
+/* The three Year 1 minigames' numbers and lines (§18, §32.15, S17 appendix §8).
+ *
+ * The rules are in js/salvage.js, js/drinking.js and js/liarsdice.js. Every
+ * number here is a placeholder the docs mark for playtesting; the Tuning
+ * Table lists the main ones. Lines are the author's (S17 appendix), with
+ * "PLACEHOLDER" where a line is still to write.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+
+  // ---- The salvage dive (§18.2, §32.15) ------------------------------------
+  var salvage = {
+    BREATH: 6,
+    SLOTS: 3,                 // items a zone holds
+    ZONE_MOD_CLAMP: 2,        // a zone's running modifier stays within ±2
+    DR_MAX: 5,                // Year 1 content
+    ZONE_DR: { hull: 2, hold: 3, cabin: 4 },
+    ZONE_NAMES: { hull: "Hull", hold: "Hold", cabin: "Cabin" },
+    ZONES: { sloop: ["hull", "hold"], brig: ["hull", "hold", "cabin"], frigate: ["hull", "hold", "cabin"] },
+    WRECK_WEIGHTS: { sloop: 55, brig: 30, frigate: 15 },
+    WRECKS_OFFERED: 3,
+    HAZARDS: { snag: 35, current: 30, shark: 20, cryptid: 15 },
+    // DEFAULT (§18.2 gives no DR): the shark's Notice Danger and the
+    // cryptid's Ghost Sense.
+    SHARK_CHECK: { type: "Notice Danger", dr: 2 },
+    CRYPTID_CHECK: { type: "Ghost Sense", dr: 3 },
+    RELIC_CHANCE: 0.4,
+    GEAR: { "Diver's Mask": 1, "Diving Barrel": 2 }, // the best one counts (§32.12)
+
+    // §32.15 Tier weights by zone (%).
+    TIERS: {
+      hull: { junk: 25, supplies: 35, goods: 10, treasure: 30, item: 0 },
+      hold: { junk: 15, supplies: 25, goods: 20, treasure: 40, item: 0 },
+      cabin_brig: { junk: 10, supplies: 0, goods: 15, treasure: 65, item: 10 },
+      cabin_frigate: { junk: 5, supplies: 0, goods: 15, treasure: 65, item: 15 },
+    },
+    // §32.15 Yields. goods: [good, min, max, weight]. "Rum (sealed casks)"
+    // is read as Plantation rum and porcelain as Ming porcelain (DEFAULTS).
+    YIELDS: {
+      hull: { supplies: [1, 1], goods: [["Plantation rum", 1, 2, 1]], treasure: [1, 1], gold: [20, 40] },
+      hold: { supplies: [1, 2], goods: [["Plantation rum", 1, 3, 50], ["Ming porcelain", 1, 2, 50]], treasure: [1, 2], gold: [30, 60] },
+      cabin_brig: { goods: [["Ming porcelain", 1, 2, 80], ["Ambergris", 1, 1, 20]], treasure: [2, 3], gold: [50, 100], rare: 1 / 5 },
+      cabin_frigate: { goods: [["Ming porcelain", 1, 2, 60], ["Silver bars", 1, 2, 30], ["Pearls", 1, 1, 10]], treasure: [3, 4], gold: [75, 150], rare: 1 / 3 },
+    },
+    // Salvage-safe items (§32.15). DEFAULT: the catalog doesn't tier the
+    // Ivory Compass or the Obsidian Amulet, so they stand in as the Rares.
+    ITEMS: {
+      uncommon: ["Shark-Tooth Necklace", "Tin Whistle", "Silver Pocket Watch", "Fancy Spyglass", "Navigator's Octant"],
+      rare: ["Ivory Compass", "Obsidian Amulet"],
+    },
+    // Rough worth, only to pick the better half of a haul on a blackout.
+    WORTH: { treasureUnit: 70, provisions: 30, uncommon: 500, rare: 2500 },
+
+    sites: {
+      ocracoke: { name: "Lilyhook's Graveyard", cryptid: "the giant shark", relic: "Giant Tooth", legend: ["legend_giant_shark"] },
+    },
+
+    // The *Miranda* (A Dying Pirate's Wish, §18.2): a brig, her Hull at DR 1,
+    // the mermaid seeded first in her Hull, only Snag and Current.
+    miranda: {
+      id: "miranda", type: "brig", name: "the Miranda",
+      zoneDr: { hull: 1 },
+      hazards: { snag: 35, current: 30 },
+      quest: { zone: "hull", item: "carved ivory mermaid" },
+      flavor: "A brig sits upright on the bottom, in relatively good condition compared to the other wrecks, save for the gaping holes in her hull.",
+    },
+
+    lines: {
+      goingUnder: "You take a deep breath and plunge into the depths below.",
+      grab: { clean: "You manage to grab it and tuck it under your arm.", partial: "It takes some effort, but you manage to work it loose.", setback: "You expend a lot of energy trying to claw it free, but it doesn't budge." },
+      scout: "You take a moment to peer through the gloom.",
+      surface: "You break the surface, gasping for air.",
+      blackout: "Your vision grows black. You wake on the beach, coughing up seawater, with only half of what you grabbed.",
+      snag: "Your shirt catches on a splintered plank, and it takes precious seconds to tear yourself free.",
+      current: "A fast current rolls through the wreck and pushes you out. Getting back in there won't be easy.",
+      shark: { draw: "A grey shadow glides past the wreck.", clean: "You press yourself flat against the hull until it swims lazily away.",
+        partial: "You hide for what seems like ages, holding your breath to its limit, until it goes away.",
+        setback: "It rushes at you and opens its jaws, then the world goes dark. When you come to, Ollie is dragging you up the beach as your blood mixes with the seawater." },
+      // The giant shark's own lines belong with the cryptid scenes (§35); the
+      // dive uses Ollie's "Shark seen" line and the relic line until then.
+      cryptid: { draw: "A chill runs up your spine. You're not alone here. You look down and watch a massive shadow passing underneath.",
+        clean: "PLACEHOLDER (cryptid scene, §35): the shadow passes.", partial: "PLACEHOLDER (cryptid scene, §35): you hold still until it's gone.",
+        setback: "PLACEHOLDER (cryptid scene, §35): the shadow blots out the wreck, and the world goes dark.",
+        relic: "You dive to the bottom in the creature's wake, and pick up what fell to the sea floor." },
+      junkPrefix: "You surface with ",
+      offered: "You spot a few ripe pickings.",
+      frigate: "One of them is larger than the rest.",
+      quick: "You gather what you can find and return to the beach.",
+      goodHaul: "You spot something valuable.",
+      poorHaul: "Slim pickings this time.",
+      already: "The wrecks are picked clean. Come back later.",
+      mermaidMissed: "You surface without finding the mermaid. You'll need to try again if you want to get paid.",
+      mermaid: "PLACEHOLDER (dive beat): your fingers close around something small and smooth in the sand. The ivory mermaid.",
+    },
+    flavor: {
+      sloop: ["A small, sleek hull lies on her side in the shallows, her mast snapped clean off.", "The bow of a half-buried sloop rises out of the sand."],
+      brig: ["Two broken masts break the surface, leading down to a shattered brig.", "The two broken halves of a brig lie sideways at the bottom."],
+      frigate: ["The remnants of a heavy frigate lie broken at the bottom of the sea, with only murky darkness behind her gunports.", "A large warship lies submerged at the bottom of the shallows, half-buried in the sand."],
+    },
+    // Lines 16-30 are still to write (pinned, §13.2).
+    junk: ["a barnacled boot, still laced", "a cannonball, very heavy, entirely worthless", "a tin cup with a hole in the bottom",
+      "a lid from a barrel, stamped with a big letter A", "a chunk of decades-old hardtack, probably still edible",
+      "an empty glass bottle, stained green", "half a compass, without a needle", "an algae-filled clay pipe", "a pewter candlestick",
+      "a piece of rotted pulp that used to be a book", "a handful of buttons", "a doll's head that stares at you coldly",
+      "a tangled net", "a single smooth rock", "a crude wooden sign that says \"No Lollygagging\""],
+  };
+
+  // ---- Under the Table (§18.4) -------------------------------------------------
+  var drinking = {
+    WITS: 6,
+    DR_CAP: 5,
+    TOLERANCE: { Pirate: [3, 6], Sailor: [3, 5], Dockhand: [2, 4], "Colonial Officer": [2, 4] },
+    TAB: { "Very poor": 10, "Poor": 20, "Modest": 40, "Wealthy": 80 },
+    MISHAPS: { wrongPipe: 40, spins: 30, brawl: 20, bottle: 10 },
+    BRAWL_CHECK: { type: "Brawling", dr: 2 },
+    BOTTLE_CHECK: { type: "Ghost Sense", dr: 3 },
+    SIZE_CHECK: { type: "Read People", dr: 2 },
+    MOCK_CHECK: { type: "Tavern Talk", dr: 2 },
+    LEAN_CHECK: { type: "Intimidate", dr: 2 },
+    HANGOVER_AT: 2,           // a win or a called night at 2 Wits or less rolls
+    ITEM_CHANCE: 0.10,
+    ONE_MORE_AT: 2,           // Heavy Drinker's "One more round" needs 2+ Wits after a win
+    DRUNKARD_AFTER: 3,        // the ratchet (§5.8)
+    // The rumor a win pays, by the opponent's role (§30.4; Ocracoke's
+    // Pirate is in the Tuning Table).
+    RUMORS: { Pirate: { "Danger": 85, "Prize": 15 }, Sailor: { "World State": 100 }, Dockhand: { "Merchant": 100 }, "Colonial Officer": { "Danger": 100 } },
+    ITEMS: {
+      Pirate: { uncommon: ["Hip Flask", "Shark-Tooth Necklace", "Loaded Dice"], rare: ["Velvet Buccaneer Coat"] },
+    },
+    // Ocracoke's drinker pool (§17.2): a Pirate with one of six traits.
+    pools: { ocracoke: { role: "Pirate", traits: ["Hard Drinker", "Hot-Tempered", "Proud", "Superstitious", "Old Sea Dog", "Jovial"] } },
+
+    // The opponent's trait (§18.4.5). Lines marked insult show the
+    // Hot-Tempered flaw's "Throw your drink in his face" (§18.4.7; which
+    // lines count as insults is a DEFAULT).
+    traits: {
+      "Hard Drinker": { drinkDr: 1, hint: "red-faced and big-bellied.",
+        steady: { line: "He drains it and wipes his mouth. \"Too easy.\"", insult: true }, wobbling: "He drinks a bit slower this time, but still downs it in one gulp.", doneFor: "He stares into his cup like he's been here before." },
+      "Hot-Tempered": { tauntDr: -1, tauntSetbackBrawl: true, brawlWeight: 2, hint: "tapping his foot impatiently.",
+        steady: "He slams his cup down on the table and whoops.", wobbling: { line: "\"You lookin' at me funny?\" You weren't.", insult: true }, doneFor: "He tries to take a swing at you, but misses and falls back into his chair." },
+      "Proud": { leanDr: 1, strongOnce: true, hint: "his chin held high.",
+        steady: { line: "\"You don't stand a chance at besting me.\"", insult: true }, wobbling: "He stares at the ceiling, swaying in place with perfect posture.", doneFor: "\"I am perfect. I've never been better. I'm always...\" He loses the end of his sentence." },
+      "Superstitious": { bottleWeight: 2, hint: "tying and untying his shoelaces several times.",
+        steady: "He throws a pinch of salt over his shoulder.", wobbling: "He keeps glancing over at the corner. There's nothing there.", doneFor: "\"Bad omens. Bad, bad omens.\"" },
+      "Old Sea Dog": { tolerance: 1, hint: "his face as worn and leathery as a book cover.",
+        steady: { line: "\"Been around a long time, and beaten better men than you.\"", lineF: "\"Been around a long time, and beaten better women than you.\"", insult: true },
+        wobbling: "He starts telling a story about a drunken mermaid, but trails off.", doneFor: "He's humming a shanty from before you were born, eyes shut tight." },
+      "Jovial": { mockDr: -1, hint: "brimming with excitement.",
+        steady: "He clinks your cup before you've even lifted it. \"To new friends!\"", wobbling: "He's been giggling at his own joke for quite a while.", doneFor: "He tells you that he loves you. He tells you again, louder." },
+      // Hooks for the other pools (§18.4.5); their lines come with their nodes.
+      "Taciturn": { mockDr: 1 }, "Fearless": { leanDr: 1 }, "Cool-Headed": { leanDr: 1 }, "Timid": { leanDr: -1, tolerance: -1, quitsAtDoneFor: true },
+      "Inscrutable": { sizeDr: 1 }, "Candid": { sizeDr: -1 }, "Reckless": { strongOnce: true }, "Wild": { strongOnce: true }, "Green": { tolerance: -1 },
+    },
+
+    lines: {
+      setup: "A grizzled pirate drops onto the stool across from you, ",
+      size: { clean: "You watch how he holds his cup and know exactly what you're dealing with.", partial: "You get a rough measure of him, but he's hard to pin down.",
+        setback: { line: "He catches you staring. \"Sizing me up, eh? Let's start with the strong stuff, then.\"", insult: true } },
+      mockClean: "\"I can outdrink ten of you, just watch.\" He downs one to prove he can.",
+      leanClean: "You lean in close and don't blink. He breaks eye contact and drinks first.",
+      tauntPartial: "He glares at you and waves for something stronger.",
+      tauntSetback: { line: "He laughs in your face and slides the strong stuff across. \"Let's see if you can handle it.\"", insult: true },
+      // DEFAULT: the Proud (Reckless, Wild) opponent's own call for the strong stuff.
+      heCallsStrong: "PLACEHOLDER (drinking line): he bangs the table and calls for the strong stuff.",
+      wrongPipe: "It goes down the wrong way, and you spend the next few seconds coughing your lungs out.",
+      spins: "The room starts to spin, and it's getting faster now.",
+      brawl: { start: "He flips the table and drinks fly everywhere. \"Get over here!\"", clean: "When the dust settles, he's unconscious under the table and you're polishing off your drink.",
+        partial: "You both get dusted off and pushed back onto your stools as the onlookers turn the table back upright.", setback: "The tavern keeper throws you both out the door face-first." },
+      bottle: { start: "For a moment, a face stares up at you from the bottom of your cup.", clean: "You blink and it's gone.", partial: "You push the cup away, unsettled.",
+        setback: "You don't remember falling off your stool. You only remember the face." },
+      win: "He slides slowly off his stool and goes to sleep under the table as the room cheers.",
+      draw: "You wake on the floor beside him. Nobody can agree on who went down first.",
+      callIt: "You push your cup away and hang your head. He tells the tavern keeper that you'll be picking up the tab.",
+      under: "The room goes black, and you fall straight backward. You wake to the tavern keeper standing above you, demanding you pay the tab.",
+      oneMore: "A second competitor drops onto the warm stool. \"My turn.\"",
+      hangover: "You wake with a bone-dry mouth and a headache that could kill an elephant.",
+      timidQuits: "PLACEHOLDER (drinking line): he pushes his cup away and calls it a night.",
+    },
+  };
+
+  // ---- Liar's Dice (§18.3) -------------------------------------------------------
+  var dice = {
+    DICE: 3,                  // each (placeholder; the classic game uses five)
+    GAMES_PER_SESSION: 5,
+    STAKES: { "Very poor": [25, 50], "Poor": [25, 100], "Modest": [50, 150], "Wealthy": [50, 200] },
+    SIZE_CHECK: { type: "Cards & Dice", dr: 3 },
+    CHEAT_CHECK: { type: "Cards & Dice", dr: 3 },
+    CAUGHT_STANDING: -5,      // with the node's faction; black Standing at Ocracoke (§18.3, §28.3)
+    MARKS_TO_CATCH: 2,
+    CARD_SHARP_AT: 500,       // DEFAULT: gross winnings at Liar's Dice (threshold OPEN, §18.3)
+    // How the opponent plays, by trait (§18.3): call when the bid is less
+    // likely than this; bold players raise past the minimum.
+    PLAY: {
+      base: { callBelow: 0.45 },
+      "Reckless": { callBelow: 0.3, bold: true }, "Fearless": { callBelow: 0.3, bold: true }, "Proud": { callBelow: 0.3, bold: true },
+      "Timid": { callBelow: 0.6 }, "Suspicious": { callBelow: 0.6 }, "Gullible": { callBelow: 0.15 },
+      "Cool-Headed": { callBelow: 0.5 }, "Gambler": { callBelow: 0.45, chases: true, checkDr: -1 },
+      "Inscrutable": { sizeDr: 1 }, "Candid": { sizeDr: -1 },
+    },
+    pools: { ocracoke: { role: "Dockhand/Laborer" } },
+    lines: {
+      sit: "A dockhand with tar under his nails rattles a cup at you. \"Let's play. No crying when you lose.\"",
+      size: { clean: "He gulps hard whenever he's bluffing.", partial: "He's nervous about something. You're just not sure what.", setback: "He grins. \"I've got you right where I want you.\"" },
+      tell: "He gulps hard.",
+      vague: "He shifts in his seat.",
+      cheat: { clean: "A quick glance under the edge of his cup, and he's none the wiser.", partial: "You sneak a quick peek, but he narrows his eyes and pulls the cup closer." },
+      caught: "He slams his hand on the table. \"Cheater!\" he cries, and the whole tavern hears it.",
+      win: "He groans and pushes the coins across.",
+      lose: "He sweeps up the coins with a grin. \"I'd love to take more of your coin. Another?\"",
+      broke: "\"Come back when you've got more gold.\"",
+    },
+  };
+
+  PC.data.minigames = { salvage: salvage, drinking: drinking, dice: dice };
+})();
+</script>
 
   <!-- Screen -->
   <script>
@@ -8360,7 +9912,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     root.innerHTML =
       '<div class="game">' + topBar() +
       '<div class="body"><aside class="sheet">' + captainSheet() + "</aside>" +
-      '<main class="stage">' + (state.current.screen === "hub" ? hubPanel() : state.current.screen === "node" ? nodePanel() : scenePanel()) + logPanel() + "</main></div></div>" +
+      '<main class="stage">' + (state.current.screen === "hub" ? hubPanel() : state.current.screen === "node" ? nodePanel() : state.current.screen === "minigame" ? minigamePanel() : scenePanel()) + logPanel() + "</main></div></div>" +
       popupHtml();
     wire();
   }
@@ -8370,13 +9922,13 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     root.innerHTML =
       '<div class="title-screen">' +
       "<h1>Pirate Chronicle</h1>" +
-      '<p class="sub">Prototype · Milestone 3 · scenes and quests</p>' +
+      '<p class="sub">Prototype · Milestone 4 · the minigames</p>' +
       '<div class="title-buttons">' +
       (hasSave ? '<button data-act="continue" class="primary">Continue</button>' : "") +
       '<button data-act="new"' + (hasSave ? "" : ' class="primary"') + ">New game</button>" +
       '<button data-act="import">Load a save file</button>' +
       "</div>" +
-      '<p class="note">Make your captain and sail into Ocracoke: run the sandbar, meet the Beach Captain, take Bobby Rats\'s job and grant a dying pirate\'s wish. Then hire hands and officers, hear the rumors, repair the sloop and sign the Articles. The minigames come next.</p>' +
+      '<p class="note">Make your captain and sail into Ocracoke: run the sandbar, meet the Beach Captain, take Bobby Rats\'s job and grant a dying pirate\'s wish. Then hire hands and officers, hear the rumors, repair the sloop and sign the Articles. Dive the wrecks, drink a pirate under the table and play Liar\'s Dice. The prize hunt comes next.</p>' +
       '<p class="note"><button class="link" data-act="quickstart">Quick start with the test captain</button></p>' +
       "</div>";
     wire();
@@ -8643,8 +10195,15 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     html += "<li" + (gi.ok ? "" : ' class="locked"') + '><button data-act="gather"' + (gi.ok ? "" : " disabled") + ">Gather Intelligence <small>(1 action)</small></button>" +
       '<span class="cost">Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.</span>' +
       (gi.ok ? checkLine(PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] })) : '<span class="lock">' + esc(gi.why) + "</span>") + "</li>";
-    html += comingSoon("Drink with a pirate (Under the Table)", 4, first ? "Not on your first visit" : null) +
-      comingSoon("Liar's Dice", 4, first ? "Not on your first visit" : null) + "</ol>";
+    // The minigames (§18.3, §18.4): an action each.
+    var dk = PC.drinking.canDrink(state);
+    html += "<li" + (dk.ok ? "" : ' class="locked"') + '><button data-act="drink"' + (dk.ok ? "" : " disabled") + ">Drink with a pirate (Under the Table) <small>(1 action)</small></button>" +
+      '<span class="cost">Once a season. The loser pays the ' + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.</span>" +
+      (dk.ok ? "" : '<span class="lock">' + esc(dk.why) + "</span>") + "</li>";
+    var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
+    html += "<li" + (lp.ok ? "" : ' class="locked"') + '><button data-act="dice"' + (lp.ok ? "" : " disabled") + ">Liar's Dice <small>(1 action)</small></button>" +
+      '<span class="cost">Up to ' + PC.data.minigames.dice.GAMES_PER_SESSION + " games a sitting, " + st[0] + "-" + st[1] + " gold a game from your purse.</span>" +
+      (lp.ok ? "" : '<span class="lock">' + esc(lp.why) + "</span>") + "</li></ol>";
     if (state.location.gatherPick) {
       html += '<div class="svc"><h4>What do you want to hear about?</h4><div class="opts">' + PC.rumors.gatherTypes(state).map(function (t) {
         return '<button data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
@@ -8795,8 +10354,156 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   function graveyardMenu() {
     var o = PC.npcs.get(state, "ollie");
     var lines = { "-1": "\"I hope you're a strong swimmer.\"", "0": "\"Back for another dive?\"", "1": "\"I dreamed that you're in for a good haul today.\"", "2": "\"I dreamed that you're in for a good haul today.\"", "3": "\"The treasure-seeker returns!\"" };
-    return "<h3>" + npcTag("ollie") + "</h3>" + '<div class="say">' + esc(lines[String(Math.max(-1, o.rung))] || lines["0"]) + "</div>" +
-      '<ol class="choices">' + comingSoon("Dive the wrecks", 4) + "</ol>";
+    var html = "<h3>" + npcTag("ollie") + "</h3>" + '<div class="say">' + esc(lines[String(Math.max(-1, o.rung))] || lines["0"]) + "</div>";
+    var S = PC.data.minigames.salvage;
+    // A Dying Pirate's Wish: the Miranda is the only wreck until the mermaid comes up (§18.2).
+    if (PC.salvage.mirandaPending(state)) {
+      var rc = PC.salvage.canRetryMiranda(state);
+      return html + '<div class="wreck"><h4>The <i>Miranda</i></h4><p class="small">' + esc(S.miranda.flavor) + "</p>" +
+        '<p class="small">Ollie waits on the beach. Geezer\'s mermaid is still down there.</p>' +
+        '<div class="actions"><button class="primary" data-act="miranda"' + (rc.ok ? "" : " disabled") + ">Dive for the mermaid again (1 action)</button>" +
+        (rc.ok ? "" : '<span class="lock">' + esc(rc.why) + "</span>") + "</div></div>";
+    }
+    var cd = PC.salvage.canDive(state);
+    var wrecks = PC.salvage.wrecksOnOffer(state, "ocracoke");
+    html += '<p class="muted">' + esc(S.lines.offered) + (wrecks.some(function (w) { return w.type === "frigate"; }) ? " " + esc(S.lines.frigate) : "") + "</p>";
+    if (!cd.ok) html += '<p class="notice">' + esc(cd.why) + "</p>";
+    wrecks.forEach(function (w) {
+      html += '<div class="wreck"><h4>A ' + esc(w.type) + "</h4>" + '<p class="small">' + esc(w.flavor) + "</p>" +
+        '<p class="small">' + S.ZONES[w.type].map(function (z) {
+          var a = PC.checks.assess(state, { type: "Dive", dr: S.ZONE_DR[z] }, { conditions: ["Underwater"] });
+          return esc(S.ZONE_NAMES[z]) + ": " + esc(a.tier) + " (" + pct(a.odds.partialOrBetter) + ")";
+        }).join(" · ") + "</p>" +
+        '<div class="actions"><button data-act="divewreck" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Dive (1 action)</button>" +
+        '<button data-act="divequick" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Quick Dive (1 action)</button></div></div>";
+    });
+    return html;
+  }
+
+  // ---- The minigames (§18) ----
+  // The rules are in js/salvage.js, js/drinking.js and js/liarsdice.js.
+
+  function mgLog(lines) {
+    var last = lines.slice(-12);
+    return '<div class="mglog">' + last.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>";
+  }
+
+  function mgMeter(label, n, max) {
+    var pips = "";
+    for (var i = 0; i < max; i++) pips += '<i class="' + (i < n ? "on" : "off") + '"></i>';
+    return '<div class="meter"><span>' + esc(label) + "</span> " + pips + " <small>" + n + "/" + max + "</small></div>";
+  }
+
+  function mgPending(p) {
+    if (!p) return "";
+    return '<div class="result"><p class="you-chose">' + esc(p.type) + "</p>" +
+      '<div class="badge badge-' + p.outcome + '">' + OUTCOME_LABEL[p.outcome] + "</div>" + diceLine(p.roll) +
+      '<div class="actions"><button data-act="mgreroll">Reroll (' + esc(p.reroll) + ')</button><button class="primary" data-act="mgaccept">Accept it</button></div></div>';
+  }
+
+  function mgOption(act, attrs, label, chk, extra) {
+    return '<li><button data-act="' + act + '" ' + attrs + ">" + esc(label) + "</button>" + (extra ? '<span class="cost">' + esc(extra) + "</span>" : "") + (chk ? checkLine(chk) : "") + "</li>";
+  }
+
+  function minigamePanel() {
+    var v = PC.minigames.view(state);
+    var html = '<section class="scene minigame mg-' + v.kind + '">';
+    html += ({ dive: divePanel, drink: drinkPanel, dice: dicePanel })[v.kind](v);
+    return html + "</section>";
+  }
+
+  function divePanel(v) {
+    var html = '<div class="where">Lilyhook\'s Graveyard</div><h2>' + esc(v.title) + "</h2>" +
+      mgMeter("Breath", v.breath, v.breathMax) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending);
+    if (!v.over) {
+      html += '<ol class="choices">';
+      v.zones.forEach(function (z) {
+        if (z.left <= 0) { html += '<li class="locked"><button disabled>' + esc(z.name) + '</button><span class="lock">Picked clean</span></li>'; return; }
+        html += mgOption("mgdive", 'data-op="grab" data-zone="' + z.id + '"', "Grab from the " + z.name, z.assess,
+          z.left + " left" + (z.scouted ? " · next: " + z.scouted : "") + " · clean 1 breath, partial 2, setback 2 and a hazard");
+        html += mgOption("mgdive", 'data-op="scout" data-zone="' + z.id + '"', "Scout the " + z.name, null, "1 breath: see the next find, and the next grab there is one step easier");
+      });
+      html += '<li><button data-act="mgdive" data-op="surface">Surface</button><span class="cost">Bank what you have</span></li></ol>';
+      if (v.canQuick) html += '<div class="actions"><button data-act="mgquick">Quick Dive instead</button></div>';
+      return html;
+    }
+    html += '<div class="svc"><h4>' + (v.blackout ? "What you kept" : "Your haul") + "</h4>" +
+      (v.kept && v.kept.length ? "<ul>" + v.kept.map(function (k) { return "<li>" + esc(k) + "</li>"; }).join("") + "</ul>" : '<p class="small muted">Nothing.</p>') + "</div>";
+    if (v.needsPot) {
+      return html + '<p class="small">' + v.gold + ' gold came up with it.</p><div class="actions"><button class="primary" data-act="mgbank" data-pot="purse">Into your purse</button>' +
+        '<button class="primary" data-act="mgbank" data-pot="crew">Share it with the crew</button></div>';
+    }
+    return html + '<div class="actions"><button class="primary" data-act="mgleave">Continue</button></div>';
+  }
+
+  function drinkPanel(v) {
+    var html = '<div class="where">The Tavern · Under the Table</div><h2>' + esc(v.opponent) + "</h2>" +
+      '<p class="small muted">' + esc(v.role) + (v.trait ? " · " + esc(v.trait) : "") + (v.tolerance ? " · Tolerance " + esc(v.tolerance) : "") +
+      " · " + esc(v.state) + " · Round " + v.round + " · the tab " + v.tab + " gold</p>" +
+      mgMeter("Wits", v.wits, v.witsMax) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending);
+    if (v.offerOneMore) {
+      return html + '<p class="notice">Heavy Drinker: another pirate wants a go. Play on with the Wits you have left, for another rumor?</p>' +
+        '<div class="actions"><button data-act="mgonemore" data-yes="1">One more round</button><button class="primary" data-act="mgonemore" data-yes="0">Call it a night</button></div>';
+    }
+    if (!v.over) {
+      if (v.mustStrong) html += '<p class="notice">The strong stuff, or call it a night.</p>';
+      html += '<ol class="choices">' + v.options.map(function (o) {
+        var note = { drink: "Clean costs no Wits, partial 1, setback 2 and a mishap", strong: "Counts as two drinks for him. Clean 0 Wits, partial 2, setback 3 and a mishap",
+          size: "Once, before the first drink. Clean names his trait and Tolerance", mock: "One taunt a match: he drinks alone", lean: "One taunt a match: he drinks alone",
+          throw: "Starts a brawl", callit: "A loss: you pay the tab" }[o.op];
+        return mgOption("mgdrink", 'data-op="' + o.op + '"', o.label, o.assess || null, note);
+      }).join("") + "</ol>";
+      return html;
+    }
+    var r = v.result || {};
+    html += '<div class="svc"><h4>' + (r.won ? "You won" : r.how === "draw" ? "A draw" : "You lost") + "</h4><ul>" +
+      (r.tab ? "<li>You paid " + r.tab + " gold for the tab.</li>" : "") +
+      (r.lead ? "<li>A lead for your journal.</li>" : "") + (r.rumor ? "<li>A rumor (in your log).</li>" : "") +
+      (r.item ? "<li>Found: " + esc(r.item) + "</li>" : "") + (r.hangover ? "<li>Hangover until next season.</li>" : "") + "</ul></div>";
+    return html + '<div class="actions"><button class="primary" data-act="mgleave">Continue</button></div>';
+  }
+
+  var FACE = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+  function dieFace(d) { return d ? '<span class="die">' + FACE[d] + "</span>" : '<span class="die hidden">?</span>'; }
+
+  function dicePanel(v) {
+    var html = '<div class="where">The Tavern · Liar\'s Dice</div><h2>' + esc(v.opponent) + "</h2>" +
+      '<p class="small muted">Game ' + v.games + " of " + v.maxGames + " · won " + v.won + ", lost " + v.lost + " (" + (v.net >= 0 ? "+" : "") + v.net + " gold) · your purse " + gold(v.purse) +
+      (v.marks ? " · suspicion " + v.marks : "") + "</p>" + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending);
+    var g = v.round;
+    if (!g) {
+      if (v.over) return html + '<div class="actions"><button class="primary" data-act="mgleave">Leave the table</button></div>';
+      html += '<ol class="choices">';
+      if (v.canSize) html += mgOption("mgsize", "", "Size him up", v.sizeAssess, "Once a sitting");
+      if (v.canStart) html += '<li><div class="buyrow">' + qtyBox("q-stake", v.stakes[0], Math.min(v.stakes[1], Math.floor(v.purse))) +
+        '<button data-act="mgstake" data-for="q-stake">Play a game</button></div><span class="cost">Stake ' + v.stakes[0] + "-" + v.stakes[1] + " gold from your purse; the winner takes both stakes.</span></li>";
+      html += '<li><button data-act="mgstop">Leave the table</button></li></ol>';
+      return html;
+    }
+    html += '<div class="cups"><p>His cup (' + g.hisN + "): " + g.his.map(dieFace).join(" ") + "</p>" +
+      "<p>Your cup (" + g.myN + "): " + g.mine.map(dieFace).join(" ") + "</p></div>";
+    if (g.history.length) html += '<ul class="small">' + g.history.map(function (h) { return "<li>" + esc(h) + "</li>"; }).join("") + "</ul>";
+    if (g.over) {
+      return html + '<p class="notice">' + (g.caught ? "Caught cheating: the pot is his." : g.won ? "You take the pot: " + g.stake * 2 + " gold." : "He takes the pot.") + "</p>" +
+        '<div class="actions"><button class="primary" data-act="mgclosegame">Continue</button></div>';
+    }
+    if (g.revealed) return html + '<div class="actions"><button class="primary" data-act="mgnextround">Next round</button></div>';
+    var bid = g.bid ? "The bid: " + g.bid.q + " × " + FACE[g.bid.f] : "You open the bidding.";
+    var q = g.bid ? g.bid.q : 1, f = g.bid ? Math.min(6, g.bid.f + 1) : 1;
+    if (g.bid && g.bid.f >= 6) { q += 1; f = 1; }
+    html += "<p><b>" + esc(bid) + "</b> (" + g.total + " dice on the table)</p>" +
+      '<div class="buyrow"><label>At least <input id="bid-q" class="qty" type="number" min="1" max="' + g.total + '" value="' + q + '"></label>' +
+      ' <label>showing <select id="bid-f">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<option value="' + n + '"' + (n === f ? " selected" : "") + ">" + FACE[n] + " (" + n + ")</option>"; }).join("") + "</select></label>" +
+      ' <button data-act="mgbid">Bid</button>' + (g.bid ? ' <button data-act="mgliar">Call Liar!</button>' : "") + "</div>";
+    if (!g.cheated) {
+      html += '<details class="check"><summary>Cheat: peek under his cup (once a game)</summary><div class="opts">' +
+        g.his.map(function (d, i) { return '<button data-act="mgcheat" data-i="' + i + '">Die ' + (i + 1) + "</button>"; }).join(" ") + "</div>" + checkLine(v.cheatAssess) +
+        '<p class="small muted">Two suspicion marks and you are caught: the pot is forfeit, and the pirates think less of you.</p></details>';
+    }
+    return html;
   }
 
   // ---- The Ship layer (§17.1) ----
@@ -8985,6 +10692,28 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   }
 
   var nodeHandlers = {
+    // ---- The minigames (§18) ----
+    "drink": function () { scrollTop(); PC.drinking.start(state); },
+    "dice": function () { scrollTop(); PC.liarsdice.start(state); },
+    "divewreck": function (el) { scrollTop(); PC.salvage.startGraveyardDive(state, el.dataset.wreck, false); },
+    "divequick": function (el) { scrollTop(); PC.salvage.startGraveyardDive(state, el.dataset.wreck, true); },
+    "miranda": function () { scrollTop(); PC.salvage.retryMiranda(state); },
+    "mgdive": function (el) { PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
+    "mgquick": function () { PC.salvage.quickDive(state); },
+    "mgbank": function (el) { PC.salvage.bank(state, state.minigame, el.dataset.pot); },
+    "mgdrink": function (el) { PC.drinking.act(state, el.dataset.op); },
+    "mgonemore": function (el) { PC.drinking.oneMore(state, el.dataset.yes === "1"); },
+    "mgreroll": function () { PC.minigames.reroll(state); },
+    "mgaccept": function () { PC.minigames.settle(state); },
+    "mgleave": function () { scrollTop(); PC.minigames.leave(state); },
+    "mgsize": function () { PC.liarsdice.sizeUp(state); },
+    "mgstake": function (el) { PC.liarsdice.newGame(state, Number(document.getElementById(el.dataset.for).value)); },
+    "mgbid": function () { PC.liarsdice.bid(state, Number(document.getElementById("bid-q").value), Number(document.getElementById("bid-f").value)); },
+    "mgliar": function () { PC.liarsdice.callLiar(state); },
+    "mgcheat": function (el) { PC.liarsdice.cheat(state, Number(el.dataset.i)); },
+    "mgnextround": function () { PC.liarsdice.nextRound(state); },
+    "mgclosegame": function () { PC.liarsdice.closeGame(state); },
+    "mgstop": function () { PC.liarsdice.stop(state); },
     "goplace": function (el) { enterPlace(el.dataset.place); },
     "leaveplace": function () {
       scrollTop();
