@@ -117,6 +117,9 @@
       row("Crew gold", state.money.crew) +
       row("Your purse", state.money.purse) +
       row("Provisions", state.provisions + " lots") +
+      "</table>" +
+      (PC.data.shipArt(state.ship.type) ? '<img class="sheet-ship" src="' + assetUrl(PC.data.shipArt(state.ship.type)) + '" alt="Your ' + esc(state.ship.type.toLowerCase()) + '">' : "") +
+      '<table class="ledger">' +
       row(state.ship.type, "<i>" + esc(state.ship.name) + "</i>") +
       row("Hull", state.ship.hull + " / " + state.ship.hullMax) +
       row("Guns", state.ship.guns + " / " + state.ship.gunsMax) +
@@ -607,7 +610,7 @@
   }
 
   function stepShip() {
-    return '<div class="ship-plate"><div class="ship-placeholder">⛵<br><span class="small">Woodcut of the sloop to come</span></div>' +
+    return '<div class="ship-plate"><img class="ship-art" src="' + assetUrl(PC.data.shipArt("Sloop")) + '" alt="A sloop">' +
       '<p class="small">A battered sloop: 14 of 20 hull, frayed rigging, 6 of 10 guns, shallow draft for the shoals, and a skeleton crew of 12 green hands.</p></div>' +
       textField("Her name", "shipName", { max: 30, placeholder: "The ship's name" });
   }
