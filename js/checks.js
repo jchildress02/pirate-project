@@ -90,10 +90,24 @@
     return out;
   }
 
+  // A modifier's condition (§11.8.1). The season counts as a condition
+  // ("Winter"), so callers pass the season in ctx.season.
   function whenMatches(when, ctx) {
     if (!when) return true;
-    if (when.condition && (ctx.conditions || []).indexOf(when.condition) < 0) return false;
+    var have = (ctx.conditions || []).concat(ctx.season ? [ctx.season] : []);
+    if (when.condition && have.indexOf(when.condition) < 0) return false;
+    if (when.anyOf && !when.anyOf.some(function (c) { return have.indexOf(c) >= 0; })) return false;
     return true;
+  }
+
+  // Does a modifier's target cover this check? A type, a §11.6 group, a
+  // stat actually used, or "any".
+  function targets(e, check, stats) {
+    if (e.any) return true;
+    if (e.type) return e.type === check.type;
+    if (e.group) return ((PC.data.checkGroups || {})[e.group] || []).indexOf(check.type) >= 0;
+    if (e.stat) return stats.indexOf(e.stat) >= 0;
+    return false;
   }
 
   // Captain modifiers for one check. A modifier that names a type follows
@@ -103,9 +117,7 @@
     var seen = {}, parts = [], capped = 0, outside = 0;
     captainSources(captain).forEach(function (src) {
       (src.mod.edge || []).forEach(function (e) {
-        var hit = (e.type && e.type === check.type) ||
-                  (e.stat && stats.indexOf(e.stat) >= 0);
-        if (!hit || !whenMatches(e.when, ctx)) return;
+        if (!targets(e, check, stats) || !whenMatches(e.when, ctx)) return;
         var name = src.mod.name || src.id;
         if (seen[name]) return;
         seen[name] = true;
@@ -125,8 +137,14 @@
   }
 
   // Full breakdown of a check for one captain. Pure: no dice rolled.
-  function assess(state, check, ctx) {
+  function withSeason(state, ctx) {
     ctx = ctx || {};
+    if (ctx.season || !state.time || !PC.state) return ctx;
+    return { conditions: ctx.conditions || [], season: PC.state.seasonName(state) };
+  }
+
+  function assess(state, check, ctx) {
+    ctx = withSeason(state, ctx);
     var cap = state.captain;
     var stats = statsUsed(check);
     var dr = check.dr || 0;
@@ -168,16 +186,31 @@
 
   // Which reroll (if any) the captain can use on this check right now.
   // Once per season per source; a few sources grant two (§11.2, §5.7).
-  function availableReroll(state, check, outcome) {
+  // The mentor's Old Lessons (§25.8): a separate once-a-season reroll of a
+  // setback on the rolls he taught, while he serves aboard.
+  function mentorSource(state) {
+    var m = (state.officers || []).filter(function (o) { return o.mentor && !o.gone; })[0];
+    if (!m) return null;
+    var types = ((PC.data.creator && PC.data.creator.MENTOR_LESSONS) || {})[m.type] || [];
+    return { id: "mentor:Old Lessons", kind: "mentor",
+      mod: { name: "Old Lessons (" + m.first + ")", reroll: { types: types, perSeason: 1, on: ["setback"] } } };
+  }
+
+  function availableReroll(state, check, outcome, ctx) {
     if (outcome === "clean") return null;
+    ctx = withSeason(state, ctx);
     var used = state.rerollsUsed || {};
     var found = null;
-    captainSources(state.captain).forEach(function (src) {
+    var sources = captainSources(state.captain);
+    var ms = mentorSource(state);
+    if (ms) sources.push(ms);
+    sources.forEach(function (src) {
       if (found) return;
       var r = src.mod.reroll;
       if (!r) return;
       if (r.types && r.types.indexOf(check.type) < 0) return;
       if (r.on && r.on.indexOf(outcome) < 0) return;
+      if (!whenMatches(r.when, ctx)) return;
       var per = r.perSeason || 1;
       if ((used[src.id] || 0) >= per) return;
       found = { id: src.id, name: src.mod.name || src.id };

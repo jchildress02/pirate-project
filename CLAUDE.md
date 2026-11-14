@@ -21,3 +21,5 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 
 - Meter modifiers on checks (Dread and Standing, §11.8.5): `meterModifier()` in `js/checks.js` is a stub.
 - Social retries at DR -1 (§11.10); clocks (§11.9); approval tags are recorded on choices but not yet read by anything.
+- Modifier `note` fields (economy cuts, Gunnery, Dread and morale floors) are recorded but not applied; the systems that read them come later.
+- Captain ageing over the years: the portrait already follows `captain.age`, but nothing advances it yet.

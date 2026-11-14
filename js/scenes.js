@@ -135,7 +135,7 @@
     var p = state.current.pending;
     var ch = s.choices[p.choiceIndex];
     var o = outcomeFor(ch, p.outcome);
-    var reroll = ch.check ? PC.checks.availableReroll(state, ch.check, p.outcome) : null;
+    var reroll = ch.check ? PC.checks.availableReroll(state, ch.check, p.outcome, { conditions: s.conditions || [] }) : null;
     if (p.rerolled) reroll = null; // at most one reroll per roll
     return {
       choiceLabel: PC.text.render(ch.label, state),
@@ -184,7 +184,7 @@
     var s = sceneById(state.current.sceneId);
     var p = state.current.pending;
     var ch = s.choices[p.choiceIndex];
-    var r = PC.checks.availableReroll(state, ch.check, p.outcome);
+    var r = PC.checks.availableReroll(state, ch.check, p.outcome, { conditions: s.conditions || [] });
     if (!r || p.rerolled) throw new Error("No reroll available.");
     state.rerollsUsed[r.id] = (state.rerollsUsed[r.id] || 0) + 1;
     var res = PC.checks.resolve(state, ch.check, p.key + "|reroll", { conditions: s.conditions || [] });

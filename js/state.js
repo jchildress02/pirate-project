@@ -8,15 +8,15 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 1;
+  var SAVE_VERSION = 2;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
-  // A new game from a captain template (Milestone 0 uses a fixed test
-  // captain; the character creator replaces this in a later milestone).
+  // A new game from a starting template: the character creator's build
+  // (PC.creator.build), or the fixed test captain the engine tests use.
   function newGame(captainTemplate, opts) {
     opts = opts || {};
     var c = clone(captainTemplate);
@@ -31,8 +31,10 @@
       ship: c.ship,
       crew: c.crew,
       meters: c.meters,         // Dread, Standing, Heat — §28
-      npcs: {},                 // per-NPC deltas only (ladder rung, flags)
-      flags: {},
+      officers: c.officers || [], // the mentor first (§25); rung 0 is Neutral, 2 Friend
+      npcs: c.npcs || {},       // per-NPC deltas only (ladder rung, flags)
+      flags: c.flags || {},
+      quests: c.quests || {},   // open quests by id (the loss quest, §12.5)
       seen: {},                 // scenes finished (for "Once" scenes)
       rolls: {},                // how many times each roll point has fired
       rerollsUsed: {},          // per source, reset each season
@@ -67,7 +69,12 @@
     if (!data || typeof data !== "object") throw new Error("Not a save file.");
     if (typeof data.saveVersion !== "number") throw new Error("Not a Pirate Chronicle save file.");
     if (data.saveVersion > SAVE_VERSION) throw new Error("This save is from a newer version of the game.");
-    // (no migrations yet: version 1 is the first)
+    if (data.saveVersion === 1) {
+      // Version 2 (Milestone 1): officers, quests and the captain's portrait.
+      data.officers = data.officers || [];
+      data.quests = data.quests || {};
+      data.saveVersion = 2;
+    }
     return data;
   }
 
