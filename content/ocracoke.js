@@ -1,10 +1,9 @@
 /* Ocracoke (§17.2 and its appendix): the node record the engine reads.
  *
  * The rules are in js/node.js. The lines are the author's (S17 appendix,
- * §6 service lines and §8 short lines). The first-visit scenes and the two
- * Startup quests are Milestone 3: until then, short PLACEHOLDER beats stand
- * in for them at the right moments and give the real rewards, so the
- * economy can be played.
+ * §6 service lines and §8 short lines). The first-visit scenes, both Startup
+ * quests, Restless & Ruined and the one-armed pirate are in
+ * content/ocracoke_scenes.js.
  */
 (function () {
   "use strict";
@@ -21,6 +20,7 @@
     geezer: { first: "Geezer", last: "Flanagan", gender: "m", role: "Pirate", startRung: "Neutral", traits: ["Old Sea Dog", "Superstitious"], node: "ocracoke" },
     bobby: { first: "Bobby", last: "Rats", gender: "m", role: "Smuggler/Fence", startRung: "Neutral", traits: ["Greedy", "Fickle"], node: "ocracoke", label: "the fence" },
     davey: { first: "Davey", last: "Dell", gender: "m", role: "Pirate", startRung: "Friendly", node: "ocracoke", label: "the Raider" },
+    one_armed_pirate: { first: "The one-armed pirate", last: "", gender: "m", role: "Pirate", node: "ocracoke", label: "the one-armed pirate", scripted: true },
   };
   Object.keys(cast).forEach(function (id) { PC.data.npcs[id] = cast[id]; });
 
@@ -55,6 +55,9 @@
       ship: { name: "The Ship", blurb: "Your ship sits at anchor just off the beach." },
     },
 
+    // §17.2 The tavern keeper's rumor weights (Ocracoke's mix).
+    rumorWeights: { "Legend": 20, "Danger": 20, "World State": 15, "Node": 15, "Reputation": 10, "Quest": 10, "Merchant": 8, "Prize": 2 },
+
     // §24.7 The ruined on the docks and Amber Jack's loyalists.
     crewPool: { min: 15, max: 25, mix: { Green: 40, Seasoned: 50, Veteran: 10 } },
 
@@ -74,6 +77,9 @@
         greet: { "-1": "\"You again. What do you want?\"", "0": "\"Welcome back.\"", "1": "\"Greetings, friend. What can I do for you?\"", "2": "\"Greetings, friend. What can I do for you?\"", "3": "\"Good to see you! First drink is on me.\"" },
         refuse: "\"Absolutely not. You'd best turn around and leave.\"",
         lodgingAsk: "My crew needs lodging.",
+        askRumors: "Heard anything interesting lately?",
+        talkClean: "\"I did hear one other thing...\"",
+        outOfRumors: "\"That's all I've got for you.\"",
         lodgingBought: "\"Hope it's to your liking.\"",
         lodgingUsed: "\"Sorry, no space left.\"",
         rungUp: "\"Always good to see you.\"",
@@ -116,6 +122,7 @@
         bigHaul: "\"Hold on, hold on! Give Bobby a second to count.\"",
         capReached: "\"Bobby's got a serious case of empty pockets. Why don't you pay a visit to Bobby's old friend Declan in Edenton, or the pretty miss Maelis in Nassau?\"",
         nothing: "\"Nothing for Bobby? Too bad.\"",
+        offeredClean: "\"What is Bobby supposed to do with this? Go take it to a normal merchant.\"",
         rungUp: "\"Bobby's made another friend! Some say he's got too many.\"",
       },
       arrival: {
@@ -124,51 +131,12 @@
         captives: "You free [number] grateful captives. They give you [reward] in gratitude.",
         duePaid: "You pay the port fee to avoid any trouble.",
         dueShort: "You don't have enough gold to cover the port fee. Instead, they take [what they take] from your ship.",
-        dueWaived: "(to write) Twopenny waves off the fee you can't cover.",
-        stocks: "(to write) With nothing left to take, Twopenny's men put you in the stocks for the night.",
+        dueWaived: "Twopenny removes his hat and gives you a theatrical bow. \"Welcome back! Friends dock free here.\"",
+        stocks: "You spend a dreary night in the stocks, and are released in the morning.",
         back: "You navigate through the shoals and return to town.",
       },
     },
   };
 
-  // ---- PLACEHOLDER first-visit beats (replaced in Milestone 3) -----------
-  // They fire at the doc's moments (§17.2) and give the real rewards.
-  var P = "PLACEHOLDER (Milestone 3). ";
-  var scenes = {
-    ocr_opening: {
-      id: "ocr_opening", kind: "beat", title: "Ocracoke", where: "Ocracoke, arrival",
-      ap: 0, repeat: "once",
-      setup: P + "The sandbar, the mentor's first words and Arthur Twopenny's welcome come in the next milestone. For now [Mentor] brings [Ship Name] over the bar, and the Beach Captain's men collect the harbor due on the beach.",
-      choices: [{ id: "pay", label: "Pay Twopenny's harbor due and head up the beach.",
-        result: { text: "\"Satisfactory,\" says the young man in the oversized coat. \"Welcome to Ocracoke.\"",
-          effects: [{ gold: -25, pot: "crew" }, { ladder: { npc: "twopenny", delta: 1 } }, { flag: "ocr_opening_done" }], exit: "hub" } }],
-    },
-    ocr_underworld_stub: {
-      id: "ocr_underworld_stub", kind: "beat", title: "Welcome to the Underworld", where: "Ocracoke, Tavern",
-      ap: 1, repeat: "once",
-      setup: P + "An unusually small man in the corner waves you over. Bobby Rats has a debt he wants collected from the drunk at the bar. The full scene arrives in the next milestone; for now, the debt is collected.",
-      choices: [{ id: "done", label: "Collect the debt.",
-        result: { text: "\"You make Bobby very happy.\" Bobby lets you keep the drunk's coin purse, and tells you he buys anything the merchants won't touch.",
-          effects: [{ gold: 385 }, { ladder: { npc: "bobby", delta: 1 } }, { flag: "ocr_underworld_done" }], exit: "hub" } }],
-    },
-    ocr_dying_wish_stub: {
-      id: "ocr_dying_wish_stub", kind: "beat", title: "A Dying Pirate's Wish", where: "Ocracoke, Lilyhook's Graveyard",
-      ap: 1, repeat: "once",
-      setup: P + "As you leave the tavern, Ollie Flanagan catches you: his father Geezer wants his ivory mermaid back from the wreck of the *Miranda*. The dive and the shark arrive in later milestones; for now, the mermaid comes up on the first try.",
-      choices: [{ id: "done", label: "Dive for the mermaid.",
-        result: { text: "Old Geezer dies with the mermaid in his hands. Ollie pays you with a pouch of old coins and jewelry, and a scrap of a map with \"Ocracoke\" written on it.",
-          effects: [{ treasure: 10, dirty: false }, { item: "Lilyhook Fragment 1" }, { ladder: { npc: "ollie", delta: 1 } }, { flag: "ocr_dpw_done" }], exit: "hub" } }],
-    },
-    ocr_restless_stub: {
-      id: "ocr_restless_stub", kind: "beat", title: "Restless & Ruined", where: "Ocracoke, Docks",
-      ap: 0, repeat: "once",
-      setup: P + "On your first walk down the dock, a very large young man named Davey Dell asks to sign on. Recruiting him arrives in the next milestone, along with the rest of the scene.",
-      choices: [{ id: "done", label: "Tell him you'll talk later.",
-        result: { text: "Davey waves cheerfully and goes back to coaxing a small black monkey with a piece of hardtack.",
-          effects: [{ flag: "ocr_rr_done" }], exit: "hub" } }],
-    },
-  };
-  Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });
-
-  PC.data.start = { scene: "ocr_opening", node: "ocracoke" };
+  PC.data.start = { scene: "ocr_sandbar", node: "ocracoke" }; // the scenes are in content/ocracoke_scenes.js
 })();

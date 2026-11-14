@@ -12,6 +12,17 @@ The game saves itself in your browser after every action. **Save file** download
 
 ## Where things stand
 
+**Milestone 3: scenes and quests** (§17.2, §30, §25.7, §37.9). Ocracoke's opening is the author's real scenes now:
+
+- the first visit: the sandbar (pilot her, give the mentor the helm, or full sail), the mentor on the beach, and Arthur Twopenny's harbor due (pay, flatter, donate, refuse, or shove him into the sand), with his pointer to your first lead;
+- both Startup quests: Welcome to the Underworld (Bobby Rats's "debt") and A Dying Pirate's Wish (Ollie, Geezer, the *Miranda* and the shark). The dive itself is a stand-in until Milestone 4: the mermaid always comes up;
+- Restless & Ruined at the Docks: sign Davey Dell, pay his tab, or send him to the Tavern, where he waits in an officer seat;
+- the one-armed pirate (Variants A and C), with his price and the *Trident* lead;
+- the tavern keeper's rumors, with the Tavern Talk check, the scripted Frisian posture rumor (rolled when the world is made) and the rest of Ocracoke's prototype rumor lines; Node rumors reveal an NPC's trait;
+- Gather Intelligence, officer recruitment (two candidates a season, 1,000 crew gold, one action a visit) and Bobby's "Ask about the French" and his Underworld rumors on deals;
+- a placeholder Journal in the Ship layer: quests, leads and live rumors;
+- Developer panel: switch the loss variant, set the Frisian posture, jump to any scene.
+
 **Milestone 2: the Ocracoke shell** (§17.2, §37.8). After the creator you sail into Ocracoke:
 
 - the town screen with its five places (Tavern, Docks, Merchant, Lilyhook's Graveyard, the Ship) and the first-visit locks: only the Tavern is open until your first visit there ends;
@@ -21,7 +32,7 @@ The game saves itself in your browser after every action. **Save file** download
 - the Ship layer: the Articles (sign, loosen, never tighten), the Crew tab (Rally, Drill, Give to the crew, Make an Example, rationing), officers, cargo (jettison, open the stores) and the captain;
 - random name buttons in the creator.
 
-The first-visit scenes and the Startup quests are short PLACEHOLDER beats that fire at the right moments and pay the real rewards; Milestone 3 writes them in. Menu entries for later milestones show what's coming.
+Menu entries for later milestones show what's coming.
 
 **Milestone 1: the character creator** (§12). **New game** opens it:
 
@@ -36,7 +47,7 @@ The first-visit scenes and the Startup quests are short PLACEHOLDER beats that f
 
 **Milestone 0: the engine.** The check system, seeded dice, the scene runner, effects, pronoun tokens, seasons and actions, autosave and save files, the content checker and the Developer panel.
 
-Next: Milestone 3, Ocracoke's scenes and quests (§37.8).
+Next: Milestone 4, the minigames: the salvage dive, the drinking match and Liar's Dice (§37.8).
 
 ## Folders
 

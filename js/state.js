@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 3;
+  var SAVE_VERSION = 4;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -47,8 +47,32 @@
       settings: { showDice: false },
     };
     addMilestone2Fields(state, startNode);
+    addMilestone3Fields(state);
     return state;
   }
+
+  // Milestone 3: Frisia's posture, rolled at world creation (§8; equal odds
+  // until §8 sets weights, ruled November 14), the rumors heard, and the
+  // quest leads (§30).
+  var POSTURES = ["Distracted", "Opportunist", "Hunter"];
+  function rollPosture(seed) {
+    var r = PC.rng.fromKey(seed + "|frisian-posture");
+    return POSTURES[Math.floor(r() * POSTURES.length)];
+  }
+  function addMilestone3Fields(state) {
+    state.world.posture = state.world.posture || rollPosture(state.world.seed);
+    state.rumors = state.rumors || [];       // heard rumors, newest last (§30.12)
+    state.quests = state.quests || {};
+    state.officerVisit = state.officerVisit || null; // the Tavern visit an officer hire was paid for
+  }
+
+  // Milestone 2's placeholder beats were renamed when the real scenes came in.
+  var STUB_TO_SCENE = {
+    ocr_opening: "ocr_sandbar",
+    ocr_underworld_stub: "ocr_uw_1",
+    ocr_dying_wish_stub: "ocr_dpw_1",
+    ocr_restless_stub: "ocr_rr_1",
+  };
 
   // Milestone 2: the node, the hold, the ship's upgrades, the crew's tiers,
   // the Articles and the persistent Minors (§17, §21.6, §24, §26, §36).
@@ -85,6 +109,14 @@
   function seasonName(state) { return SEASONS[state.time.season]; }
 
   function advanceSeason(state) {
+    // Temporary tags that last "until the end of the season" lapse (§5.3).
+    var until = (state.captain && state.captain.tagsUntil) || {};
+    Object.keys(until).forEach(function (t) {
+      if (until[t] !== stamp(state)) return;
+      var i = state.captain.tags.indexOf(t);
+      if (i >= 0) state.captain.tags.splice(i, 1);
+      delete until[t];
+    });
     state.time.season += 1;
     if (state.time.season >= SEASONS.length) { state.time.season = 0; state.time.year += 1; }
     state.ap.left = state.ap.max;
@@ -121,6 +153,15 @@
       if (data.location) data.current = { screen: "scene", sceneId: PC.data.start.scene, phase: "choosing" };
       data.saveVersion = 3;
     }
+    if (data.saveVersion === 3) {
+      // Version 4 (Milestone 3): the real opening scenes. A captain who already
+      // played a placeholder beat keeps what it paid; one standing in front
+      // of a placeholder plays the real scene instead.
+      addMilestone3Fields(data);
+      if (data.current && STUB_TO_SCENE[data.current.sceneId]) data.current = { screen: "scene", sceneId: STUB_TO_SCENE[data.current.sceneId], phase: "choosing" };
+      if (data.location && data.location.queue) data.location.queue = data.location.queue.map(function (q) { return STUB_TO_SCENE[q] || q; });
+      data.saveVersion = 4;
+    }
     return data;
   }
 
@@ -146,6 +187,8 @@
   PC.state = {
     SAVE_VERSION: SAVE_VERSION,
     SEASONS: SEASONS,
+    POSTURES: POSTURES,
+    rollPosture: rollPosture,
     newGame: newGame,
     seasonName: seasonName,
     stamp: stamp,

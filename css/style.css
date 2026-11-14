@@ -225,3 +225,10 @@ button.big { font-size: 1.15em; padding: 0.6em 1.6em; }
   .grid th:nth-child(2), .grid td:nth-child(2) { white-space: nowrap; }
   .opts { grid-template-columns: 1fr; }
 }
+
+/* Milestone 3: rumors heard, officer candidates */
+.say .heard { font-style: normal; margin: 0.5em 0 0.2em 1em; padding: 0; }
+.say .heard li { margin: 0.3em 0; }
+.candidate { border-top: 1px solid #e3dccb; padding-top: 0.5em; margin-top: 0.5em; }
+.candidate p { margin: 0.3em 0; }
+.notice { color: #8a4b00; }

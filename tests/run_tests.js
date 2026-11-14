@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/validate.js", "js/creator.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -147,7 +147,7 @@ test("reloading before a choice gives the same roll", function () {
 console.log("Scenes");
 
 test("content passes the content check", function () {
-  var v = PC.validate(fresh());
+  var v = PC.validate(PC.state.newGame(PC.data.testCaptain, { seed: "content-check" }));
   eq(v.errors, []);
 });
 
@@ -299,9 +299,9 @@ test("a version 2 (Milestone 1) save restarts at Ocracoke's arrival with its cap
   delete old.world.names; delete old.ship.upgrades; delete old.crew.tiers;
   old.money.crew = 777;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 3);
+  eq(back.saveVersion, 4);
   eq(back.location.node, "ocracoke");
-  eq(back.current.sceneId, "ocr_opening");
+  eq(back.current.sceneId, "ocr_sandbar");
   eq(back.money.crew, 777);
   eq(back.crew.tiers.Green, 12);
   ok(back.generated.ocr_keeper && back.generated.ocr_provisioner && back.generated.ocr_shipwright, "slots filled");
@@ -557,12 +557,43 @@ test("every ship class has its woodcut (§21.2)", function () {
 console.log("Names and Minor NPCs (§36, §15)");
 
 function ocr(seed) { return PC.state.newGame(PC.data.testCaptain, { seed: seed || "ocr-seed" }); }
-function playOpening(s) { PC.scenes.choose(s, 0); PC.scenes.commit(s); }
+// Play scenes until the captain is back in the town menus. `prefs` names
+// choice ids to take when they're open; otherwise the first open choice that
+// moves on (not an information step). Gold gained goes to the crew.
+function choiceIndex(s, id) {
+  var sc = PC.scenes.sceneById(s.current.sceneId);
+  for (var i = 0; i < sc.choices.length; i++) if (sc.choices[i].id === id) return i;
+  return -1;
+}
+function play(s, prefs, limit) {
+  prefs = prefs || [];
+  for (var n = 0; n < (limit || 200) && s.current.screen === "scene"; n++) {
+    var v = PC.scenes.viewScene(s);
+    var sc = PC.scenes.sceneById(s.current.sceneId);
+    var open = v.choices.filter(function (c) { return c.status === "open"; });
+    var pick = null;
+    prefs.some(function (id) { var i = choiceIndex(s, id); return open.some(function (c) { if (c.index === i) { pick = c; return true; } return false; }); });
+    if (!pick) pick = open.filter(function (c) { var ch = sc.choices[c.index]; return !ch.info; })[0];
+    if (!pick) throw new Error("stuck in " + sc.id);
+    PC.scenes.choose(s, pick.index);
+    PC.scenes.commit(s, "crew");
+  }
+  return s;
+}
+function pickIn(s, id) { PC.scenes.choose(s, choiceIndex(s, id)); PC.scenes.commit(s, "crew"); }
+// The opening by the plainest road (the mentor at the helm, "just passing
+// through", pay the fee). The economy tests start from the starting package,
+// so the sandbar's knocks are put back.
+function playOpening(s) {
+  play(s, ["mentor", "passing", "pay"]);
+  s.ship.hull = 14; s.crew.morale = 50; s.provisions = 10;
+  s.location.place = null; // back out on the beach, before the Tavern
+}
 
 test("a new game starts at Ocracoke with three persistent Minors named", function () {
   var s = ocr();
   eq(s.location.node, "ocracoke");
-  eq(s.current.sceneId, "ocr_opening");
+  eq(s.current.sceneId, "ocr_sandbar");
   ["ocr_keeper", "ocr_shipwright", "ocr_provisioner"].forEach(function (id) {
     var g = s.generated[id];
     ok(g && g.first && g.full, id + " named");
@@ -672,13 +703,15 @@ test("pronoun tokens work for generated Minors by slot name ({keeper.he})", func
 
 console.log("Ocracoke (§17.2)");
 
-test("the opening placeholder collects the 25 harbor due and Twopenny goes Wary to Neutral", function () {
+test("the opening: the sandbar, the mentor, Twopenny's 25 harbor due, Wary to Neutral, then the Tavern", function () {
   var s = ocr();
   eq(PC.npcs.get(s, "twopenny").rungName, "Wary");
-  playOpening(s);
+  play(s, ["mentor", "passing", "pay"]);
   eq(s.money.crew, 575);
   eq(PC.npcs.get(s, "twopenny").rungName, "Neutral");
   eq(s.current.screen, "node");
+  eq(s.location.place, "tavern");
+  ok(s.flags.ocr_opening_done, "opening done");
 });
 
 test("first visit: only the Tavern and the Ship are open; lodging is locked", function () {
@@ -690,22 +723,27 @@ test("first visit: only the Tavern and the Ship are open; lodging is locked", fu
   eq(PC.node.lodgingCheck(s, 1).ok, false);
 });
 
-test("the first Tavern action fires Welcome to the Underworld; leaving fires A Dying Pirate's Wish", function () {
+test("the first Tavern action (asking for rumors) fires Welcome to the Underworld; leaving fires A Dying Pirate's Wish", function () {
   var s = ocr(); playOpening(s);
   PC.node.enter(s, "tavern");
-  var r = PC.node.talkToKeeper(s);
-  ok(r.line.indexOf("Welcome in") >= 0, "first meeting line");
+  var r = PC.rumors.askKeeper(s);
+  ok(r.rumors.length >= 1, "at least one rumor");
+  eq(PC.node.nextQueued(s), "ocr_uw_1");
+  PC.scenes.enterScene(s, "ocr_uw_1");
+  play(s, ["coin", "collect", "knock_out", "on"]);
+  eq(s.current.screen, "node");
   var next = PC.node.leave(s);
-  eq(next, "ocr_underworld_stub");
+  eq(next, "ocr_dpw_1");
   PC.scenes.enterScene(s, next);
-  PC.scenes.choose(s, 0); PC.scenes.commit(s, "crew");
-  eq(s.current.sceneId, "ocr_dying_wish_stub");
-  PC.scenes.choose(s, 0); PC.scenes.commit(s);
+  play(s, ["on", "dive", "swim", "alright"]);
   eq(s.current.screen, "node");
   eq(s.money.crew, 575 + 385);
   eq(s.cargo.treasure.clean, 10);
   eq(s.ap.left, 5);
   eq(PC.npcs.get(s, "bobby").rungName, "Friendly");
+  eq(PC.npcs.get(s, "ollie").rungName, "Friendly");
+  ok(PC.npcs.get(s, "geezer").dead, "Geezer dies");
+  ok(s.captain.items.indexOf("Lilyhook Fragment 1") >= 0, "the fragment");
   var p = {}; PC.node.places(s).forEach(function (x) { p[x.id] = x; });
   ok(!p.docks.locked && !p.merchant.locked && !p.graveyard.locked);
 });
@@ -713,15 +751,16 @@ test("the first Tavern action fires Welcome to the Underworld; leaving fires A D
 test("leaving the Tavern without doing anything fires both, Underworld first", function () {
   var s = ocr(); playOpening(s);
   PC.node.enter(s, "tavern");
-  eq(PC.node.leave(s), "ocr_underworld_stub");
-  eq(s.location.queue, ["ocr_dying_wish_stub"]);
+  eq(PC.node.leave(s), "ocr_uw_1");
+  eq(s.location.queue, ["ocr_dpw_1"]);
 });
 
 function opened(seed) {
   var s = ocr(seed); playOpening(s);
-  PC.node.enter(s, "tavern"); PC.node.leave(s);
-  PC.scenes.enterScene(s, "ocr_underworld_stub"); PC.scenes.choose(s, 0); PC.scenes.commit(s, "crew");
-  PC.scenes.choose(s, 0); PC.scenes.commit(s);
+  PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, PC.node.leave(s));
+  play(s, ["coin", "collect", "knock_out", "on", "dive", "swim", "alright"]);
+  s.captain.tags = s.captain.tags.filter(function (t) { return t !== "Wounded"; });
   return s;
 }
 
@@ -883,6 +922,337 @@ test("a Rival shipwright won't serve; Service Level cuts his prices", function (
   s.npcs.ocr_shipwright.rung = -2;
   ok(PC.node.shipwrightGreeting(s).refuse);
   eq(PC.node.repair(s, 1).line, PC.data.nodes.ocracoke.lines.shipwright.refuse);
+});
+
+console.log("Milestone 3: scenes and quests (§17.2, §30, §25.7)");
+
+// Force every check to one outcome while fn runs (the dice are seeded, so
+// tests that need a particular branch say so).
+function forced(outcome, fn) {
+  var real = PC.checks.resolve;
+  var totals = { clean: 12, partial: 7, setback: 2 };
+  PC.checks.resolve = function (state, check, key, ctx) {
+    var a = PC.checks.assess(state, check, ctx);
+    return { assessment: a, dice: [1, 1], total: totals[outcome], outcome: outcome, key: key };
+  };
+  try { return fn(); } finally { PC.checks.resolve = real; }
+}
+function withLoss(s, v) {
+  var L = PC.data.creator.LOSSES;
+  s.captain.tags = s.captain.tags.filter(function (t) { return !L.some(function (l) { return l.tag === t; }); });
+  s.captain.loss = v;
+  s.captain.tags.push(L.filter(function (l) { return l.id === v; })[0].tag);
+  return s;
+}
+function visibleIds(s) {
+  var sc = PC.scenes.sceneById(s.current.sceneId);
+  return PC.scenes.viewScene(s).choices.map(function (c) { return sc.choices[c.index].id + (c.status === "locked" ? "(locked)" : ""); });
+}
+
+test("the opening plays the real scenes in order: sandbar, mentor, Twopenny, the Tavern", function () {
+  var s = ocr();
+  eq(s.current.sceneId, "ocr_sandbar");
+  forced("partial", function () { pickIn(s, "pilot"); });
+  eq(s.ship.hull, 13);
+  eq(s.current.sceneId, "ocr_mentor");
+  ok(PC.scenes.viewScene(s).setup.indexOf("barely pay you any mind") >= 0, "no flag: the plain line");
+  ok(PC.scenes.viewScene(s).setup.indexOf("your brother") >= 0, "[Loss Target] for Variant A");
+  pickIn(s, "on");
+  eq(s.current.sceneId, "ocr_twopenny_1");
+});
+
+test("the sandbar: a wreck sets bar_wrecked, colors the mentor and Twopenny, and makes Intimidate DR 3", function () {
+  var s = ocr();
+  forced("setback", function () { pickIn(s, "full_sail"); });
+  eq([s.ship.hull, s.provisions, s.crew.morale], [9, 8, 45]);
+  ok(s.flags.bar_wrecked);
+  ok(PC.scenes.viewScene(s).setup.indexOf("snicker") >= 0);
+  ok(PC.scenes.viewScene(s).setup.indexOf("Especially since she's just taken a beating.") >= 0);
+  pickIn(s, "on");
+  ok(PC.scenes.viewScene(s).setup.indexOf("Clumsy on the approach") >= 0);
+  pickIn(s, "passing");
+  var ids = visibleIds(s);
+  ok(ids.indexOf("refuse_wrecked") >= 0 && ids.indexOf("refuse") < 0, ids.join());
+});
+
+test("a Reckless captain's full sail is DR 3 (the temptation), and Distrustful relabels the helm choice", function () {
+  var s = ocr(); s.captain.flaws = ["Reckless"];
+  var ids = visibleIds(s);
+  ok(ids.indexOf("full_sail_tempted") >= 0 && ids.indexOf("full_sail") < 0);
+  s.captain.flaws = ["Distrustful"];
+  ok(PC.scenes.viewScene(s).choices[1].label.indexOf("Reluctantly") === 0);
+});
+
+test("Twopenny: telling him your loss earns the pointer, by variant", function () {
+  ["A", "B", "C"].forEach(function (v) {
+    var s = withLoss(ocr(), v);
+    forced("clean", function () { pickIn(s, "pilot"); });
+    pickIn(s, "on");
+    ok(PC.scenes.viewScene(s).choices[0].label.indexOf(v === "A" ? "my brother" : v === "B" ? "jewels" : "someone") >= 0, v);
+    pickIn(s, "loss"); pickIn(s, "pay");
+    eq(s.current.sceneId, "ocr_twopenny_pointer");
+    var t = PC.scenes.viewScene(s).setup;
+    ok(t.indexOf(v === "B" ? "Bobby Rats" : "one-armed pirate") >= 0, v + ": " + t);
+  });
+});
+
+test("Twopenny: information steps return to the fee menu with the answer showing", function () {
+  var s = ocr(); forced("clean", function () { pickIn(s, "pilot"); }); pickIn(s, "on"); pickIn(s, "passing");
+  pickIn(s, "who");
+  eq(s.current.sceneId, "ocr_twopenny_fee");
+  ok(PC.scenes.viewScene(s).setup.indexOf("They call me Arthur Twopenny") >= 0);
+  pickIn(s, "pay");
+  eq(s.current.sceneId, "ocr_twopenny_exit");
+});
+
+test("Twopenny: flattery waives the fee and makes him Friendly; mocking him blocks flattery and any rise", function () {
+  var s = ocr(); forced("clean", function () { pickIn(s, "pilot"); }); pickIn(s, "on"); pickIn(s, "passing");
+  forced("clean", function () { pickIn(s, "flatter"); });
+  eq(s.money.crew, 600);
+  eq(PC.npcs.get(s, "twopenny").rungName, "Friendly");
+  var t = ocr(); forced("clean", function () { pickIn(t, "pilot"); }); pickIn(t, "on"); pickIn(t, "passing");
+  pickIn(t, "small");
+  ok(visibleIds(t).indexOf("flatter(locked)") >= 0, visibleIds(t).join());
+  pickIn(t, "donate");
+  eq(t.money.crew, 550);
+  eq(PC.npcs.get(t, "twopenny").rungName, "Wary");
+});
+
+test("Twopenny: a flattery partial gives the 10-gold discount", function () {
+  var s = ocr(); forced("clean", function () { pickIn(s, "pilot"); }); pickIn(s, "on"); pickIn(s, "passing");
+  forced("partial", function () { pickIn(s, "flatter"); });
+  ok(visibleIds(s).indexOf("pay_discount") >= 0 && visibleIds(s).indexOf("pay") < 0);
+  pickIn(s, "pay_discount");
+  eq(s.money.crew, 590);
+  eq(PC.npcs.get(s, "twopenny").rungName, "Neutral");
+});
+
+test("Twopenny: refuse, then the shove: clean humiliates him (Rival); setback costs 25 and he wins", function () {
+  var s = ocr(); forced("clean", function () { pickIn(s, "pilot"); }); pickIn(s, "on"); pickIn(s, "passing");
+  forced("partial", function () { pickIn(s, "refuse"); });
+  eq(s.current.sceneId, "ocr_twopenny_partial");
+  ok(PC.scenes.viewScene(s).setup.indexOf("Ten gold pieces") >= 0, "the line carries over");
+  forced("clean", function () { pickIn(s, "shove"); });
+  eq(PC.npcs.get(s, "twopenny").rungName, "Rival");
+  ok(s.flags.tp_humiliated);
+  eq(s.current.sceneId, "ocr_twopenny_exit");
+  var t = ocr(); forced("clean", function () { pickIn(t, "pilot"); }); pickIn(t, "on"); pickIn(t, "passing");
+  forced("setback", function () { pickIn(t, "refuse"); });
+  forced("setback", function () { pickIn(t, "shove"); });
+  eq(t.money.crew, 575);
+  ok(t.flags.tp_beat_you);
+});
+
+test("the opening's exit walks the captain into the Tavern; the one-armed pirate sits there for A and C only", function () {
+  var s = ocr(); play(s, ["mentor", "passing", "pay"]);
+  eq(s.location.place, "tavern");
+  ok(PC.node.oneArmedHere(s));
+  ok(!PC.node.oneArmedHere(withLoss(ocr(), "B")));
+});
+
+test("the one-armed pirate: 30 to pay, Haggle partial 15, a setback 60, last result wins; the lead goes in the journal", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, "ocr_oap");
+  ok(visibleIds(s).indexOf("pay_30") >= 0);
+  forced("setback", function () { pickIn(s, "threaten"); });
+  ok(visibleIds(s).indexOf("pay_60") >= 0 && visibleIds(s).indexOf("threaten(locked)") >= 0, visibleIds(s).join());
+  forced("partial", function () { pickIn(s, "haggle"); });
+  ok(visibleIds(s).indexOf("pay_15") >= 0 && visibleIds(s).indexOf("pay_60") < 0, visibleIds(s).join());
+  pickIn(s, "pay_15");
+  eq(s.money.crew, 560);
+  eq(s.current.sceneId, "ocr_oap_lead");
+  ok(PC.scenes.viewScene(s).setup.indexOf("chained to the mast") >= 0);
+  pickIn(s, "on");
+  ok(PC.quests.hasLead(s, "what_was_lost", "trident"));
+  ok(!PC.node.oneArmedHere(s), "he's gone once heard");
+  var j = PC.quests.journal(s)[0];
+  eq([j.leads, j.beyond], [1, "The trail leads beyond Ocracoke."]);
+});
+
+test("talking to the one-armed pirate first fires Welcome to the Underworld after", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  PC.node.tavernActionDone(s);
+  PC.scenes.enterScene(s, "ocr_oap");
+  pickIn(s, "pay_30"); pickIn(s, "on");
+  eq(s.current.sceneId, "ocr_uw_1");
+});
+
+test("Welcome to the Underworld: failed approaches grey out; Brawling repeats with \"again\"; Variant B's lead", function () {
+  var s = withLoss(ocr(), "B"); playOpening(s); PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, "ocr_uw_1");
+  ok(visibleIds(s).indexOf("jewels") >= 0, "B can ask about the jewels");
+  pickIn(s, "coin"); pickIn(s, "collect");
+  forced("partial", function () { pickIn(s, "intimidate"); });
+  ok(visibleIds(s).indexOf("intimidate(locked)") >= 0);
+  forced("setback", function () { PC.scenes.choose(s, choiceIndex(s, "knock_out")); });
+  ok(PC.scenes.viewScene(s).result.text.indexOf("far wall.") >= 0);
+  PC.scenes.commit(s);
+  forced("setback", function () { PC.scenes.choose(s, choiceIndex(s, "knock_out")); });
+  ok(PC.scenes.viewScene(s).result.text.indexOf("far wall again.") >= 0);
+  PC.scenes.commit(s);
+  forced("partial", function () { pickIn(s, "knock_out"); });
+  ok(PC.scenes.test(s, { seasonFlag: "keeper_annoyed" }), "the keeper is annoyed this season");
+  eq(s.current.sceneId, "ocr_uw_reward");
+  ok(PC.scenes.viewScene(s).setup.indexOf("very tall man") >= 0);
+  PC.scenes.choose(s, 0);
+  ok(PC.scenes.viewScene(s).result.needsPot, "purse or crew");
+  PC.scenes.commit(s, "purse");
+  eq(s.money.purse, 385);
+  ok(PC.quests.hasLead(s, "what_was_lost", "bald_man"));
+  ok(PC.node.fenceOpen(s));
+  eq(PC.rumors.talkCheck(s).dr, PC.rumors.talkCheck(ocr()).dr + 1);
+});
+
+test("A Dying Pirate's Wish: the stand-in dive costs 1 action; a shark setback is Wounded until the season ends", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, "ocr_dpw_1");
+  play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him"], 7);
+  eq(s.current.sceneId, "ocr_dpw_dive");
+  eq(s.ap.left, 6);
+  pickIn(s, "dive");
+  forced("setback", function () { pickIn(s, "swim"); });
+  ok(s.captain.tags.indexOf("Wounded") >= 0);
+  ok(PC.scenes.viewScene(s).setup.indexOf("bandage you up") >= 0);
+  eq(PC.checks.assess(s, { type: "Brawling", dr: 2 }).parts.some(function (p) { return p.label === "Wounded"; }), true);
+  play(s, ["close", "found", "era", "alright", "on"]);
+  ok(s.flags.ocr_dpw_done);
+  PC.state.advanceSeason(s);
+  ok(s.captain.tags.indexOf("Wounded") < 0, "gone by Summer");
+});
+
+test("A Dying Pirate's Wish: killing the shark gives the necklace, Dread +3 and the Reputation rumor", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, "ocr_dpw_1");
+  play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him", "dive"], 8);
+  forced("clean", function () { pickIn(s, "knife"); });
+  eq(s.meters.dread, 3);
+  ok(s.captain.items.indexOf("Shark-Tooth Necklace") >= 0);
+  ok(PC.rumors.candidatesOf(s, "Reputation").some(function (c) { return c.line.id === "rep_shark_killed"; }));
+});
+
+test("Restless & Ruined: a clean Persuade signs Davey free as Raider, and he walks you to the shipwright", function () {
+  var s = opened(); PC.node.enter(s, "docks");
+  eq(s.current.screen, "node");
+  s = opened(); var fire = PC.node.enter(s, "docks"); PC.scenes.enterScene(s, fire);
+  pickIn(s, "who");
+  forced("clean", function () { pickIn(s, "join"); });
+  eq(s.current.sceneId, "ocr_rr_recruited");
+  var t = PC.scenes.viewScene(s).setup;
+  ok(t.indexOf("goodbye to the monkeys") >= 0 && t.indexOf("Shipwright") >= 0, t);
+  pickIn(s, "on");
+  var d = s.officers.filter(function (o) { return o.id === "davey"; })[0];
+  eq([d.type, PC.npcs.rungName(d.rung), s.location.place], ["Raider", "Friendly", "docks"]);
+});
+
+test("Restless & Ruined: a partial costs 150 for his tab; a Raider mentor makes Davey a Gunner", function () {
+  var s = opened(); s.officers.push({ id: "mentor", mentor: true, first: "Gideon", last: "", type: "Raider", voice: "Old Salt", secondary: "Eager", rung: 2 });
+  var crew = s.money.crew;
+  PC.scenes.enterScene(s, PC.node.enter(s, "docks"));
+  pickIn(s, "who");
+  forced("partial", function () { pickIn(s, "join"); });
+  pickIn(s, "pay");
+  ok(PC.scenes.viewScene(s).setup.indexOf("pay my tab") >= 0);
+  pickIn(s, "on");
+  eq(s.money.crew, crew - 150);
+  eq(s.officers.filter(function (o) { return o.id === "davey"; })[0].type, "Gunner");
+});
+
+test("Restless & Ruined: a setback sends Davey to the Tavern, where he takes an officer seat for good", function () {
+  var s = opened(); PC.scenes.enterScene(s, PC.node.enter(s, "docks"));
+  pickIn(s, "who");
+  forced("setback", function () { pickIn(s, "join"); });
+  ok(s.flags.davey_at_tavern);
+  PC.node.leave(s); PC.node.enter(s, "tavern");
+  var c = PC.officers.candidates(s);
+  eq(c.length, 2);
+  eq(c[1].id, "davey");
+  ok(PC.officers.hiringText(s, c[1]).indexOf("peeling paint chips") >= 0);
+});
+
+test("officer recruitment: two seeded candidates; 1,000 each; one action a visit; a held type is replaced", function () {
+  var s = opened(); PC.node.enter(s, "tavern");
+  var c = PC.officers.candidates(s);
+  eq(c.length, 2);
+  eq(JSON.stringify(PC.officers.candidates(opened())), JSON.stringify(c), "same world, same candidates");
+  c.forEach(function (x) {
+    ok(x.voice && x.secondary && x.voice !== x.secondary, "two traits");
+    ok(PC.officers.hiringText(s, x).indexOf(x.first + " looks up as you reach " + (x.gender === "f" ? "her" : "his") + " table, and") === 0, PC.officers.hiringText(s, x));
+  });
+  s.money.crew = 5000;
+  var ap = s.ap.left;
+  var r = PC.officers.hire(s, c[0].id);
+  eq([s.money.crew, s.ap.left], [4000, ap - 1]);
+  ok(r.mentorLine === null, "no mentor aboard the test captain");
+  var second = PC.officers.candidates(s)[0];
+  eq(PC.officers.apNeeded(s), 0, "the same visit");
+  second.type = c[0].type; // make it a held type
+  var r2 = PC.officers.hire(s, second.id);
+  ok(r2.replaced && r2.replaced.officer.id === c[0].id, "replaced");
+  ok(r2.replaced.pay >= 75);
+  eq(s.ap.left, ap - 1);
+  eq(PC.officers.aboard(s).length, 1);
+});
+
+test("rumors: the first in Spring 1754 is the scripted posture line; once a season; never repeated while live", function () {
+  ["Distracted", "Opportunist", "Hunter"].forEach(function (p) {
+    var s = ocr("posture-" + p); s.world.posture = p; playOpening(s); PC.node.enter(s, "tavern");
+    var r = PC.rumors.askKeeper(s);
+    eq(r.rumors[0].id, "posture_scripted_" + p.toLowerCase());
+    eq(PC.rumors.askKeeper(s).rumors.length, 0);
+    var ids = s.rumors.map(function (x) { return x.id; });
+    eq(ids.length, new Set(ids).size, "no repeats");
+  });
+});
+
+test("the posture is rolled at world creation from the seed, about evenly", function () {
+  var n = { Distracted: 0, Opportunist: 0, Hunter: 0 };
+  for (var i = 0; i < 300; i++) n[PC.state.rollPosture("w" + i)]++;
+  ok(n.Distracted > 70 && n.Opportunist > 70 && n.Hunter > 70, JSON.stringify(n));
+  eq(ocr("same").world.posture, ocr("same").world.posture);
+});
+
+test("Node rumors reveal a trait; [NPC] reads as the role until you've met them", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  var c = PC.rumors.candidatesOf(s, "Node");
+  ok(c.length > 3);
+  var bob = c.filter(function (x) { return x.extra.npc === "bobby"; })[0];
+  ok(PC.rumors.render(s, bob.line, bob.ctx).indexOf("The fence") >= 0, PC.rumors.render(s, bob.line, bob.ctx));
+  s.npcs.bobby = { met: true };
+  ok(PC.rumors.render(s, bob.line, bob.ctx).indexOf("Bobby Rats, the fence") >= 0);
+});
+
+test("Gather Intelligence: 1 action; clean gives the one-armed pirate's lead (A) and a pick; setback marks the questions", function () {
+  var s = opened(); PC.node.enter(s, "tavern");
+  var ap = s.ap.left;
+  var r = forced("clean", function () { return PC.rumors.gather(s); });
+  eq(s.ap.left, ap - 1);
+  ok(r.lead && PC.quests.hasLead(s, "what_was_lost", "trident"));
+  ok(r.pick.length > 0);
+  var got = PC.rumors.gatherPick(s, "Legend");
+  eq(got.type, "Legend");
+  forced("setback", function () { PC.rumors.gather(s); });
+  ok(PC.rumors.candidatesOf(s, "Reputation")[0].line.id === "rep_asking");
+});
+
+test("Bobby: Ask about the French records a Hidden Haven lead; selling to him can bring an Underworld rumor", function () {
+  var s = opened(); PC.node.enter(s, "merchant");
+  PC.rumors.askFrench(s);
+  ok(PC.quests.hasLead(s, "hidden_haven", "bobby_french"));
+  s.npcs.bobby.rung = 3; // Confidant: 50% a deal
+  s.cargo.treasure.dirty = 20;
+  var got = 0;
+  for (var i = 0; i < 20; i++) { var r = PC.node.sell(s, "fence", "treasure", 1); if (r.rumor) got++; }
+  ok(got >= 1 && got <= 2, "two lines, each once: " + got);
+});
+
+test("a version 3 save standing in front of a placeholder plays the real scene", function () {
+  var s = ocr(); var old = JSON.parse(PC.state.serialize(s));
+  old.saveVersion = 3; delete old.world.posture; delete old.rumors;
+  old.current = { screen: "scene", sceneId: "ocr_underworld_stub", phase: "choosing" };
+  old.location.queue = ["ocr_dying_wish_stub"];
+  var back = PC.state.deserialize(JSON.stringify(old));
+  eq([back.saveVersion, back.current.sceneId, back.location.queue[0]], [4, "ocr_uw_1", "ocr_dpw_1"]);
+  ok(PC.state.POSTURES.indexOf(back.world.posture) >= 0);
 });
 
 console.log("The Ship layer (§17.1, §24, §26)");

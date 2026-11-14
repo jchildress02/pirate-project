@@ -30,13 +30,16 @@
     mr: ["Mr.", "Missus"], // Davey's "Mr. Shipwright" / "Missus Shipwright" (ruled)
   };
 
+  var LOSS_TARGET = { A: "your brother", B: "your family jewels", C: "the man who shot you", D: "that treacherous official" };
+
   function capFirst(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
   function person(state, who) {
     who = who.toLowerCase();
     if (who === "mentor") {
       var m = (state.officers || []).filter(function (o) { return o.mentor && !o.gone; })[0];
-      return m ? { first: m.first, last: m.last || "", gender: m.gender || "m" } : null;
+      // No mentor (the test captain): a plain fallback, so his lines still read.
+      return m ? { first: m.first, last: m.last || "", gender: m.gender || "m" } : { first: "your mentor", last: "", gender: "m" };
     }
     if (who === "captain") {
       var c = state.captain;
@@ -78,6 +81,8 @@
     var mentor = person(state, "mentor");
     s = s.replace(/\[Mentor\]/g, mentor ? mentor.first : "your mentor");
     s = s.replace(/\[Home City\]/g, state.captain.homeCity || "your home");
+    // [Loss Target] by loss variant (S17 appendix, the mentor beat).
+    s = s.replace(/\[Loss Target\]/g, LOSS_TARGET[state.captain.loss] || "what you lost");
     return s;
   }
 
