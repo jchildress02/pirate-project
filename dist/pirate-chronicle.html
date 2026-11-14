@@ -5052,7 +5052,10 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     var c = PC.node.tavernServiceCheck(state, 1);
     if (!c.ok) return c;
     if (!D().pools[id]) return { ok: false, why: "No one's gambling here" };
-    if (state.money.purse < stakes(state)[0]) return { ok: false, why: "Stakes come from your purse (" + stakes(state)[0] + " gold at least)" };
+    // Stakes come from the purse, never crew gold (§18.1): say so plainly,
+    // since gold often goes to the crew at the purse-or-crew choice.
+    var min = stakes(state)[0];
+    if (state.money.purse < min) return { ok: false, why: "Your purse holds " + state.money.purse + " gold. Stakes come from your own purse, not the crew's gold, and the table here starts at " + min + ". (Rewards that offer \"Into your purse\" fill it.)" };
     return { ok: true };
   }
 
