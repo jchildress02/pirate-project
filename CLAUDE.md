@@ -11,6 +11,12 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 - **Every roll goes through a seeded key** (`PC.rng`). Never use `Math.random()` for game results.
 - **Saves:** bump `SAVE_VERSION` in `js/state.js` and add a migration step whenever the save shape changes.
 
+## Branches and pull requests
+
+- **Work on a branch, never push to main.** Every milestone or fix starts on its own branch from main (for example `milestone-3-scenes-quests`) and ends with a pull request. Claude never merges: the author reviews and merges.
+- **Defaults first.** Where the docs leave something OPEN and the build picks a default (§37.11), the PR description starts with a "Defaults I chose" list, one line each with the § it touches, so the review starts with the decisions that need a ruling.
+- **Keep PRs focused.** Unrelated fixes go on their own branch and PR, even in the same run.
+
 ## Before pushing
 
 1. `node tests/run_tests.js` — all pass.
