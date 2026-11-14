@@ -9823,7 +9823,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
 
   // ---- Liar's Dice (§18.3) -------------------------------------------------------
   var dice = {
-    DICE: 3,                  // each (placeholder; the classic game uses five)
+    DICE: 5,                  // each, the classic game (ruled November 14; §18.3 had 3 as the placeholder)
     GAMES_PER_SESSION: 5,
     STAKES: { "Very poor": [25, 50], "Poor": [25, 100], "Modest": [50, 150], "Wealthy": [50, 200] },
     SIZE_CHECK: { type: "Cards & Dice", dr: 3 },
@@ -9832,12 +9832,13 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     MARKS_TO_CATCH: 2,
     CARD_SHARP_AT: 500,       // DEFAULT: gross winnings at Liar's Dice (threshold OPEN, §18.3)
     // How the opponent plays, by trait (§18.3): call when the bid is less
-    // likely than this; bold players raise past the minimum.
+    // likely than this; bold players raise past the minimum. Loosened a
+    // touch with five dice (November 14), so he doesn't play the exact odds.
     PLAY: {
-      base: { callBelow: 0.45 },
-      "Reckless": { callBelow: 0.3, bold: true }, "Fearless": { callBelow: 0.3, bold: true }, "Proud": { callBelow: 0.3, bold: true },
-      "Timid": { callBelow: 0.6 }, "Suspicious": { callBelow: 0.6 }, "Gullible": { callBelow: 0.15 },
-      "Cool-Headed": { callBelow: 0.5 }, "Gambler": { callBelow: 0.45, chases: true, checkDr: -1 },
+      base: { callBelow: 0.38 },
+      "Reckless": { callBelow: 0.25, bold: true }, "Fearless": { callBelow: 0.25, bold: true }, "Proud": { callBelow: 0.25, bold: true },
+      "Timid": { callBelow: 0.52 }, "Suspicious": { callBelow: 0.52 }, "Gullible": { callBelow: 0.12 },
+      "Cool-Headed": { callBelow: 0.45 }, "Gambler": { callBelow: 0.38, chases: true, checkDr: -1 },
       "Inscrutable": { sizeDr: 1 }, "Candid": { sizeDr: -1 },
     },
     pools: { ocracoke: { role: "Dockhand/Laborer" } },

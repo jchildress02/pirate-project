@@ -1664,7 +1664,7 @@ test("Liar's Dice: stakes 25-50 from the purse at Ocracoke, an action a sitting"
   ok(threw, "over the table limit");
   PC.liarsdice.newGame(s, 30);
   eq(s.money.purse, 170);
-  eq(s.minigame.round.mine.length, 3);
+  eq(s.minigame.round.mine.length, PC.data.minigames.dice.DICE);
 });
 
 test("Liar's Dice: a raise bids more dice, or the same number of a higher face", function () {
@@ -1678,7 +1678,7 @@ test("Liar's Dice: a call the count meets costs the caller a die; the last with 
   var s = at(inTown(), "tavern"); s.money.purse = 200;
   PC.liarsdice.start(s); PC.liarsdice.newGame(s, 50);
   var g = s.minigame.round;
-  g.mine = [6, 6, 6]; g.his = [1, 2, 3];
+  g.mine = [6, 6, 6]; g.his = [1, 2, 3]; g.myN = 3; g.hisN = 3;
   g.turn = "me"; g.bid = { q: 4, f: 6, by: "him" };
   PC.liarsdice.callLiar(s); // only three sixes: his bid was a lie
   eq(g.hisN, 2);
