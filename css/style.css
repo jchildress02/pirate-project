@@ -186,3 +186,11 @@ button.big { font-size: 1.15em; padding: 0.6em 1.6em; }
   .steps li { flex: 0 0 auto; }
   .sheet-portrait { max-width: 160px; }
 }
+
+/* Ship woodcuts */
+.ship-art { width: 200px; min-width: 200px; aspect-ratio: 720 / 802; object-fit: cover; border: 1px solid var(--rule); }
+.sheet-ship { display: block; width: 60%; max-width: 160px; aspect-ratio: 720 / 802; object-fit: cover; border: 1px solid var(--rule); margin: 0.8em auto 0.2em; }
+@media (max-width: 760px) {
+  .ship-plate { flex-direction: column; align-items: flex-start; }
+  .ship-art { width: 160px; min-width: 0; }
+}

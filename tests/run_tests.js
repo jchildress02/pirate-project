@@ -7,7 +7,7 @@ var path = require("path");
 var root = path.join(__dirname, "..");
 [
   "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/scenes.js", "js/validate.js", "js/creator.js",
-  "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/test_captain.js", "content/test_scenes.js",
+  "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/test_captain.js", "content/test_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -527,6 +527,13 @@ test("a built captain can play the test scenes", function () {
   eq(PC.validate(s).errors, []);
   PC.scenes.choose(s, 0);
   PC.scenes.commit(s, "crew");
+});
+
+test("every ship class has its woodcut (§21.2)", function () {
+  var fs = require("fs");
+  eq(PC.data.shipClasses.length, 15);
+  PC.data.shipClasses.forEach(function (c) { ok(fs.existsSync(path.join(root, PC.data.shipArt(c.id))), "missing " + c.id); });
+  eq(PC.data.shipArt("Sloop"), "assets/ships/sloop.webp");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");
