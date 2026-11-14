@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pirate Chronicle</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app"><noscript>Pirate Chronicle needs JavaScript turned on.</noscript></div>
+
+  <!-- Engine (rules; no screen code) -->
+  <script src="js/rng.js"></script>
+  <script src="js/checks.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/text.js"></script>
+  <script src="js/scenes.js"></script>
+  <script src="js/validate.js"></script>
+
+  <!-- Content (data the engine reads) -->
+  <script src="content/check_types.js"></script>
+  <script src="content/modifiers.js"></script>
+  <script src="content/test_captain.js"></script>
+  <script src="content/test_scenes.js"></script>
+
+  <!-- Screen -->
+  <script src="js/ui.js"></script>
+  <script>PC.ui.start(document.getElementById("app"));</script>
+</body>
+</html>
