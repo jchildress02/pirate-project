@@ -196,6 +196,10 @@
 
   function clean(s) { return String(s || "").trim(); }
 
+  // The ship's name never carries "the": every scene and line adds the
+  // article itself ("go back to the Drunken Saint"; ruled November 14).
+  function shipName(s) { return clean(s).replace(/^the\s+/i, ""); }
+
   function stepErrors(draft, stepId) {
     var e = [];
     var st = S();
@@ -366,7 +370,7 @@
       money: { crew: st.crewGold + (city.gold || 0), purse: st.purse },
       provisions: st.provisions,
       ship: {
-        name: clean(draft.shipName), type: st.ship.type,
+        name: shipName(draft.shipName), type: st.ship.type,
         hull: st.ship.hull, hullMax: st.ship.hullMax, guns: st.ship.guns, gunsMax: st.ship.gunsMax,
         speed: st.ship.speed, speedMax: st.ship.speedMax, rigging: st.ship.rigging, draft: st.ship.draft, cargo: st.ship.cargo,
       },
@@ -419,6 +423,7 @@
     randomDraft: randomDraft,
     band: band,
     setById: setById,
+    shipName: shipName,
     portraitPath: portraitPath,
     allPortraitPaths: allPortraitPaths,
     captainPortrait: captainPortrait,

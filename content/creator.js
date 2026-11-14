@@ -37,15 +37,16 @@
     { id: "Charleston", effect: "Starting friend: a Charleston merchant (the provisioner), on the Friend rung.", friend: { id: "charleston_merchant", role: "merchant", node: "Charleston" } },
   ];
 
+  // Plain descriptions of the trade, independent of the sack (ruled November 14).
   var PROFESSIONS = [
-    { id: "Official", flavor: "Ex-customs clerk or minor port official", free: ["Petition", "Forge"], losses: ["A", "B", "C", "D"] },
-    { id: "Merchant", flavor: "Failed shopkeeper or supercargo", free: ["Haggle", "Appraise"], losses: ["A", "B", "C"] },
-    { id: "Farmer", flavor: "Displaced planter's son or tenant", free: ["Endure", "Wilderness Survival"], losses: ["A", "B", "C"] },
+    { id: "Official", flavor: "Customs clerk or minor port official", free: ["Petition", "Forge"], losses: ["A", "B", "C", "D"] },
+    { id: "Merchant", flavor: "Shopkeeper or supercargo", free: ["Haggle", "Appraise"], losses: ["A", "B", "C"] },
+    { id: "Farmer", flavor: "Planter's son or tenant farmer", free: ["Endure", "Wilderness Survival"], losses: ["A", "B", "C"] },
     { id: "Artisan", flavor: "Shipwright's apprentice or town smith", free: ["Repair at Sea", "Refit & Careen"], losses: ["A", "B", "C"] },
     { id: "Sailor", flavor: "Impressed deckhand or coastal trader", free: ["Navigate", "Ride Out Storm"], losses: ["A", "B", "C", "D"] },
-    { id: "Soldier", flavor: "Militia guardsman who failed to hold the walls", free: ["Hold Your Ground", "Marksmanship"], losses: ["A", "B", "C", "D"] },
-    { id: "Smuggler", flavor: "Petty runner who used the chaos to slip past patrols", free: ["Smuggle", "Ship Concealment"], losses: ["A", "B", "C"] },
-    { id: "Thief", flavor: "Back-alley survivor of the fires", free: ["Light Fingers", "Chase & Climb"], losses: ["A", "B", "C"] },
+    { id: "Soldier", flavor: "Militia guardsman", free: ["Hold Your Ground", "Marksmanship"], losses: ["A", "B", "C", "D"] },
+    { id: "Smuggler", flavor: "Petty runner who slips past the patrols", free: ["Smuggle", "Ship Concealment"], losses: ["A", "B", "C"] },
+    { id: "Thief", flavor: "Back-alley pickpocket", free: ["Light Fingers", "Chase & Climb"], losses: ["A", "B", "C"] },
   ];
 
   // What was lost. Variant D is hidden in the prototype creator (§12.5).
