@@ -27,7 +27,7 @@
         { id: "open_handed", label: "Open-Handed", text: "2.5 shares, at least 125 gold", greed: -1, approval: ["Generosity", "Mercy"], shares: 2.5, min: 125 },
       ] },
       { id: "quarter", name: "Quarter", noGreed: true, options: [
-        { id: "quarter_asked", label: "Quarter Asked", text: "Only crews that refused a demanded surrender may be executed", greed: null, approval: ["Honor"] },
+        { id: "quarter_asked", label: "Quarter Asked", text: "Only crews who refuse a demanded surrender may be executed", greed: null, approval: ["Honor"] },
         { id: "quarter_given", label: "Quarter Given", text: "No executions", greed: null, approval: ["Mercy"] },
         { id: "no_quarter", label: "No Quarter", text: "Unlimited executions; you earn the No Quarter tag", greed: null, approval: ["Cruelty"] },
       ] },

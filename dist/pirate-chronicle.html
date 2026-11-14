@@ -3771,6 +3771,10 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
 
   function clean(s) { return String(s || "").trim(); }
 
+  // The ship's name never carries "the": every scene and line adds the
+  // article itself ("go back to the Drunken Saint"; ruled November 14).
+  function shipName(s) { return clean(s).replace(/^the\s+/i, ""); }
+
   function stepErrors(draft, stepId) {
     var e = [];
     var st = S();
@@ -3941,7 +3945,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
       money: { crew: st.crewGold + (city.gold || 0), purse: st.purse },
       provisions: st.provisions,
       ship: {
-        name: clean(draft.shipName), type: st.ship.type,
+        name: shipName(draft.shipName), type: st.ship.type,
         hull: st.ship.hull, hullMax: st.ship.hullMax, guns: st.ship.guns, gunsMax: st.ship.gunsMax,
         speed: st.ship.speed, speedMax: st.ship.speedMax, rigging: st.ship.rigging, draft: st.ship.draft, cargo: st.ship.cargo,
       },
@@ -3994,6 +3998,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     randomDraft: randomDraft,
     band: band,
     setById: setById,
+    shipName: shipName,
     portraitPath: portraitPath,
     allPortraitPaths: allPortraitPaths,
     captainPortrait: captainPortrait,
@@ -4243,15 +4248,16 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     { id: "Charleston", effect: "Starting friend: a Charleston merchant (the provisioner), on the Friend rung.", friend: { id: "charleston_merchant", role: "merchant", node: "Charleston" } },
   ];
 
+  // Plain descriptions of the trade, independent of the sack (ruled November 14).
   var PROFESSIONS = [
-    { id: "Official", flavor: "Ex-customs clerk or minor port official", free: ["Petition", "Forge"], losses: ["A", "B", "C", "D"] },
-    { id: "Merchant", flavor: "Failed shopkeeper or supercargo", free: ["Haggle", "Appraise"], losses: ["A", "B", "C"] },
-    { id: "Farmer", flavor: "Displaced planter's son or tenant", free: ["Endure", "Wilderness Survival"], losses: ["A", "B", "C"] },
+    { id: "Official", flavor: "Customs clerk or minor port official", free: ["Petition", "Forge"], losses: ["A", "B", "C", "D"] },
+    { id: "Merchant", flavor: "Shopkeeper or supercargo", free: ["Haggle", "Appraise"], losses: ["A", "B", "C"] },
+    { id: "Farmer", flavor: "Planter's son or tenant farmer", free: ["Endure", "Wilderness Survival"], losses: ["A", "B", "C"] },
     { id: "Artisan", flavor: "Shipwright's apprentice or town smith", free: ["Repair at Sea", "Refit & Careen"], losses: ["A", "B", "C"] },
     { id: "Sailor", flavor: "Impressed deckhand or coastal trader", free: ["Navigate", "Ride Out Storm"], losses: ["A", "B", "C", "D"] },
-    { id: "Soldier", flavor: "Militia guardsman who failed to hold the walls", free: ["Hold Your Ground", "Marksmanship"], losses: ["A", "B", "C", "D"] },
-    { id: "Smuggler", flavor: "Petty runner who used the chaos to slip past patrols", free: ["Smuggle", "Ship Concealment"], losses: ["A", "B", "C"] },
-    { id: "Thief", flavor: "Back-alley survivor of the fires", free: ["Light Fingers", "Chase & Climb"], losses: ["A", "B", "C"] },
+    { id: "Soldier", flavor: "Militia guardsman", free: ["Hold Your Ground", "Marksmanship"], losses: ["A", "B", "C", "D"] },
+    { id: "Smuggler", flavor: "Petty runner who slips past the patrols", free: ["Smuggle", "Ship Concealment"], losses: ["A", "B", "C"] },
+    { id: "Thief", flavor: "Back-alley pickpocket", free: ["Light Fingers", "Chase & Climb"], losses: ["A", "B", "C"] },
   ];
 
   // What was lost. Variant D is hidden in the prototype creator (§12.5).
@@ -4824,7 +4830,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
         { id: "open_handed", label: "Open-Handed", text: "2.5 shares, at least 125 gold", greed: -1, approval: ["Generosity", "Mercy"], shares: 2.5, min: 125 },
       ] },
       { id: "quarter", name: "Quarter", noGreed: true, options: [
-        { id: "quarter_asked", label: "Quarter Asked", text: "Only crews that refused a demanded surrender may be executed", greed: null, approval: ["Honor"] },
+        { id: "quarter_asked", label: "Quarter Asked", text: "Only crews who refuse a demanded surrender may be executed", greed: null, approval: ["Honor"] },
         { id: "quarter_given", label: "Quarter Given", text: "No executions", greed: null, approval: ["Mercy"] },
         { id: "no_quarter", label: "No Quarter", text: "Unlimited executions; you earn the No Quarter tag", greed: null, approval: ["Cruelty"] },
       ] },
@@ -8543,6 +8549,10 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   function gold(n) { return (Math.round(n * 100) / 100).toLocaleString("en-US"); }
   function apLabel(n) { return n ? n + " action" + (n > 1 ? "s" : "") : "no action"; }
 
+  // How many of something crew gold can pay for (the boxes cap here, so the
+  // player never has to do the sum; ruled November 14).
+  function afford(each) { return each > 0 ? Math.floor(state.money.crew / each + 1e-9) : Infinity; }
+
   function qtyBox(id, value, max) {
     return '<input class="qty" type="number" inputmode="numeric" min="1"' + (max != null ? ' max="' + max + '"' : "") +
       ' id="' + id + '" value="' + esc(value) + '">';
@@ -8677,7 +8687,8 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
         (sh.rigging === "frayed" ? " · <b>frayed rigging</b> (Speed " + sh.speed + "; any repair fixes it)" : "") +
         " · " + gold(N().repairPerHp(state)) + " gold a point. A repair of " + Math.ceil(0.25 * sh.hullMax) + " points or more takes an action.</p>";
       if (missing > 0) {
-        html += '<div class="buyrow">' + qtyBox("q-repair", missing, missing) +
+        var fix = Math.max(1, Math.min(missing, afford(N().repairPerHp(state))));
+        html += '<div class="buyrow">' + qtyBox("q-repair", fix, fix) +
           '<button data-act="repair" data-for="q-repair">Repair</button>' +
           '<button data-act="repair" data-all="1">Repair all: ' + gold(N().repairCost(state, missing)) + " gold" + (N().repairTakesAP(state, missing) ? ", 1 action" : "") + "</button></div>";
       } else html += '<p class="small muted">Nothing to fix.</p>';
@@ -8689,8 +8700,9 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
             "<td>" + (u.locked ? "" : '<button data-act="upgrade" data-track="' + t + '">Buy level ' + u.next + "</button>") + "</td></tr>";
         }).join("") + "</table></div>";
       var room = sh.gunsMax - sh.guns;
-      html += '<div class="svc"><h4>Guns</h4><p class="small">' + sh.guns + " of " + sh.gunsMax + " mounted · " + gold(N().gunPrice(state)) + " gold a gun.</p>" +
-        (room > 0 ? '<div class="buyrow">' + qtyBox("q-guns", room, room) + '<button data-act="guns" data-for="q-guns">Buy guns</button></div>' : '<p class="small muted">Every gun port is full.</p>') +
+      var gunsMax = Math.min(room, afford(N().gunPrice(state)));
+      html += '<div class="svc"><h4>Guns</h4><p class="small">' + sh.guns + " of " + sh.gunsMax + " mounted · " + gold(N().gunPrice(state)) + " gold a gun. Buy as many as you like, up to what you can pay for.</p>" +
+        (room <= 0 ? '<p class="small muted">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qtyBox("q-guns", 1, gunsMax) + '<button data-act="guns" data-for="q-guns">Buy guns</button></div>' : '<p class="small muted">You can\'t pay for a gun right now.</p>') +
         "</div>";
     }
     // Crew recruitment (§24.7)
@@ -8699,9 +8711,9 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     html += '<div class="svc"><h4>Hire hands</h4><p class="small">The ruined on the docks. ' + state.crew.count + " of " + sh.crewMax + " berths filled.</p>" +
       '<table class="grid"><tr><th>Tier</th><th>Waiting</th><th>Each</th><th></th></tr>' +
       PC.data.economy.TIER_ORDER.filter(function (t) { return avail[t] || (N().season(state).pool[t]); }).map(function (t) {
-        var max = Math.min(avail[t], berths);
+        var max = Math.min(avail[t], berths, afford(N().signingCost(state, t)));
         return "<tr><td>" + t + "</td><td>" + avail[t] + "</td><td>" + gold(N().signingCost(state, t)) + "</td><td>" +
-          (max > 0 ? '<div class="buyrow">' + qtyBox("q-hire-" + t, max, max) + '<button data-act="hire" data-tier="' + t + '" data-for="q-hire-' + t + '">Sign</button></div>' : '<span class="small muted">' + (avail[t] ? "No berths" : "None left") + "</span>") +
+          (max > 0 ? '<div class="buyrow">' + qtyBox("q-hire-" + t, max, max) + '<button data-act="hire" data-tier="' + t + '" data-for="q-hire-' + t + '">Sign</button></div>' : '<span class="small muted">' + (!avail[t] ? "None left" : !berths ? "No berths" : "Not enough crew gold") + "</span>") +
           "</td></tr>";
       }).join("") + "</table></div>";
     // Paying off hands
@@ -8724,13 +8736,14 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     if (!state.location.say) html += '<div class="say">' + esc(g.line) + "</div>";
     if (!g.refuse) {
       var free = PC.crew.slotsFree(state);
+      var provMax = Math.min(free, afford(N().provisionsPrice(state)));
       html += '<p class="small">Hold: ' + PC.crew.slotsUsed(state) + " of " + state.ship.cargo + " slots used.</p>";
       html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(N().provisionsPrice(state)) + " gold a lot. One lot feeds 5 hands for an action at sea. Aboard: " + state.provisions + ".</p>" +
-        (free > 0 ? '<div class="buyrow">' + qtyBox("q-prov", Math.min(free, 10), free) + '<button data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' : '<p class="small muted">The hold is full.</p>') + "</div>";
+        (free <= 0 ? '<p class="small muted">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qtyBox("q-prov", Math.min(provMax, 10), provMax) + '<button data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' : '<p class="small muted">You can\'t pay for a lot right now.</p>') + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th></th></tr>' +
         Object.keys(stock).map(function (gname) {
-          var max = Math.min(stock[gname], free);
+          var max = Math.min(stock[gname], free, afford(N().shopPrice(state, id, gname, prov)));
           var info = PC.data.goods[gname];
           return "<tr><td>" + esc(gname) + (info && info.stores ? ' <span class="small muted">(crew stores)</span>' : "") + "</td><td>" + stock[gname] + "</td><td>" + gold(N().shopPrice(state, id, gname, prov)) + "</td><td>" +
             (max > 0 ? '<div class="buyrow">' + qtyBox("q-good-" + slug(gname), Math.min(max, 2), max) + '<button data-act="buygood" data-good="' + esc(gname) + '" data-for="q-good-' + slug(gname) + '">Buy</button></div>' : '<span class="small muted">' + (stock[gname] ? "No room" : "Sold out") + "</span>") +
@@ -8788,14 +8801,14 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
 
   // ---- The Ship layer (§17.1) ----
 
-  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["captain", "Captain"], ["journal", "Journal"]];
+  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["captain", "Captain"], ["journal", "Journal"], ["notes", "Notes"]];
 
   function shipMenu() {
     var tab = state.location.tab || (state.articles ? "crew" : "articles");
     var html = '<div class="tabs">' + SHIP_TABS.map(function (t) {
       return '<button data-act="shiptab" data-tab="' + t[0] + '" class="' + (t[0] === tab ? "on" : "") + '">' + t[1] + "</button>";
     }).join("") + '<button disabled title="Not in the prototype">World Map' + (state.articles ? "" : " 🔒") + "</button></div>";
-    html += ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, captain: captainTab, journal: journalTab })[tab]();
+    html += ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, captain: captainTab, journal: journalTab, notes: notesTab })[tab]();
     return html;
   }
 
@@ -8827,7 +8840,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     }
     var html2 = '<p class="small">Signed ' + esc(PC.state.SEASONS[state.articles.signed.season]) + " " + state.articles.signed.year +
       " · net Greed " + (state.articles.greed > 0 ? "+" : "") + state.articles.greed + " · " + esc(PC.articles.currentReputation(state).name) +
-      ". You can loosen a term any time (+3 morale); harder terms wait for the next split.</p>";
+      ". You can loosen a term any time (+3 morale); harder terms wait for the next split, which comes only in Winter.</p>";
     html2 += A.SLOTS.map(function (s) {
       return '<div class="svc"><h4>' + esc(s.name) + "</h4>" + '<div class="opts">' + s.options.map(function (o) {
         var on = state.articles.terms[s.id] === o.id;
@@ -8888,8 +8901,9 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     }).join("") + "</table>";
     var used = PC.crew.usedThisSeason(state, "stores");
     var choices = PC.crew.storeChoices(state);
-    html += '<div class="svc"><h4>Open the stores</h4><p class="small">Once a season: ' + PC.crew.storesNeeded(state) + " units of drink or tobacco for your " + state.crew.count + " hands.</p>" +
-      (used ? '<p class="small muted">Opened this season.</p>' : !choices.length ? '<p class="small muted">Not enough drink or tobacco aboard. Kill-devil is cheap at the Merchant.</p>' :
+    var need = PC.crew.storesNeeded(state);
+    html += '<div class="svc"><h4>Open the stores</h4><p class="small">Once a season: ' + need + " unit" + (need === 1 ? "" : "s") + " of drink or tobacco for your " + state.crew.count + " hands.</p>" +
+      (used ? '<p class="small muted">Opened this season.</p>' : !choices.length ? '<p class="small muted">Not enough drink or tobacco aboard.</p>' :
         choices.map(function (c) { return '<button data-act="stores" data-good="' + esc(c.good) + '">Open the ' + esc(c.good.toLowerCase()) + " (+" + c.morale + " morale)</button> "; }).join("")) + "</div>";
     return html;
   }
@@ -8932,6 +8946,17 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     return html;
   }
 
+  // Notes: the player's own headcanon about the captain and the officers.
+  // No rules read them (ruled November 14).
+  function notesTab() {
+    var notes = state.notes || {};
+    var people = [{ id: "captain", name: (state.captain.first + " " + state.captain.last).trim() + " (your captain)" }].concat(
+      (state.officers || []).filter(function (o) { return !o.gone; }).map(function (o) { return { id: "officer:" + o.id, name: (o.first + " " + (o.last || "")).trim() + " (" + o.type + ")" }; }));
+    return '<p class="small muted">Your own notes. Nothing in the game reads them; they travel with your save.</p>' + people.map(function (p) {
+      return '<div class="svc"><h4>' + esc(p.name) + '</h4><textarea class="note-box" rows="3" data-note="' + esc(p.id) + '" placeholder="Who are they to you?">' + esc(notes[p.id] || "") + "</textarea></div>";
+    }).join("");
+  }
+
   // ---- The arrival popup ----
 
   function popupHtml() {
@@ -8946,6 +8971,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     var box = el.dataset.for ? document.getElementById(el.dataset.for) : null;
     var n = box ? Math.floor(Number(box.value)) : 1;
     if (!(n > 0)) throw new Error("Enter a number above zero.");
+    if (box && box.max && n > Number(box.max)) n = Number(box.max);
     return n;
   }
 
@@ -8961,6 +8987,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
   var nodeHandlers = {
     "goplace": function (el) { enterPlace(el.dataset.place); },
     "leaveplace": function () {
+      scrollTop();
       var fire = N().leave(state);
       if (fire) PC.scenes.enterScene(state, fire);
     },
@@ -9035,6 +9062,10 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
       var text = { accepted: "The crew file up and put their names to it.", cheered: "The crew cheer as they sign.", clean: "You read the terms out and the crew sign without a murmur.", partial: "The crew sign, but there's grumbling.", setback: "The crew sign with sour faces." }[r.outcome];
       say(null, text, r.effects.length ? r.effects.join(", ") + "." : null);
       state.location.tab = "articles";
+      state.location.popup = { title: "The Articles are signed", lines: [
+        "You can loosen a term at any time, and the crew will thank you for it.",
+        "Harder terms have to wait for the next split. A split is when the crew takes its shares and may sign new Articles, and splits happen only at the start of Winter.",
+      ] };
     },
     "artamend": function (el) { var c = PC.articles.amend(state, el.dataset.slot, el.dataset.opt); say(null, "The change is read out to the crew.", c.morale ? "Crew morale +" + c.morale + "." : null); },
     "rally": function () { var r = PC.crew.rally(state); say(null, { clean: "The men roar back at you.", partial: "A few cheers, and some nods.", setback: "The speech falls flat." }[r.outcome], r.gain ? "Crew morale +" + r.gain + "." : null); },
@@ -9423,6 +9454,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     if (!draft.mentor.portraitSet || !choices.some(function (c) { return c.set === draft.mentor.portraitSet; })) draft.mentor.portraitSet = choices[0].set;
     var html = '<p class="muted">An old hand who sailed with you out of the ashes. Your mentor is your first officer and your first Quartermaster, starts as your Friend, and once a season lets you reroll a setback on a check they taught you.</p>' +
       '<div class="row2">' + textField("Mentor's first name", "mentor.first", { max: 24 }) + textField("Last name", "mentor.last", { max: 24 }) + "</div>" +
+      '<p><button data-act="randmentor">Random name</button> <span class="small muted">From the Avalon pool, to suit the portrait.</span></p>' +
       cycler(choices, "mentor.portraitSet", "Mentor portrait") +
       "<h3>Type</h3>" + '<div class="cards">' + Dc.OFFICER_TYPES.map(function (t) {
         return card("pick", "mentor.type", t.id, t.id, t.perk + ". Teaches: " + t.lessons + ".");
@@ -9445,7 +9477,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     return '<div class="ship-plate"><img class="ship-art" src="' + assetUrl(PC.data.shipArt("Sloop")) + '" alt="A sloop">' +
       '<p class="small">A battered sloop: 14 of 20 hull, frayed rigging, 6 of 10 guns, shallow draft for the shoals, and a skeleton crew of 12 green hands.</p></div>' +
       textField("Her name", "shipName", { max: 30, placeholder: "The ship's name" }) +
-      '<p><button data-act="randship">Random name</button></p>';
+      '<p><button data-act="randship">Random name</button> <span class="small muted">Leave off "the": the game adds it ("the ' + esc(PC.creator.shipName(draft.shipName) || "Drunken Saint") + '").</span></p>';
   }
 
   function stepReview() {
@@ -9534,6 +9566,14 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
       var n = PC.npcs.randomCaptainName(g, "captain-name|" + PC.rng.newWorldSeed());
       draft.first = n.first; draft.last = n.last;
     },
+    "randmentor": function () {
+      var set = draft.mentor.portraitSet ? PC.creator.setById(draft.mentor.portraitSet) : null;
+      var key = "mentor-name|" + PC.rng.newWorldSeed();
+      for (var i = 0; i < 10; i++) {
+        var n = PC.npcs.randomCaptainName(set ? set.gender : "m", key + "|" + i);
+        if (n.last !== draft.last) { draft.mentor.first = n.first; draft.mentor.last = n.last; break; }
+      }
+    },
     "randship": function () { draft.shipName = PC.npcs.randomShipName("ship-name|" + PC.rng.newWorldSeed()); },
     "begin": function () {
       var seed = PC.rng.newWorldSeed();
@@ -9551,6 +9591,16 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
 
   // Text boxes update the draft as you type, without redrawing (so the
   // cursor stays put). Age redraws on change: it moves the portrait band.
+  function wireNotes() {
+    root.querySelectorAll("textarea[data-note]").forEach(function (el) {
+      el.addEventListener("input", function () {
+        state.notes = state.notes || {};
+        state.notes[el.dataset.note] = el.value;
+        PC.state.saveToBrowser(state);
+      });
+    });
+  }
+
   function wireFields() {
     root.querySelectorAll("input[data-field]").forEach(function (el) {
       var path = el.dataset.field;
@@ -9661,6 +9711,7 @@ PC.assets = {"assets/portraits/anne_mid.webp": "data:image/webp;base64,UklGRvI9A
     if (showDev && state) root.insertAdjacentHTML("beforeend", devPanel());
     if (dialog) root.insertAdjacentHTML("beforeend", dialogHtml());
     wireFields();
+    if (state) wireNotes();
     root.querySelectorAll("[data-act]").forEach(function (el) {
       var name = el.dataset.act;
       var h = handlers[name];

@@ -1255,6 +1255,24 @@ test("a version 3 save standing in front of a placeholder plays the real scene",
   ok(PC.state.POSTURES.indexOf(back.world.posture) >= 0);
 });
 
+console.log("Milestone 2 review (§37.9)");
+
+test("ship names never carry \"the\"; the creator strips a typed one", function () {
+  eq(PC.creator.shipName("The Drunken Saint"), "Drunken Saint");
+  eq(PC.creator.shipName("  the  Black Gull "), "Black Gull");
+  eq(PC.creator.shipName("Theodora"), "Theodora");
+  for (var i = 0; i < 40; i++) ok(!/^the /i.test(PC.npcs.randomShipName("k" + i)));
+});
+
+test("profession descriptions don't lean on the sack", function () {
+  PC.data.creator.PROFESSIONS.forEach(function (p) { ok(!/fail|fires|chaos|walls|displaced/i.test(p.flavor), p.flavor); });
+});
+
+test("Quarter Asked reads \"only crews who refuse a demanded surrender\"", function () {
+  var q = PC.data.articles.SLOTS.filter(function (x) { return x.id === "quarter"; })[0].options[0];
+  ok(/^Only crews who refuse a demanded surrender/.test(q.text), q.text);
+});
+
 console.log("The Ship layer (§17.1, §24, §26)");
 
 test("the Standard Articles: net Greed 0, accepted with no check", function () {
