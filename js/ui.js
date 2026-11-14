@@ -53,7 +53,7 @@
     root.innerHTML =
       '<div class="game">' + topBar() +
       '<div class="body"><aside class="sheet">' + captainSheet() + "</aside>" +
-      '<main class="stage">' + (state.current.screen === "hub" ? hubPanel() : state.current.screen === "node" ? nodePanel() : scenePanel()) + logPanel() + "</main></div></div>" +
+      '<main class="stage">' + (state.current.screen === "hub" ? hubPanel() : state.current.screen === "node" ? nodePanel() : state.current.screen === "minigame" ? minigamePanel() : scenePanel()) + logPanel() + "</main></div></div>" +
       popupHtml();
     wire();
   }
@@ -63,13 +63,13 @@
     root.innerHTML =
       '<div class="title-screen">' +
       "<h1>Pirate Chronicle</h1>" +
-      '<p class="sub">Prototype · Milestone 3 · scenes and quests</p>' +
+      '<p class="sub">Prototype · Milestone 4 · the minigames</p>' +
       '<div class="title-buttons">' +
       (hasSave ? '<button data-act="continue" class="primary">Continue</button>' : "") +
       '<button data-act="new"' + (hasSave ? "" : ' class="primary"') + ">New game</button>" +
       '<button data-act="import">Load a save file</button>' +
       "</div>" +
-      '<p class="note">Make your captain and sail into Ocracoke: run the sandbar, meet the Beach Captain, take Bobby Rats\'s job and grant a dying pirate\'s wish. Then hire hands and officers, hear the rumors, repair the sloop and sign the Articles. The minigames come next.</p>' +
+      '<p class="note">Make your captain and sail into Ocracoke: run the sandbar, meet the Beach Captain, take Bobby Rats\'s job and grant a dying pirate\'s wish. Then hire hands and officers, hear the rumors, repair the sloop and sign the Articles. Dive the wrecks, drink a pirate under the table and play Liar\'s Dice. The prize hunt comes next.</p>' +
       '<p class="note"><button class="link" data-act="quickstart">Quick start with the test captain</button></p>' +
       "</div>";
     wire();
@@ -336,8 +336,15 @@
     html += "<li" + (gi.ok ? "" : ' class="locked"') + '><button data-act="gather"' + (gi.ok ? "" : " disabled") + ">Gather Intelligence <small>(1 action)</small></button>" +
       '<span class="cost">Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.</span>' +
       (gi.ok ? checkLine(PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] })) : '<span class="lock">' + esc(gi.why) + "</span>") + "</li>";
-    html += comingSoon("Drink with a pirate (Under the Table)", 4, first ? "Not on your first visit" : null) +
-      comingSoon("Liar's Dice", 4, first ? "Not on your first visit" : null) + "</ol>";
+    // The minigames (§18.3, §18.4): an action each.
+    var dk = PC.drinking.canDrink(state);
+    html += "<li" + (dk.ok ? "" : ' class="locked"') + '><button data-act="drink"' + (dk.ok ? "" : " disabled") + ">Drink with a pirate (Under the Table) <small>(1 action)</small></button>" +
+      '<span class="cost">Once a season. The loser pays the ' + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.</span>" +
+      (dk.ok ? "" : '<span class="lock">' + esc(dk.why) + "</span>") + "</li>";
+    var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
+    html += "<li" + (lp.ok ? "" : ' class="locked"') + '><button data-act="dice"' + (lp.ok ? "" : " disabled") + ">Liar's Dice <small>(1 action)</small></button>" +
+      '<span class="cost">Up to ' + PC.data.minigames.dice.GAMES_PER_SESSION + " games a sitting, " + st[0] + "-" + st[1] + " gold a game from your purse.</span>" +
+      (lp.ok ? "" : '<span class="lock">' + esc(lp.why) + "</span>") + "</li></ol>";
     if (state.location.gatherPick) {
       html += '<div class="svc"><h4>What do you want to hear about?</h4><div class="opts">' + PC.rumors.gatherTypes(state).map(function (t) {
         return '<button data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
@@ -488,8 +495,156 @@
   function graveyardMenu() {
     var o = PC.npcs.get(state, "ollie");
     var lines = { "-1": "\"I hope you're a strong swimmer.\"", "0": "\"Back for another dive?\"", "1": "\"I dreamed that you're in for a good haul today.\"", "2": "\"I dreamed that you're in for a good haul today.\"", "3": "\"The treasure-seeker returns!\"" };
-    return "<h3>" + npcTag("ollie") + "</h3>" + '<div class="say">' + esc(lines[String(Math.max(-1, o.rung))] || lines["0"]) + "</div>" +
-      '<ol class="choices">' + comingSoon("Dive the wrecks", 4) + "</ol>";
+    var html = "<h3>" + npcTag("ollie") + "</h3>" + '<div class="say">' + esc(lines[String(Math.max(-1, o.rung))] || lines["0"]) + "</div>";
+    var S = PC.data.minigames.salvage;
+    // A Dying Pirate's Wish: the Miranda is the only wreck until the mermaid comes up (§18.2).
+    if (PC.salvage.mirandaPending(state)) {
+      var rc = PC.salvage.canRetryMiranda(state);
+      return html + '<div class="wreck"><h4>The <i>Miranda</i></h4><p class="small">' + esc(S.miranda.flavor) + "</p>" +
+        '<p class="small">Ollie waits on the beach. Geezer\'s mermaid is still down there.</p>' +
+        '<div class="actions"><button class="primary" data-act="miranda"' + (rc.ok ? "" : " disabled") + ">Dive for the mermaid again (1 action)</button>" +
+        (rc.ok ? "" : '<span class="lock">' + esc(rc.why) + "</span>") + "</div></div>";
+    }
+    var cd = PC.salvage.canDive(state);
+    var wrecks = PC.salvage.wrecksOnOffer(state, "ocracoke");
+    html += '<p class="muted">' + esc(S.lines.offered) + (wrecks.some(function (w) { return w.type === "frigate"; }) ? " " + esc(S.lines.frigate) : "") + "</p>";
+    if (!cd.ok) html += '<p class="notice">' + esc(cd.why) + "</p>";
+    wrecks.forEach(function (w) {
+      html += '<div class="wreck"><h4>A ' + esc(w.type) + "</h4>" + '<p class="small">' + esc(w.flavor) + "</p>" +
+        '<p class="small">' + S.ZONES[w.type].map(function (z) {
+          var a = PC.checks.assess(state, { type: "Dive", dr: S.ZONE_DR[z] }, { conditions: ["Underwater"] });
+          return esc(S.ZONE_NAMES[z]) + ": " + esc(a.tier) + " (" + pct(a.odds.partialOrBetter) + ")";
+        }).join(" · ") + "</p>" +
+        '<div class="actions"><button data-act="divewreck" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Dive (1 action)</button>" +
+        '<button data-act="divequick" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Quick Dive (1 action)</button></div></div>";
+    });
+    return html;
+  }
+
+  // ---- The minigames (§18) ----
+  // The rules are in js/salvage.js, js/drinking.js and js/liarsdice.js.
+
+  function mgLog(lines) {
+    var last = lines.slice(-12);
+    return '<div class="mglog">' + last.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>";
+  }
+
+  function mgMeter(label, n, max) {
+    var pips = "";
+    for (var i = 0; i < max; i++) pips += '<i class="' + (i < n ? "on" : "off") + '"></i>';
+    return '<div class="meter"><span>' + esc(label) + "</span> " + pips + " <small>" + n + "/" + max + "</small></div>";
+  }
+
+  function mgPending(p) {
+    if (!p) return "";
+    return '<div class="result"><p class="you-chose">' + esc(p.type) + "</p>" +
+      '<div class="badge badge-' + p.outcome + '">' + OUTCOME_LABEL[p.outcome] + "</div>" + diceLine(p.roll) +
+      '<div class="actions"><button data-act="mgreroll">Reroll (' + esc(p.reroll) + ')</button><button class="primary" data-act="mgaccept">Accept it</button></div></div>';
+  }
+
+  function mgOption(act, attrs, label, chk, extra) {
+    return '<li><button data-act="' + act + '" ' + attrs + ">" + esc(label) + "</button>" + (extra ? '<span class="cost">' + esc(extra) + "</span>" : "") + (chk ? checkLine(chk) : "") + "</li>";
+  }
+
+  function minigamePanel() {
+    var v = PC.minigames.view(state);
+    var html = '<section class="scene minigame mg-' + v.kind + '">';
+    html += ({ dive: divePanel, drink: drinkPanel, dice: dicePanel })[v.kind](v);
+    return html + "</section>";
+  }
+
+  function divePanel(v) {
+    var html = '<div class="where">Lilyhook\'s Graveyard</div><h2>' + esc(v.title) + "</h2>" +
+      mgMeter("Breath", v.breath, v.breathMax) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending);
+    if (!v.over) {
+      html += '<ol class="choices">';
+      v.zones.forEach(function (z) {
+        if (z.left <= 0) { html += '<li class="locked"><button disabled>' + esc(z.name) + '</button><span class="lock">Picked clean</span></li>'; return; }
+        html += mgOption("mgdive", 'data-op="grab" data-zone="' + z.id + '"', "Grab from the " + z.name, z.assess,
+          z.left + " left" + (z.scouted ? " · next: " + z.scouted : "") + " · clean 1 breath, partial 2, setback 2 and a hazard");
+        html += mgOption("mgdive", 'data-op="scout" data-zone="' + z.id + '"', "Scout the " + z.name, null, "1 breath: see the next find, and the next grab there is one step easier");
+      });
+      html += '<li><button data-act="mgdive" data-op="surface">Surface</button><span class="cost">Bank what you have</span></li></ol>';
+      if (v.canQuick) html += '<div class="actions"><button data-act="mgquick">Quick Dive instead</button></div>';
+      return html;
+    }
+    html += '<div class="svc"><h4>' + (v.blackout ? "What you kept" : "Your haul") + "</h4>" +
+      (v.kept && v.kept.length ? "<ul>" + v.kept.map(function (k) { return "<li>" + esc(k) + "</li>"; }).join("") + "</ul>" : '<p class="small muted">Nothing.</p>') + "</div>";
+    if (v.needsPot) {
+      return html + '<p class="small">' + v.gold + ' gold came up with it.</p><div class="actions"><button class="primary" data-act="mgbank" data-pot="purse">Into your purse</button>' +
+        '<button class="primary" data-act="mgbank" data-pot="crew">Share it with the crew</button></div>';
+    }
+    return html + '<div class="actions"><button class="primary" data-act="mgleave">Continue</button></div>';
+  }
+
+  function drinkPanel(v) {
+    var html = '<div class="where">The Tavern · Under the Table</div><h2>' + esc(v.opponent) + "</h2>" +
+      '<p class="small muted">' + esc(v.role) + (v.trait ? " · " + esc(v.trait) : "") + (v.tolerance ? " · Tolerance " + esc(v.tolerance) : "") +
+      " · " + esc(v.state) + " · Round " + v.round + " · the tab " + v.tab + " gold</p>" +
+      mgMeter("Wits", v.wits, v.witsMax) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending);
+    if (v.offerOneMore) {
+      return html + '<p class="notice">Heavy Drinker: another pirate wants a go. Play on with the Wits you have left, for another rumor?</p>' +
+        '<div class="actions"><button data-act="mgonemore" data-yes="1">One more round</button><button class="primary" data-act="mgonemore" data-yes="0">Call it a night</button></div>';
+    }
+    if (!v.over) {
+      if (v.mustStrong) html += '<p class="notice">The strong stuff, or call it a night.</p>';
+      html += '<ol class="choices">' + v.options.map(function (o) {
+        var note = { drink: "Clean costs no Wits, partial 1, setback 2 and a mishap", strong: "Counts as two drinks for him. Clean 0 Wits, partial 2, setback 3 and a mishap",
+          size: "Once, before the first drink. Clean names his trait and Tolerance", mock: "One taunt a match: he drinks alone", lean: "One taunt a match: he drinks alone",
+          throw: "Starts a brawl", callit: "A loss: you pay the tab" }[o.op];
+        return mgOption("mgdrink", 'data-op="' + o.op + '"', o.label, o.assess || null, note);
+      }).join("") + "</ol>";
+      return html;
+    }
+    var r = v.result || {};
+    html += '<div class="svc"><h4>' + (r.won ? "You won" : r.how === "draw" ? "A draw" : "You lost") + "</h4><ul>" +
+      (r.tab ? "<li>You paid " + r.tab + " gold for the tab.</li>" : "") +
+      (r.lead ? "<li>A lead for your journal.</li>" : "") + (r.rumor ? "<li>A rumor (in your log).</li>" : "") +
+      (r.item ? "<li>Found: " + esc(r.item) + "</li>" : "") + (r.hangover ? "<li>Hangover until next season.</li>" : "") + "</ul></div>";
+    return html + '<div class="actions"><button class="primary" data-act="mgleave">Continue</button></div>';
+  }
+
+  var FACE = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+  function dieFace(d) { return d ? '<span class="die">' + FACE[d] + "</span>" : '<span class="die hidden">?</span>'; }
+
+  function dicePanel(v) {
+    var html = '<div class="where">The Tavern · Liar\'s Dice</div><h2>' + esc(v.opponent) + "</h2>" +
+      '<p class="small muted">Game ' + v.games + " of " + v.maxGames + " · won " + v.won + ", lost " + v.lost + " (" + (v.net >= 0 ? "+" : "") + v.net + " gold) · your purse " + gold(v.purse) +
+      (v.marks ? " · suspicion " + v.marks : "") + "</p>" + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending);
+    var g = v.round;
+    if (!g) {
+      if (v.over) return html + '<div class="actions"><button class="primary" data-act="mgleave">Leave the table</button></div>';
+      html += '<ol class="choices">';
+      if (v.canSize) html += mgOption("mgsize", "", "Size him up", v.sizeAssess, "Once a sitting");
+      if (v.canStart) html += '<li><div class="buyrow">' + qtyBox("q-stake", v.stakes[0], Math.min(v.stakes[1], Math.floor(v.purse))) +
+        '<button data-act="mgstake" data-for="q-stake">Play a game</button></div><span class="cost">Stake ' + v.stakes[0] + "-" + v.stakes[1] + " gold from your purse; the winner takes both stakes.</span></li>";
+      html += '<li><button data-act="mgstop">Leave the table</button></li></ol>';
+      return html;
+    }
+    html += '<div class="cups"><p>His cup (' + g.hisN + "): " + g.his.map(dieFace).join(" ") + "</p>" +
+      "<p>Your cup (" + g.myN + "): " + g.mine.map(dieFace).join(" ") + "</p></div>";
+    if (g.history.length) html += '<ul class="small">' + g.history.map(function (h) { return "<li>" + esc(h) + "</li>"; }).join("") + "</ul>";
+    if (g.over) {
+      return html + '<p class="notice">' + (g.caught ? "Caught cheating: the pot is his." : g.won ? "You take the pot: " + g.stake * 2 + " gold." : "He takes the pot.") + "</p>" +
+        '<div class="actions"><button class="primary" data-act="mgclosegame">Continue</button></div>';
+    }
+    if (g.revealed) return html + '<div class="actions"><button class="primary" data-act="mgnextround">Next round</button></div>';
+    var bid = g.bid ? "The bid: " + g.bid.q + " × " + FACE[g.bid.f] : "You open the bidding.";
+    var q = g.bid ? g.bid.q : 1, f = g.bid ? Math.min(6, g.bid.f + 1) : 1;
+    if (g.bid && g.bid.f >= 6) { q += 1; f = 1; }
+    html += "<p><b>" + esc(bid) + "</b> (" + g.total + " dice on the table)</p>" +
+      '<div class="buyrow"><label>At least <input id="bid-q" class="qty" type="number" min="1" max="' + g.total + '" value="' + q + '"></label>' +
+      ' <label>showing <select id="bid-f">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<option value="' + n + '"' + (n === f ? " selected" : "") + ">" + FACE[n] + " (" + n + ")</option>"; }).join("") + "</select></label>" +
+      ' <button data-act="mgbid">Bid</button>' + (g.bid ? ' <button data-act="mgliar">Call Liar!</button>' : "") + "</div>";
+    if (!g.cheated) {
+      html += '<details class="check"><summary>Cheat: peek under his cup (once a game)</summary><div class="opts">' +
+        g.his.map(function (d, i) { return '<button data-act="mgcheat" data-i="' + i + '">Die ' + (i + 1) + "</button>"; }).join(" ") + "</div>" + checkLine(v.cheatAssess) +
+        '<p class="small muted">Two suspicion marks and you are caught: the pot is forfeit, and the pirates think less of you.</p></details>';
+    }
+    return html;
   }
 
   // ---- The Ship layer (§17.1) ----
@@ -678,6 +833,28 @@
   }
 
   var nodeHandlers = {
+    // ---- The minigames (§18) ----
+    "drink": function () { scrollTop(); PC.drinking.start(state); },
+    "dice": function () { scrollTop(); PC.liarsdice.start(state); },
+    "divewreck": function (el) { scrollTop(); PC.salvage.startGraveyardDive(state, el.dataset.wreck, false); },
+    "divequick": function (el) { scrollTop(); PC.salvage.startGraveyardDive(state, el.dataset.wreck, true); },
+    "miranda": function () { scrollTop(); PC.salvage.retryMiranda(state); },
+    "mgdive": function (el) { PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
+    "mgquick": function () { PC.salvage.quickDive(state); },
+    "mgbank": function (el) { PC.salvage.bank(state, state.minigame, el.dataset.pot); },
+    "mgdrink": function (el) { PC.drinking.act(state, el.dataset.op); },
+    "mgonemore": function (el) { PC.drinking.oneMore(state, el.dataset.yes === "1"); },
+    "mgreroll": function () { PC.minigames.reroll(state); },
+    "mgaccept": function () { PC.minigames.settle(state); },
+    "mgleave": function () { scrollTop(); PC.minigames.leave(state); },
+    "mgsize": function () { PC.liarsdice.sizeUp(state); },
+    "mgstake": function (el) { PC.liarsdice.newGame(state, Number(document.getElementById(el.dataset.for).value)); },
+    "mgbid": function () { PC.liarsdice.bid(state, Number(document.getElementById("bid-q").value), Number(document.getElementById("bid-f").value)); },
+    "mgliar": function () { PC.liarsdice.callLiar(state); },
+    "mgcheat": function (el) { PC.liarsdice.cheat(state, Number(el.dataset.i)); },
+    "mgnextround": function () { PC.liarsdice.nextRound(state); },
+    "mgclosegame": function () { PC.liarsdice.closeGame(state); },
+    "mgstop": function () { PC.liarsdice.stop(state); },
     "goplace": function (el) { enterPlace(el.dataset.place); },
     "leaveplace": function () {
       scrollTop();

@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -299,7 +299,7 @@ test("a version 2 (Milestone 1) save restarts at Ocracoke's arrival with its cap
   delete old.world.names; delete old.ship.upgrades; delete old.crew.tiers;
   old.money.crew = 777;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 4);
+  eq(back.saveVersion, PC.state.SAVE_VERSION);
   eq(back.location.node, "ocracoke");
   eq(back.current.sceneId, "ocr_sandbar");
   eq(back.money.crew, 777);
@@ -565,9 +565,19 @@ function choiceIndex(s, id) {
   for (var i = 0; i < sc.choices.length; i++) if (sc.choices[i].id === id) return i;
   return -1;
 }
+// The Miranda dive (§18.2) by the plainest road: a clean grab in the Hull
+// brings up the mermaid, then surface, any gold to the crew, and back to
+// the story.
+function diveForMermaid(s) {
+  forced("clean", function () { PC.salvage.act(s, "grab", "hull"); });
+  PC.salvage.act(s, "surface");
+  if (!s.minigame.banked) PC.salvage.bank(s, s.minigame, "crew");
+  PC.minigames.leave(s);
+}
 function play(s, prefs, limit) {
   prefs = prefs || [];
-  for (var n = 0; n < (limit || 200) && s.current.screen === "scene"; n++) {
+  for (var n = 0; n < (limit || 200) && (s.current.screen === "scene" || (s.current.screen === "minigame" && s.minigame.miranda)); n++) {
+    if (s.current.screen === "minigame") { diveForMermaid(s); continue; }
     var v = PC.scenes.viewScene(s);
     var sc = PC.scenes.sceneById(s.current.sceneId);
     var open = v.choices.filter(function (c) { return c.status === "open"; });
@@ -1103,13 +1113,17 @@ test("Welcome to the Underworld: failed approaches grey out; Brawling repeats wi
   eq(PC.rumors.talkCheck(s).dr, PC.rumors.talkCheck(ocr()).dr + 1);
 });
 
-test("A Dying Pirate's Wish: the stand-in dive costs 1 action; a shark setback is Wounded until the season ends", function () {
+test("A Dying Pirate's Wish: the Miranda dive costs 1 action; a shark setback is Wounded until the season ends", function () {
   var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
   PC.scenes.enterScene(s, "ocr_dpw_1");
   play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him"], 7);
   eq(s.current.sceneId, "ocr_dpw_dive");
   eq(s.ap.left, 6);
   pickIn(s, "dive");
+  eq(s.current.screen, "minigame");
+  ok(s.minigame.miranda, "on the Miranda");
+  diveForMermaid(s);
+  eq(s.current.sceneId, "ocr_dpw_shark");
   forced("setback", function () { pickIn(s, "swim"); });
   ok(s.captain.tags.indexOf("Wounded") >= 0);
   ok(PC.scenes.viewScene(s).setup.indexOf("bandage you up") >= 0);
@@ -1123,7 +1137,7 @@ test("A Dying Pirate's Wish: the stand-in dive costs 1 action; a shark setback i
 test("A Dying Pirate's Wish: killing the shark gives the necklace, Dread +3 and the Reputation rumor", function () {
   var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
   PC.scenes.enterScene(s, "ocr_dpw_1");
-  play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him", "dive"], 8);
+  play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him", "dive"], 9);
   forced("clean", function () { pickIn(s, "knife"); });
   eq(s.meters.dread, 3);
   ok(s.captain.items.indexOf("Shark-Tooth Necklace") >= 0);
@@ -1251,7 +1265,7 @@ test("a version 3 save standing in front of a placeholder plays the real scene",
   old.current = { screen: "scene", sceneId: "ocr_underworld_stub", phase: "choosing" };
   old.location.queue = ["ocr_dying_wish_stub"];
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq([back.saveVersion, back.current.sceneId, back.location.queue[0]], [4, "ocr_uw_1", "ocr_dpw_1"]);
+  eq([back.saveVersion, back.current.sceneId, back.location.queue[0]], [PC.state.SAVE_VERSION, "ocr_uw_1", "ocr_dpw_1"]);
   ok(PC.state.POSTURES.indexOf(back.world.posture) >= 0);
 });
 
@@ -1362,6 +1376,398 @@ test("the content check passes with Ocracoke loaded", function () {
   var s = opened();
   var v = PC.validate(s);
   eq(v.errors, []);
+});
+
+
+console.log("Milestone 4: the minigames (§18)");
+
+// A captain in town after the opening, at the Graveyard or the Tavern.
+function inTown(seed) { var s = opened(seed); s.location.place = null; s.current = { screen: "node" }; s.ap.left = 7; return s; }
+function at(s, place) { s.location.place = place; return s; }
+// Force every roll in fn to one outcome, and every seeded draw to come up r.
+function forcedDraw(value, fn) {
+  var real = PC.rng.fromKey;
+  PC.rng.fromKey = function () { return function () { return value; }; };
+  try { return fn(); } finally { PC.rng.fromKey = real; }
+}
+
+test("the Graveyard offers three seeded wrecks a season: the same on reload, others next season", function () {
+  var s = inTown();
+  var a = PC.salvage.wrecksOnOffer(s, "ocracoke"), b = PC.salvage.wrecksOnOffer(PC.state.deserialize(PC.state.serialize(s)), "ocracoke");
+  eq(a.length, 3); eq(a, b);
+  a.forEach(function (w) { ok(["sloop", "brig", "frigate"].indexOf(w.type) >= 0); ok(w.flavor); });
+  PC.state.advanceSeason(s);
+  ok(JSON.stringify(PC.salvage.wrecksOnOffer(s, "ocracoke")) !== JSON.stringify(a), "a fresh set next season");
+});
+
+test("a dive costs 1 action once a season; a clean grab costs 1 breath, a partial 2", function () {
+  var s = at(inTown(), "graveyard");
+  ok(PC.salvage.canDive(s).ok);
+  var w = PC.salvage.wrecksOnOffer(s, "ocracoke")[0];
+  PC.salvage.startGraveyardDive(s, w.id, false);
+  eq(s.ap.left, 6); eq(s.current.screen, "minigame"); eq(s.minigame.breath, 6);
+  forced("clean", function () { PC.salvage.act(s, "grab", "hull"); });
+  eq(s.minigame.breath, 5); eq(s.minigame.haul.length, 1);
+  forced("partial", function () { PC.salvage.act(s, "grab", "hull"); });
+  eq(s.minigame.breath, 3); eq(s.minigame.haul.length, 2);
+  PC.salvage.act(s, "surface");
+  ok(s.minigame.over && !s.minigame.blackout);
+  if (!s.minigame.banked) PC.salvage.bank(s, s.minigame, "crew");
+  PC.minigames.leave(s);
+  eq(s.current.screen, "node"); eq(s.location.place, "graveyard");
+  ok(!PC.salvage.canDive(s).ok, "once a season");
+});
+
+test("Scout: 1 breath, shows the next find, and the next grab there is one step easier", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[0].id, false);
+  var before = PC.minigames.view(s).zones.filter(function (z) { return z.id === "hold"; })[0].dr;
+  PC.salvage.act(s, "scout", "hold");
+  var z = PC.minigames.view(s).zones.filter(function (z) { return z.id === "hold"; })[0];
+  eq(s.minigame.breath, 5); eq(z.dr, before - 1); ok(z.scouted, "the next find is shown");
+});
+
+test("a setback draws a hazard: a Snag costs a breath; a Current makes that zone one step harder", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[0].id, false);
+  forcedDraw(0, function () { forced("setback", function () { PC.salvage.act(s, "grab", "hull"); }); }); // first card: Snag
+  eq(s.minigame.breath, 3);
+  forcedDraw(0.5, function () { forced("setback", function () { PC.salvage.act(s, "grab", "hull"); }); }); // 35-65: Current
+  eq(s.minigame.zones.hull.mod, 1);
+  eq(s.minigame.breath, 1);
+});
+
+test("out of breath is a blackout: half the haul (the better half) and Waterlogged", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[0].id, false);
+  forced("partial", function () { PC.salvage.act(s, "grab", "hull"); PC.salvage.act(s, "grab", "hold"); PC.salvage.act(s, "grab", "hold"); });
+  ok(s.minigame.over && s.minigame.blackout);
+  eq(s.minigame.kept.length, 1);
+  var best = s.minigame.haul.slice().sort(function (a, b) { return PC.salvage.worth(b) - PC.salvage.worth(a); })[0];
+  eq(s.minigame.kept[0], best);
+  ok(s.captain.tags.indexOf("Waterlogged") >= 0);
+  eq(PC.checks.assess(s, { type: "Endure", dr: 2 }).parts.some(function (p) { return p.label === "Waterlogged"; }), true);
+});
+
+test("the shark: a hiding setback blacks you out with the Wounded tag; never on the Miranda", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[0].id, false);
+  forcedDraw(0.7, function () { forced("setback", function () { PC.salvage.act(s, "grab", "hull"); }); }); // 65-85: Shark
+  ok(s.minigame.blackout); ok(s.captain.tags.indexOf("Wounded") >= 0);
+  eq(PC.data.minigames.salvage.miranda.hazards, { snag: 35, current: 30 });
+});
+
+test("Something Moves Below: a clean Ghost Sense can bring up the Giant Tooth (one at a time)", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[0].id, false);
+  forcedDraw(0.1, function () {
+    forced("setback", function () { PC.salvage.act(s, "grab", "hull"); });
+  });
+  // 0.1 lands on Snag; draw the cryptid by hand to test its result.
+  s.minigame.hazardRoll = null;
+  forcedDraw(0.01, function () { forced("clean", function () { PC.minigames.roll(s, s.minigame, { type: "Ghost Sense", dr: 3 }, "cryptid", {}, ["Underwater"]); }); });
+  ok(s.minigame.haul.some(function (i) { return i.item === "Giant Tooth"; }), "the relic");
+  s.captain.items.push("Giant Tooth");
+  forcedDraw(0.01, function () { forced("clean", function () { PC.minigames.roll(s, s.minigame, { type: "Ghost Sense", dr: 3 }, "cryptid", {}, ["Underwater"]); }); });
+  eq(s.minigame.haul.filter(function (i) { return i.item === "Giant Tooth"; }).length, 1, "not a second one");
+});
+
+test("Quick Dive: clean brings up four finds, partial two, a setback nothing", function () {
+  ["clean", "partial", "setback"].forEach(function (o) {
+    var s = at(inTown(), "graveyard");
+    var w = PC.salvage.wrecksOnOffer(s, "ocracoke")[0];
+    forced(o, function () { PC.salvage.startGraveyardDive(s, w.id, true); });
+    ok(s.minigame.over);
+    var finds = 0; ["hold", "hull", "cabin"].forEach(function (z) { if (s.minigame.zones[z]) finds += s.minigame.zones[z].next; });
+    eq(finds, { clean: 4, partial: 2, setback: 0 }[o], o);
+    if (o === "setback") ok(s.minigame.blackout && !s.minigame.kept.length);
+  });
+});
+
+test("the Diver's Mask gives +1 breath; the Diving Barrel +2, and only the best counts", function () {
+  var s = inTown();
+  s.captain.items.push("Diver's Mask"); eq(PC.salvage.breathMax(s), 7);
+  s.captain.items.push("Diving Barrel"); eq(PC.salvage.breathMax(s), 8);
+});
+
+test("the Miranda: the mermaid waits first in her Hull at DR 1; surfacing without it leaves Ollie waiting", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, "ocr_dpw_1");
+  play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him"], 7);
+  s.flags.ocr_first_tavern_done = true; // in play, the quest fires as he leaves the Tavern
+  pickIn(s, "dive");
+  eq(s.minigame.zones.hull.dr, 1);
+  eq(s.minigame.zones.hull.items[0].tier, "quest");
+  ok(!PC.minigames.view(s).canQuick, "no Quick Dive on the Miranda");
+  PC.salvage.act(s, "surface");
+  if (!s.minigame.banked) PC.salvage.bank(s, s.minigame, "crew");
+  PC.minigames.leave(s);
+  eq(s.current.screen, "node"); eq(s.location.place, "graveyard");
+  ok(!PC.node.places(s).filter(function (p) { return p.id === "graveyard"; })[0].locked, "the Graveyard is open while he waits");
+  ok(PC.salvage.mirandaPending(s));
+  var ap = s.ap.left;
+  PC.salvage.retryMiranda(s);
+  eq(s.ap.left, ap - 1, "each retry is 1 action");
+  forced("clean", function () { PC.salvage.act(s, "grab", "hull"); });
+  ok(s.minigame.questFound);
+  PC.salvage.act(s, "surface");
+  if (!s.minigame.banked) PC.salvage.bank(s, s.minigame, "crew");
+  PC.minigames.leave(s);
+  eq(s.current.sceneId, "ocr_dpw_shark");
+});
+
+test("the Miranda: a blackout never loses the mermaid", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  PC.scenes.enterScene(s, "ocr_dpw_1");
+  play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him", "dive"], 8);
+  forced("partial", function () { PC.salvage.act(s, "grab", "hull"); PC.salvage.act(s, "grab", "hold"); PC.salvage.act(s, "grab", "hold"); });
+  ok(s.minigame.blackout);
+  ok(s.minigame.kept.some(function (i) { return i.tier === "quest"; }));
+});
+
+test("the loot envelope (§32.15): four clean grabs land about 2 / 3 / 5-6 treasure on a sloop, brig, frigate", function () {
+  var S = PC.data.minigames.salvage, avg = {};
+  ["sloop", "brig", "frigate"].forEach(function (type) {
+    var tot = 0, n = 400;
+    for (var i = 0; i < n; i++) {
+      var s = fresh("env" + i);
+      var w = { id: "w" + i, type: type, flavor: "" };
+      var game = PC.salvage.start(s, { wreck: w });
+      var order = type === "sloop" ? ["hold", "hold", "hull", "hull"] : ["cabin", "cabin", "hold", "hold"];
+      order.forEach(function (z) { var zz = game.zones[z]; var it = zz.items[zz.next++]; if (it.tier === "treasure") tot += it.treasure; });
+    }
+    avg[type] = tot / n;
+  });
+  ok(avg.sloop > 1.2 && avg.sloop < 3, "sloop " + avg.sloop);
+  ok(avg.brig > 2.5 && avg.brig < 4.5, "brig " + avg.brig);
+  ok(avg.frigate > 4 && avg.frigate < 7, "frigate " + avg.frigate);
+});
+
+test("drinking: locked on the first visit, then once a season for an action, counting as a Tavern visit", function () {
+  var s = ocr(); playOpening(s); PC.node.enter(s, "tavern");
+  eq(PC.drinking.canDrink(s).why, "Not on your first visit");
+  s = at(inTown(), "tavern");
+  ok(PC.drinking.canDrink(s).ok);
+  var keeper = PC.node.slotNpc("ocracoke", "keeper");
+  PC.drinking.start(s);
+  eq(s.ap.left, 6);
+  eq((s.npcs[keeper] || {}).visitStamp, PC.state.stamp(s));
+  var g = s.minigame;
+  eq(g.opp.role, "Pirate");
+  ok(PC.data.minigames.drinking.pools.ocracoke.traits.indexOf(g.opp.trait) >= 0);
+  ok(g.opp.tolerance >= 3 && g.opp.tolerance <= (g.opp.trait === "Old Sea Dog" ? 7 : 6), "Tolerance " + g.opp.tolerance);
+  ok(PC.minigames.view(s).log[0].indexOf("A grizzled pirate drops onto the stool across from you, ") === 0);
+});
+
+test("drinking: the ladder DR is 1 + drinks poured, capped at 5; a Hard Drinker makes it one harder", function () {
+  var s = at(inTown(), "tavern");
+  PC.drinking.start(s);
+  var g = s.minigame;
+  g.opp.trait = "Jovial"; g.opp.tolerance = 6; g.opp.tolMax = 6; g.opp.strongRound = null;
+  var dr = function () { return PC.drinking.options(s, g).filter(function (o) { return o.op === "drink"; })[0].check.dr; };
+  eq(dr(), 1);
+  forced("clean", function () { PC.drinking.act(s, "drink"); });
+  eq(dr(), 2); eq(g.wits, 6); eq(g.opp.tolerance, 5);
+  forced("partial", function () { PC.drinking.act(s, "drink"); });
+  eq(dr(), 3); eq(g.wits, 5);
+  g.opp.trait = "Hard Drinker";
+  eq(dr(), 4);
+  g.poured = 9; eq(dr(), 5, "capped");
+});
+
+test("drinking: a win pays the loss quest's drinking lead first, then a Danger or Prize rumor", function () {
+  var s = at(inTown(), "tavern");
+  PC.drinking.start(s);
+  s.minigame.opp.tolerance = 1; s.minigame.opp.tolMax = 4; s.minigame.opp.strongRound = null;
+  forced("clean", function () { PC.drinking.act(s, "drink"); });
+  ok(s.minigame.result.won);
+  ok(PC.quests.hasLead(s, "what_was_lost", "drinking"), "the drinking lead");
+  eq(s.minigame.result.rumor, null);
+  PC.minigames.leave(s);
+  PC.state.advanceSeason(s);
+  PC.drinking.start(s);
+  s.minigame.opp.tolerance = 1; s.minigame.opp.strongRound = null;
+  forced("clean", function () { PC.drinking.act(s, "drink"); });
+  ok(s.minigame.result.rumor && ["Danger", "Prize"].indexOf(s.minigame.result.rumor.type) >= 0, "a Danger or Prize rumor");
+});
+
+test("drinking: one taunt a match; a clean taunt makes him drink alone", function () {
+  var s = at(inTown(), "tavern");
+  PC.drinking.start(s);
+  var g = s.minigame; g.opp.tolerance = 5; g.opp.tolMax = 5; g.opp.strongRound = null; g.opp.trait = "Jovial";
+  forced("clean", function () { PC.drinking.act(s, "mock"); });
+  eq(g.wits, 6); eq(g.opp.tolerance, 4);
+  ok(!PC.drinking.options(s, g).some(function (o) { return o.op === "mock" || o.op === "lean"; }), "no second taunt");
+});
+
+test("drinking: a loss pays the tab from the purse; going under pays double and rolls the Hangover", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 100;
+  PC.drinking.start(s);
+  PC.drinking.act(s, "callit");
+  eq(s.money.purse, 90);
+  ok(s.minigame.over);
+  PC.minigames.leave(s); PC.state.advanceSeason(s);
+  PC.drinking.start(s);
+  s.minigame.wits = 1; s.minigame.opp.tolerance = 6; s.minigame.opp.strongRound = null;
+  forcedDraw(0, function () { forced("setback", function () { PC.drinking.act(s, "drink"); }); });
+  ok(s.minigame.over && !s.minigame.result.won);
+  eq(s.money.purse, 70, "double tab");
+  ok(s.captain.tags.indexOf("Hangover") >= 0, "a failed Hangover roll");
+  eq(PC.checks.assess(s, { type: "Read People", dr: 2 }).parts.some(function (p) { return p.label === "Hangover"; }), true);
+});
+
+test("drinking: a brawl costs the tavern keeper a rung, whoever wins", function () {
+  var s = at(inTown(), "tavern");
+  var keeper = PC.node.slotNpc("ocracoke", "keeper");
+  var before = PC.npcs.rung(s, keeper);
+  PC.drinking.start(s);
+  s.minigame.opp.strongRound = null; s.minigame.opp.tolerance = 6;
+  forcedDraw(0.75, function () { forced("setback", function () { PC.drinking.act(s, "drink"); }); }); // 70-90: Brawl
+  ok(s.minigame.over);
+  eq(PC.npcs.rung(s, keeper), before - 1);
+});
+
+test("drinking: the Heavy Drinker's One more round, and the third time Drunkard replaces the flaw", function () {
+  var s = at(inTown(), "tavern"); s.captain.flaws = ["Heavy Drinker"];
+  for (var i = 0; i < 3; i++) {
+    if (i) { PC.minigames.leave(s); PC.state.advanceSeason(s); }
+    PC.drinking.start(s);
+    s.minigame.opp.tolerance = 1; s.minigame.opp.strongRound = null;
+    forced("clean", function () { PC.drinking.act(s, "drink"); });
+    ok(s.minigame.offerOneMore, "offered, round " + i);
+    PC.drinking.oneMore(s, true);
+    eq(s.minigame.wits, 6, "at the Wits he has left");
+    PC.drinking.act(s, "callit");
+  }
+  ok(s.captain.tags.indexOf("Drunkard") >= 0); eq(s.captain.flaws, []);
+});
+
+test("drinking: hair of the dog starts at 5 Wits; a clean first drink clears the Hangover; shore leave clears it too", function () {
+  var s = at(inTown(), "tavern");
+  PC.scenes.applyEffect(s, { tag: "Hangover", untilSeasonEnd: true });
+  PC.drinking.start(s);
+  eq(s.minigame.wits, 5);
+  s.minigame.opp.tolerance = 6; s.minigame.opp.strongRound = null;
+  forced("clean", function () { PC.drinking.act(s, "drink"); });
+  ok(s.captain.tags.indexOf("Hangover") < 0);
+});
+
+test("Liar's Dice: stakes 25-50 from the purse at Ocracoke, an action a sitting", function () {
+  var s = at(inTown(), "tavern");
+  ok(!PC.liarsdice.canPlay(s).ok, "an empty purse can't sit down");
+  s.money.purse = 200;
+  ok(PC.liarsdice.canPlay(s).ok);
+  PC.liarsdice.start(s);
+  eq(s.ap.left, 6);
+  eq(PC.liarsdice.stakes(s), [25, 50]);
+  var threw = false; try { PC.liarsdice.newGame(s, 60); } catch (e) { threw = true; }
+  ok(threw, "over the table limit");
+  PC.liarsdice.newGame(s, 30);
+  eq(s.money.purse, 170);
+  eq(s.minigame.round.mine.length, 3);
+});
+
+test("Liar's Dice: a raise bids more dice, or the same number of a higher face", function () {
+  var g = { myN: 3, hisN: 3, bid: { q: 2, f: 4 } };
+  ok(PC.liarsdice.valid(g, 2, 5)); ok(PC.liarsdice.valid(g, 3, 1));
+  ok(!PC.liarsdice.valid(g, 2, 4)); ok(!PC.liarsdice.valid(g, 1, 6)); ok(!PC.liarsdice.valid(g, 7, 6));
+  eq(Math.round(PC.liarsdice.atLeast(1, 3) * 1000), 421);
+});
+
+test("Liar's Dice: a call the count meets costs the caller a die; the last with dice takes the pot", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 200;
+  PC.liarsdice.start(s); PC.liarsdice.newGame(s, 50);
+  var g = s.minigame.round;
+  g.mine = [6, 6, 6]; g.his = [1, 2, 3];
+  g.turn = "me"; g.bid = { q: 4, f: 6, by: "him" };
+  PC.liarsdice.callLiar(s); // only three sixes: his bid was a lie
+  eq(g.hisN, 2);
+  // Play out the game by calling his bids until someone runs out.
+  for (var n = 0; n < 50 && !g.over; n++) {
+    if (g.revealed) { PC.liarsdice.nextRound(s); continue; }
+    if (g.turn === "me") { if (g.bid) PC.liarsdice.callLiar(s); else PC.liarsdice.bid(s, 1, g.mine[0]); }
+  }
+  ok(g.over, "the game ends");
+  eq(s.money.purse, g.won ? 250 : 150);
+});
+
+test("Liar's Dice: the opponent never makes an invalid bid, over many seeded games", function () {
+  for (var i = 0; i < 60; i++) {
+    var s = at(inTown("ld" + i), "tavern"); s.money.purse = 1000;
+    PC.liarsdice.start(s);
+    for (var games = 0; games < 3; games++) {
+      PC.liarsdice.newGame(s, 25);
+      var g = s.minigame.round;
+      for (var n = 0; n < 200 && !g.over; n++) {
+        if (g.revealed) { PC.liarsdice.nextRound(s); continue; }
+        var prev = g.bid;
+        if (g.bid && (n % 3 === 0)) { PC.liarsdice.callLiar(s); continue; }
+        var q = g.bid ? g.bid.q + 1 : 1;
+        if (q > g.myN + g.hisN) { PC.liarsdice.callLiar(s); continue; }
+        PC.liarsdice.bid(s, q, 1 + (n % 6));
+        if (!g.revealed && g.bid && g.bid.by === "him") ok(PC.liarsdice.valid({ myN: g.myN, hisN: g.hisN, bid: { q: q, f: 1 + (n % 6) } }, g.bid.q, g.bid.f) || g.bid.q > q, "his bid raises mine");
+      }
+      ok(g.over, "game " + games + " of seed " + i + " ends");
+      PC.liarsdice.closeGame(s);
+    }
+  }
+});
+
+test("Liar's Dice: caught cheating forfeits the pot and costs black Standing -5; two marks get you caught", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 200;
+  PC.liarsdice.start(s); PC.liarsdice.newGame(s, 40);
+  forced("setback", function () { PC.liarsdice.cheat(s, 0); });
+  ok(s.minigame.round.caught);
+  eq(s.meters.standing.pirates, -5);
+  eq(s.money.purse, 160);
+  PC.liarsdice.closeGame(s);
+  PC.liarsdice.newGame(s, 25);
+  forced("partial", function () { PC.liarsdice.cheat(s, 1); });
+  ok(!s.minigame.round.caught, "one mark");
+  s.minigame.round.over = true; PC.liarsdice.closeGame(s);
+  PC.liarsdice.newGame(s, 25);
+  forced("partial", function () { PC.liarsdice.cheat(s, 1); });
+  ok(s.minigame.round.caught, "the second mark");
+});
+
+test("Liar's Dice: Loaded Dice reroll the Cheat once a sitting; five games a sitting", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 500; s.captain.items.push("Loaded Dice");
+  PC.liarsdice.start(s); PC.liarsdice.newGame(s, 25);
+  forced("setback", function () { PC.liarsdice.cheat(s, 0); });
+  ok(s.minigame.pending, "waiting on a reroll");
+  eq(PC.minigames.view(s).pending.reroll, "Loaded Dice");
+  forced("clean", function () { PC.minigames.reroll(s); });
+  ok(!s.minigame.round.caught);
+  for (var i = 1; i < 5; i++) { s.minigame.round.over = true; PC.liarsdice.closeGame(s); PC.liarsdice.newGame(s, 25); }
+  s.minigame.round.over = true; PC.liarsdice.closeGame(s);
+  var threw = false; try { PC.liarsdice.newGame(s, 25); } catch (e) { threw = true; }
+  ok(threw, "a sixth game");
+});
+
+test("Card Sharp comes after 500 gold won at Liar's Dice", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 500;
+  s.minigames.diceWinnings = 480;
+  PC.liarsdice.start(s); PC.liarsdice.newGame(s, 25);
+  var g = s.minigame.round; g.hisN = 1; g.his = [1]; g.mine = [6, 6, 6]; g.turn = "me"; g.bid = { q: 2, f: 1, by: "him" };
+  PC.liarsdice.callLiar(s);
+  ok(g.won); ok(s.captain.tags.indexOf("Card Sharp") >= 0);
+});
+
+test("a version 4 save loads as version 5 with the minigame fields", function () {
+  var old = JSON.parse(PC.state.serialize(opened()));
+  old.saveVersion = 4; delete old.minigames; delete old.minigame;
+  var back = PC.state.deserialize(JSON.stringify(old));
+  eq(back.saveVersion, 5); ok(back.minigames); eq(back.minigame, null);
+});
+
+test("a save made mid-dive round-trips", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[1].id, false);
+  forced("clean", function () { PC.salvage.act(s, "grab", "hull"); });
+  var back = PC.state.deserialize(PC.state.serialize(s));
+  eq(back, s);
+  PC.salvage.act(back, "surface");
+  ok(back.minigame.over);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

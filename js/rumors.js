@@ -308,5 +308,6 @@
     fenceDealRumor: fenceDealRumor,
     askFrench: askFrench,
     render: render,
+    draw: drawOne, // one rumor by type weights, for the minigames (§18.2, §18.4.6)
   };
 })();

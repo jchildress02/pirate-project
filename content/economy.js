@@ -76,5 +76,10 @@
     "French wine": { base: 50, kind: "drink", stores: 7 },
     "French brandy": { base: 70, kind: "drink", stores: 7 },
     "Indigo": { base: 40, kind: "fine" },
+    // Salvage goods (§32.15; prices §20.9).
+    "Ming porcelain": { base: 250, kind: "fine" },
+    "Ambergris": { base: 400, kind: "fine" },
+    "Pearls": { base: 600, kind: "fine" },
+    "Silver bars": { base: 150, kind: "precious" },
   };
 })();

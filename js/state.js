@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 4;
+  var SAVE_VERSION = 5;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -48,7 +48,16 @@
     };
     addMilestone2Fields(state, startNode);
     addMilestone3Fields(state);
+    addMilestone4Fields(state);
     return state;
+  }
+
+  // Milestone 4: the minigames (§18). The game in play (state.minigame) and
+  // what carries across sessions: Liar's Dice winnings toward Card Sharp,
+  // the Heavy Drinker's "One more round" count, session counters.
+  function addMilestone4Fields(state) {
+    state.minigames = state.minigames || { diceWinnings: 0, oneMoreRounds: 0, drinkSessions: 0, diceSessions: 0 };
+    if (state.minigame === undefined) state.minigame = null;
   }
 
   // Milestone 3: Frisia's posture, rolled at world creation (§8; equal odds
@@ -161,6 +170,12 @@
       if (data.current && STUB_TO_SCENE[data.current.sceneId]) data.current = { screen: "scene", sceneId: STUB_TO_SCENE[data.current.sceneId], phase: "choosing" };
       if (data.location && data.location.queue) data.location.queue = data.location.queue.map(function (q) { return STUB_TO_SCENE[q] || q; });
       data.saveVersion = 4;
+    }
+    if (data.saveVersion === 4) {
+      // Version 5 (Milestone 4): the minigames. Nothing a version 4 save holds
+      // changes; a captain standing at the stand-in dive plays the real one.
+      addMilestone4Fields(data);
+      data.saveVersion = 5;
     }
     return data;
   }

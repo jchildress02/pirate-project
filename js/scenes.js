@@ -247,7 +247,7 @@
     var after = [];
     var live = (o.effects || []).filter(function (e) { return test(state, e.when); }); // judged before any applies
     live.forEach(function (e) {
-      if ("goPlace" in e) { after.push(e); return; }
+      if ("goPlace" in e || "minigame" in e) { after.push(e); return; }
       var line = applyEffect(state, e, pot);
       if (line) PC.state.addLog(state, "  " + line);
     });
@@ -263,7 +263,17 @@
       if (o.carry && state.current.screen === "scene") state.current.again = text;
     }
     // Walk the captain somewhere once the scene ends (Twopenny's exit: to the Tavern).
-    after.forEach(function (e) { if (PC.node && state.current.screen === "node") PC.node.enter(state, e.goPlace, { quiet: false }); });
+    after.forEach(function (e) {
+      if ("minigame" in e) { startMinigame(state, e.minigame); return; }
+      if (PC.node && state.current.screen === "node") PC.node.enter(state, e.goPlace, { quiet: false });
+    });
+  }
+
+  // A scene that hands over to a minigame (A Dying Pirate's Wish's dive on
+  // the Miranda, §18.2). The minigame decides where the story goes next.
+  function startMinigame(state, mg) {
+    if (mg === "miranda") return PC.salvage.start(state, { miranda: true, back: "node" });
+    throw new Error("Unknown minigame: " + mg);
   }
 
   function labelFor(outcome) {
