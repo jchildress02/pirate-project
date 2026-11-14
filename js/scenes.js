@@ -26,6 +26,9 @@
   //   { season: "Spring" }     or a list: { season: ["Spring", "Summer"] }
   //   { gold: { pot: "crew", atLeast: 20 } }
   //   { gender: "f" }          the captain's
+  //   { loss: "A" } or { loss: ["A", "C"] }   the captain's loss variant (§12.5)
+  //   { seasonFlag: "x" }      a flag set this season (keeper_annoyed)
+  //   { rungAtLeast: { npc, rung: "Friend" } }
   //   { all: [...] } { any: [...] } { not: {...} }
   function test(state, cond) {
     if (!cond) return true;
@@ -35,6 +38,9 @@
     if (cond.any) return cond.any.some(function (x) { return test(state, x); });
     if (cond.not) return !test(state, cond.not);
     if (cond.flag) return state.flags[cond.flag] === true;
+    if (cond.seasonFlag) return state.flags[cond.seasonFlag] === seasonStamp(state);
+    if (cond.loss) return (Array.isArray(cond.loss) ? cond.loss : [cond.loss]).indexOf(c.loss) >= 0;
+    if (cond.rungAtLeast) return PC.npcs.rung(state, cond.rungAtLeast.npc) >= PC.npcs.RUNG_VALUE[cond.rungAtLeast.rung];
     if (cond.notFlag) return state.flags[cond.notFlag] !== true;
     if (cond.tag) return (c.tags || []).indexOf(cond.tag) >= 0;
     if (cond.notTag) return (c.tags || []).indexOf(cond.notTag) < 0;
@@ -65,8 +71,20 @@
 
   function enterScene(state, id) {
     var s = sceneById(id);
-    if (s.ap) state.ap.left -= s.ap;
+    if (s.ap) state.ap.left = Math.max(0, state.ap.left - s.ap); // a scene that fires on its own never blocks on time
     state.current = { screen: "scene", sceneId: id, phase: "choosing", pending: null };
+  }
+
+  // An exit is a scene id, "hub", or a list of { when, to } tried in order
+  // with a plain id as the fallback (the pointer only if he told his loss).
+  function resolveExit(state, exit) {
+    if (!Array.isArray(exit)) return exit;
+    for (var i = 0; i < exit.length; i++) {
+      var e = exit[i];
+      if (typeof e === "string") return e;
+      if (test(state, e.when)) return e.to;
+    }
+    return "hub";
   }
 
   // "hub" means back to where the captain is: the node's menus (and any
@@ -87,8 +105,22 @@
 
   // ---- What the player sees -------------------------------------------
 
+  // Scene text can be a string, or a list of pieces where some pieces only
+  // show under a condition: ["Always. ", { when: { flag: "x" }, text: "Only with x." }].
+  // This is how an author's bracketed variant lines ([bar_wrecked] ...) are filed.
+  function textOf(state, t) {
+    if (t == null) return "";
+    if (typeof t === "string") return t;
+    if (Array.isArray(t)) return t.map(function (p) { return textOf(state, p); }).join("");
+    if (typeof t === "object") return test(state, t.when) ? textOf(state, t.text) : "";
+    return String(t);
+  }
+
   function setupText(state, s) {
-    var text = s.setup || "";
+    // Back at the same menu after an information step: the answer stands in
+    // for the setup, so the player isn't shown the whole scene again.
+    if (state.current.again != null) return PC.text.render(state.current.again, state);
+    var text = textOf(state, s.setup);
     (s.variants || []).forEach(function (v) {
       if (!test(state, v.when)) return;
       if (v.replace) text = text.split(v.replace).join(v.line);
@@ -106,7 +138,7 @@
   }
 
   function choiceView(state, s, ch, index) {
-    var v = { index: index, label: PC.text.render(ch.label, state), status: "open", reason: null, check: null, cost: ch.cost || null };
+    var v = { index: index, label: PC.text.render(textOf(state, ch.label), state), status: "open", reason: null, check: null, cost: ch.cost || null };
     if (ch.hiddenUnless && !test(state, ch.hiddenUnless)) v.status = "hidden";
     else if (ch.lockedUnless && !test(state, ch.lockedUnless)) { v.status = "locked"; v.reason = ch.lockedReason || "Locked"; }
     else {
@@ -146,13 +178,13 @@
     var reroll = ch.check ? PC.checks.availableReroll(state, ch.check, p.outcome, { conditions: s.conditions || [] }) : null;
     if (p.rerolled) reroll = null; // at most one reroll per roll
     return {
-      choiceLabel: PC.text.render(ch.label, state),
+      choiceLabel: PC.text.render(textOf(state, ch.label), state),
       outcome: p.outcome, // "clean" | "partial" | "setback" | "result"
       roll: p.roll || null,
       firstRoll: p.firstRoll || null,
-      text: PC.text.render(o.text, state),
-      effects: (o.effects || []).map(function (e) { return describeEffect(state, e); }),
-      needsPot: (o.effects || []).some(function (e) { return e.gold > 0 && (!e.pot || e.pot === "prompt"); }),
+      text: PC.text.render(textOf(state, o.text), state),
+      effects: (o.effects || []).filter(function (e) { return test(state, e.when); }).map(function (e) { return describeEffect(state, e); }),
+      needsPot: (o.effects || []).some(function (e) { return e.gold > 0 && (!e.pot || e.pot === "prompt") && test(state, e.when); }),
       reroll: reroll,
     };
   }
@@ -209,13 +241,29 @@
     var p = state.current.pending;
     var ch = s.choices[p.choiceIndex];
     var o = outcomeFor(ch, p.outcome);
-    PC.state.addLog(state, PC.text.render(ch.label, state) + " — " + labelFor(p.outcome));
-    (o.effects || []).forEach(function (e) {
+    PC.state.addLog(state, PC.text.render(textOf(state, ch.label), state) + " — " + labelFor(p.outcome));
+    var text = PC.text.render(textOf(state, o.text), state);
+    var exit = resolveExit(state, o.exit); // read before the effects change the flags
+    var after = [];
+    var live = (o.effects || []).filter(function (e) { return test(state, e.when); }); // judged before any applies
+    live.forEach(function (e) {
+      if ("goPlace" in e) { after.push(e); return; }
       var line = applyEffect(state, e, pot);
       if (line) PC.state.addLog(state, "  " + line);
     });
     state.seen[s.id] = s.repeat === "season" ? seasonStamp(state) : true;
-    goTo(state, o.exit);
+    if (exit === s.id) {
+      // Back to the same menu (an information step, or a failed approach
+      // that greys out): the answer stays on screen above the choices.
+      state.current = { screen: "scene", sceneId: s.id, phase: "choosing", pending: null, again: text || state.current.again || null };
+    } else {
+      goTo(state, exit);
+      // carry: the next menu opens on this result's line (Twopenny's "Ten
+      // gold pieces, this time only" stays above PAY and the shove).
+      if (o.carry && state.current.screen === "scene") state.current.again = text;
+    }
+    // Walk the captain somewhere once the scene ends (Twopenny's exit: to the Tavern).
+    after.forEach(function (e) { if (PC.node && state.current.screen === "node") PC.node.enter(state, e.goPlace, { quiet: false }); });
   }
 
   function labelFor(outcome) {
@@ -247,7 +295,14 @@
       var n = PC.data.npcs[e.ladder.npc];
       return (n ? n.first : e.ladder.npc) + (e.ladder.delta > 0 ? " warms to you" : " cools on you");
     }
-    if ("tag" in e) return e.tell === false ? null : (e.remove ? "Lost tag: " : "New tag: ") + e.tag;
+    if ("rung" in e) {
+      var rn = PC.npcs ? PC.npcs.get(state, e.rung.npc) : null;
+      return (rn ? rn.first : e.rung.npc) + ": " + e.rung.set;
+    }
+    if ("join" in e) { var jn = PC.data.npcs[e.join]; return (jn ? jn.first + " " + jn.last : e.join) + " joins your officers"; }
+    if ("lead" in e) return "Lead recorded in your journal";
+    if ("dies" in e || "seasonFlag" in e || "meet" in e) return null;
+    if ("tag" in e) return e.tell === false ? null : (e.remove ? "Lost tag: " : "New tag: ") + e.tag + (e.untilSeasonEnd ? " (until the end of the season)" : "");
     if ("item" in e) return "Gained: " + e.item;
     if ("ap" in e) return "Time " + signed(e.ap);
     if ("flag" in e) return null; // flags are silent
@@ -291,7 +346,19 @@
       var i = tags.indexOf(e.tag);
       if (e.remove) { if (i >= 0) tags.splice(i, 1); }
       else if (i < 0) tags.push(e.tag);
+      // A temporary tag that lapses when the season turns (§5.3).
+      if (e.untilSeasonEnd && !e.remove) { state.captain.tagsUntil = state.captain.tagsUntil || {}; state.captain.tagsUntil[e.tag] = seasonStamp(state); }
     }
+    else if ("rung" in e) {
+      // Set an NPC's rung outright ("Twopenny Friendly", §15.6).
+      var want = PC.npcs.RUNG_VALUE[e.rung.set];
+      PC.npcs.moveRung(state, e.rung.npc, want - PC.npcs.rung(state, e.rung.npc));
+    }
+    else if ("join" in e) { PC.officers.joinNamed(state, e.join); }
+    else if ("lead" in e) { PC.quests.addLead(state, e.lead.quest, e.lead.id); }
+    else if ("dies" in e) { var dn = (state.npcs[e.dies] = state.npcs[e.dies] || {}); dn.dead = true; return null; }
+    else if ("meet" in e) { var mn = (state.npcs[e.meet] = state.npcs[e.meet] || {}); mn.met = true; return null; }
+    else if ("seasonFlag" in e) { state.flags[e.seasonFlag] = seasonStamp(state); return null; }
     else if ("item" in e) { state.captain.items.push(e.item); }
     else if ("ap" in e) { state.ap.left = Math.max(0, state.ap.left + e.ap); }
     else if ("flag" in e) { state.flags[e.flag] = e.value !== false; return null; }
@@ -321,6 +388,8 @@
 
   PC.scenes = {
     test: test,
+    textOf: textOf,
+    resolveExit: resolveExit,
     sceneById: sceneById,
     canEnter: canEnter,
     enterScene: enterScene,

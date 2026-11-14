@@ -115,6 +115,9 @@
   add("Bad Knee", { edge: plus(["Chase & Climb", "Board"], -1) });
   add("Old Wound", { edge: plus(["Endure", "Wilderness Survival"], -1) });
   add("Failing Eyes", { edge: plus(["Keep Watch", "Marksmanship"], -1) });
+  // Temporary physical tags (§14.5) and items the opening can give (§32).
+  add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
+  add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
   add("Weak Chest", { edge: plus(["Endure", "Haul & Labor", "Dive"], -1).concat([{ any: true, value: -1, when: { condition: "Cold" } }]) });
   add("Bad Back", { edge: [{ group: "Heavy Labor", value: -1 }] });
   add("Rheumy Hands", { edge: [{ group: "Fine Work", value: -1 }] });

@@ -20,7 +20,7 @@
   // Paragraphs on blank lines; *stage business* in italics (§33.3.3).
   function prose(text) {
     return String(text || "").split(/\n\n+/).filter(Boolean).map(function (p) {
-      return "<p>" + esc(p).replace(/\*([^*]+)\*/g, "<em>*$1*</em>").replace(/\n/g, "<br>") + "</p>";
+      return "<p>" + esc(p).replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/\n/g, "<br>") + "</p>";
     }).join("");
   }
 
@@ -63,13 +63,13 @@
     root.innerHTML =
       '<div class="title-screen">' +
       "<h1>Pirate Chronicle</h1>" +
-      '<p class="sub">Prototype · Milestone 2 · the Ocracoke shell</p>' +
+      '<p class="sub">Prototype · Milestone 3 · scenes and quests</p>' +
       '<div class="title-buttons">' +
       (hasSave ? '<button data-act="continue" class="primary">Continue</button>' : "") +
       '<button data-act="new"' + (hasSave ? "" : ' class="primary"') + ">New game</button>" +
       '<button data-act="import">Load a save file</button>' +
       "</div>" +
-      '<p class="note">Make your captain and sail into Ocracoke: walk the town, buy, hire hands, repair the sloop and sign the Articles. The opening scenes come next.</p>' +
+      '<p class="note">Make your captain and sail into Ocracoke: run the sandbar, meet the Beach Captain, take Bobby Rats\'s job and grant a dying pirate\'s wish. Then hire hands and officers, hear the rumors, repair the sloop and sign the Articles. The minigames come next.</p>' +
       '<p class="note"><button class="link" data-act="quickstart">Quick start with the test captain</button></p>' +
       "</div>";
     wire();
@@ -142,8 +142,8 @@
     return '<div class="officer-card">' +
       (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
       "<div><b>" + esc((o.first + " " + o.last).trim()) + "</b><br>" +
-      '<span class="small">' + esc(o.type) + " · your mentor" + (o.quartermaster ? " · Quartermaster" : "") + "</span><br>" +
-      '<span class="small muted">' + esc(o.voice) + ", " + esc(o.secondary) + ", Mentor · " + esc(RUNGS[String(o.rung)] || "") + "</span></div></div>";
+      '<span class="small">' + esc(o.type) + (o.mentor ? " · your mentor" : o.named ? " · Named officer" : "") + (o.quartermaster ? " · Quartermaster" : "") + "</span><br>" +
+      '<span class="small muted">' + esc([o.voice, o.secondary, o.third, o.mentor ? "Mentor" : o.unique && o.unique !== o.voice ? o.unique : null].filter(Boolean).join(", ")) + " · " + esc(RUNGS[String(o.rung)] || "") + "</span></div></div>";
   }
 
   function checkLine(chk) {
@@ -251,10 +251,11 @@
     var s = state.location.say;
     if (!s) return "";
     return '<div class="say">' + (s.who ? '<span class="who">' + esc(s.who) + "</span> " : "") + esc(PC.text.render(s.line, state)) +
+      (s.heard && s.heard.length ? '<ul class="heard">' + s.heard.map(function (h) { return "<li>" + prose(h).replace(/^<p>|<\/p>$/g, "") + "</li>"; }).join("") + "</ul>" : "") +
       (s.note ? '<span class="note">' + esc(s.note) + "</span>" : "") + "</div>";
   }
 
-  function say(who, line, note) { state.location.say = { who: who, line: line || "", note: note || null }; }
+  function say(who, line, note, heard) { state.location.say = { who: who, line: line || "", note: note || null, heard: heard || null }; }
 
   function npcName(id) {
     var n = PC.npcs.get(state, id);
@@ -264,8 +265,10 @@
   function npcTag(id) {
     var n = PC.npcs.get(state, id);
     if (!n) return "";
+    var known = (state.npcs[n.id] || {}).knownTraits || [];
     return '<span class="npc-tag">' + esc(npcName(id)) + (n.label ? ', <i>' + esc(n.label) + "</i>" : "") +
-      ' <span class="rung rung-' + esc(n.rungName) + '">' + esc(n.rungName) + "</span></span>";
+      ' <span class="rung rung-' + esc(n.rungName) + '">' + esc(n.rungName) + "</span>" +
+      (known.length ? ' <span class="small muted">(' + esc(known.join(", ")) + ")</span>" : "") + "</span>";
   }
 
   function comingSoon(label, milestone, extraLock) {
@@ -289,6 +292,11 @@
       var loc = nd.locations[place];
       html += '<div class="where">' + esc(nd.name) + '</div><h2>' + esc(loc.name) + "</h2>" +
         '<p class="muted">' + esc(loc.blurb) + "</p>" + sayBox();
+      // A scene is waiting (Welcome to the Underworld after the first Tavern
+      // action): let the player read what was just said, then go on.
+      if ((state.location.queue || []).some(function (q) { return !state.seen[q]; })) {
+        return html + '<div class="actions"><button class="primary" data-act="nextqueued">Continue</button></div></section>';
+      }
       html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu })[place]();
       html += '<div class="actions"><button data-act="leaveplace">← Back to ' + esc(nd.name) + "</button></div>";
     }
@@ -298,25 +306,60 @@
   // ---- Tavern ----
 
   function tavernMenu() {
-    var keeper = N().slotNpc(N().here(state), "keeper");
+    var id = N().here(state);
+    var keeper = N().slotNpc(id, "keeper");
     var first = !state.flags[N().FLAGS.tavernDone];
-    var firstLock = first ? "Not on your first visit" : null;
+    var k = PC.npcs.get(state, keeper);
+    var asked = PC.rumors.keeperAsked(state);
+    var talk = PC.checks.assess(state, PC.rumors.talkCheck(state), { conditions: ["Harbor"] });
     var html = '<h3>' + npcTag(keeper) + "</h3>" + '<ol class="choices">' +
-      '<li><button data-act="keeper">Talk to ' + esc(PC.npcs.get(state, keeper).first) + "</button></li>";
+      "<li" + (asked ? ' class="locked"' : "") + '><button data-act="rumors"' + (asked ? " disabled" : "") + ">Ask " + esc(k.first) + " for rumors</button>" +
+      (asked ? '<span class="lock">Heard this season\'s rumors</span>' : '<span class="cost">No action. A clean Tavern Talk gets one more.</span>' + checkLine(talk)) + "</li>";
+    if (N().oneArmedHere(state)) {
+      html += '<li><button data-act="oneArmed">Talk to the one-armed pirate</button><span class="cost">He sits with his mates, drinking.</span></li>';
+    }
     // Shore leave (§24.12)
     [1, 2].forEach(function (ap) {
       var c = N().lodgingCheck(state, ap);
-      var gain = (ap === 2 ? 15 : 10) + (N().nodeData(N().here(state)).freePort ? 5 : 0);
+      var gain = (ap === 2 ? 15 : 10) + (N().nodeData(id).freePort ? 5 : 0);
       html += "<li" + (c.ok ? "" : ' class="locked"') + '><button data-act="lodging" data-ap="' + ap + '"' + (c.ok ? "" : " disabled") + ">" +
         "Shore leave for " + apLabel(ap) + "</button>" +
         '<span class="cost">' + gold(N().lodgingCost(state, ap)) + " crew gold · crew morale +" + gain + "</span>" +
         (c.ok ? "" : '<span class="lock">' + esc(c.why) + "</span>") + "</li>";
     });
-    html += comingSoon("Drink with a pirate (Under the Table)", 4, firstLock) +
-      comingSoon("Liar's Dice", 4, firstLock) +
-      comingSoon("Officer recruitment", 3, firstLock) +
-      comingSoon("Gather Intelligence", 3) + "</ol>";
+    // Gather Intelligence (§30.4)
+    var gi = N().tavernServiceCheck(state, 1);
+    html += "<li" + (gi.ok ? "" : ' class="locked"') + '><button data-act="gather"' + (gi.ok ? "" : " disabled") + ">Gather Intelligence <small>(1 action)</small></button>" +
+      '<span class="cost">Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.</span>' +
+      (gi.ok ? checkLine(PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] })) : '<span class="lock">' + esc(gi.why) + "</span>") + "</li>";
+    html += comingSoon("Drink with a pirate (Under the Table)", 4, first ? "Not on your first visit" : null) +
+      comingSoon("Liar's Dice", 4, first ? "Not on your first visit" : null) + "</ol>";
+    if (state.location.gatherPick) {
+      html += '<div class="svc"><h4>What do you want to hear about?</h4><div class="opts">' + PC.rumors.gatherTypes(state).map(function (t) {
+        return '<button data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
+      }).join(" ") + "</div></div>";
+    }
+    html += officersBlock(first);
     return html;
+  }
+
+  // Officer recruitment (§25.7): two seats a season.
+  function officersBlock(first) {
+    var html = '<div class="svc"><h4>Officers looking for a berth</h4>';
+    var chk = N().tavernServiceCheck(state, 0);
+    if (!chk.ok) return html + '<p class="small muted">' + esc(chk.why) + ".</p></div>";
+    var ap = PC.officers.apNeeded(state);
+    html += '<p class="small">1,000 crew gold each' + (ap ? "; hiring takes an action (one action covers every hire this visit)" : "; this visit's action is already spent") + ".</p>";
+    PC.officers.candidates(state).forEach(function (c) {
+      var held = PC.officers.holding(state, c.type);
+      var hc = PC.officers.hireCheck(state, c);
+      html += '<div class="candidate"><p><b>' + esc(c.full || (c.first + " " + c.last)) + "</b>, " + c.age + " · " + esc(c.type) + (c.named ? " · Named officer" : "") + "</p>" +
+        prose(PC.officers.hiringText(state, c)) +
+        (held ? '<p class="small notice">Hiring ' + esc(c.first) + " replaces " + esc(held.first) + (held.mentor ? ", your mentor," : "") + " (your " + esc(held.type) + "), who is dismissed with " + PC.officers.dismissPay(state) + " crew gold.</p>" : "") +
+        '<div class="actions"><button data-act="hire" data-officer="' + esc(c.id) + '"' + (hc.ok ? "" : " disabled") + ">Hire " + esc(c.first) + "</button>" +
+        (hc.ok ? "" : '<span class="lock">' + esc(hc.why) + "</span>") + "</div></div>";
+    });
+    return html + "</div>";
   }
 
   // ---- Docks ----
@@ -393,15 +436,25 @@
             "</td></tr>";
         }).join("") + "</table></div>";
       html += sellTable("provisioner", "Sell to " + PC.npcs.get(state, prov).first, N().provisionerCapLeft(state), "clean");
+      if (hasCargo("dirty")) html += '<ol class="choices"><li><button data-act="offerdirty">Offer ' + esc(PC.npcs.get(state, prov).first) + " dirty goods</button></li></ol>";
     }
     if (N().fenceOpen(state)) {
       var f = N().nodeData(id).fence;
       var fg = N().greeting(state, id, f.npc, "fence");
       html += "<h3>" + npcTag(f.npc) + "</h3>" + '<p class="small muted">' + esc(fg.line) + "</p>";
-      if (!fg.refuse) html += sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), "dirty") +
-        '<ol class="choices">' + comingSoon("Ask about the French", 3) + "</ol>";
+      if (!fg.refuse) {
+        html += sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), "dirty") + '<ol class="choices">';
+        if (!state.flags.bobby_french_heard) html += '<li><button data-act="askfrench">Ask about the French</button></li>';
+        if (hasCargo("clean")) html += '<li><button data-act="offerclean">Offer him clean goods</button></li>';
+        html += "</ol>";
+      }
     }
     return html;
+  }
+
+  function hasCargo(kind) {
+    if (state.cargo.treasure[kind]) return true;
+    return Object.keys(state.cargo.goods).some(function (g) { return state.cargo.goods[g][kind]; });
   }
 
   function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
@@ -434,14 +487,14 @@
 
   // ---- The Ship layer (§17.1) ----
 
-  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["captain", "Captain"]];
+  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["captain", "Captain"], ["journal", "Journal"]];
 
   function shipMenu() {
     var tab = state.location.tab || (state.articles ? "crew" : "articles");
     var html = '<div class="tabs">' + SHIP_TABS.map(function (t) {
       return '<button data-act="shiptab" data-tab="' + t[0] + '" class="' + (t[0] === tab ? "on" : "") + '">' + t[1] + "</button>";
     }).join("") + '<button disabled title="Not in the prototype">World Map' + (state.articles ? "" : " 🔒") + "</button></div>";
-    html += ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, captain: captainTab })[tab]();
+    html += ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, captain: captainTab, journal: journalTab })[tab]();
     return html;
   }
 
@@ -517,9 +570,8 @@
   function officersTab() {
     var list = (state.officers || []).filter(function (o) { return !o.gone; });
     if (!list.length) return '<p class="muted">No officers aboard.</p>';
-    return list.map(function (o) {
-      return mentorCard(o).replace("your mentor", o.mentor ? "your mentor" : "officer") ;
-    }).join("") + '<p class="small muted">Hiring more officers comes with Davey Dell and the Tavern (Milestone 3).</p>';
+    return list.map(function (o) { return mentorCard(o); }).join("") +
+      '<p class="small muted">Officers are hired at the Tavern: 1,000 crew gold each, one action a visit. One of each type; a new hire of a type you hold replaces the old one.</p>';
   }
 
   function cargoTab() {
@@ -558,6 +610,27 @@
       "</table>" + '<p class="small muted">Equipping items and clothing comes with the UI chat.</p>';
   }
 
+  // The journal (placeholder until the UI chat, §30.12): quests and their
+  // leads, then the live rumors by type.
+  function journalTab() {
+    var html = '<p class="small muted">A placeholder journal: the UI chat designs the real one.</p>';
+    var q = PC.quests.journal(state);
+    html += q.length ? q.map(function (j) {
+      return '<div class="svc"><h4>' + esc(j.name) + ' <span class="small muted">' + j.leads + " of " + j.needed + " leads</span></h4>" + prose(j.summary) +
+        (j.entries.length ? "<ul>" + j.entries.map(function (e) { return "<li>" + prose(e).replace(/^<p>|<\/p>$/g, "") + "</li>"; }).join("") + "</ul>" : "") +
+        (j.beyond ? "<p><i>" + esc(j.beyond) + "</i></p>" : "") + "</div>";
+    }).join("") : '<p class="muted">No quests yet.</p>';
+    var live = PC.rumors.liveRumors(state);
+    var types = {};
+    live.forEach(function (r) { (types[r.type] = types[r.type] || []).push(r); });
+    html += '<div class="svc"><h4>Rumors</h4>' + (live.length ? Object.keys(types).map(function (t) {
+      return "<p><b>" + esc(t) + "</b></p><ul>" + types[t].map(function (r) {
+        return "<li>" + prose(r.text).replace(/^<p>|<\/p>$/g, "") + ' <span class="small muted">(' + esc(r.source) + (r.expires != null ? "; good until the end of " + esc(PC.state.SEASONS[r.expires % 4]) + " " + Math.floor(r.expires / 4) : "") + ")</span></li>";
+      }).join("") + "</ul>";
+    }).join("") : '<p class="muted">Nothing heard yet.</p>') + "</div>";
+    return html;
+  }
+
   // ---- The arrival popup ----
 
   function popupHtml() {
@@ -579,7 +652,7 @@
     var fire = N().enter(state, place);
     if (place === "tavern" && !state.flags[N().FLAGS.tavernDone]) {
       var k = PC.npcs.get(state, N().slotNpc(N().here(state), "keeper"));
-      say(null, "This is your first visit to the Tavern. Talk to " + k.first + ", or leave; the rest opens once your first visit is done.");
+      say(null, "This is your first visit to the Tavern. Ask " + k.first + " for rumors" + (N().oneArmedHere(state) ? ", talk to the one-armed pirate" : "") + ", or leave; the rest opens once your first visit is done.");
     }
     if (fire) PC.scenes.enterScene(state, fire);
   }
@@ -590,18 +663,51 @@
       var fire = N().leave(state);
       if (fire) PC.scenes.enterScene(state, fire);
     },
-    "keeper": function () {
+    "rumors": function () {
       var id = N().slotNpc(N().here(state), "keeper");
-      var r = N().talkToKeeper(state);
-      say(PC.npcs.get(state, id).first + ":", r.line, r.refuse ? null : "Rumors arrive in Milestone 3.");
+      var g = N().talkToKeeper(state);
+      var r = PC.rumors.askKeeper(state);
+      var who = PC.npcs.get(state, id).first + ":";
+      if (r.refuse) { say(who, r.line); return; }
+      var heard = r.rumors.map(function (x) { return x.text; });
+      if (r.extra) heard.push(r.extraLine + " " + r.extra.text);
+      say(who, g.line, "Tavern Talk: " + { clean: "clean, one more rumor", partial: "partial", setback: "setback" }[r.talk.outcome] + "." + (state.settings.showDice ? " (Dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge + ")" : ""), heard);
+    },
+    "nextqueued": function () {
       var next = N().nextQueued(state);
+      state.location.say = null;
       if (next) PC.scenes.enterScene(state, next);
     },
+    "oneArmed": function () {
+      N().tavernActionDone(state); // the first Tavern action (§17.2)
+      PC.scenes.enterScene(state, "ocr_oap");
+    },
+    "gather": function () {
+      var r = PC.rumors.gather(state);
+      var heard = [];
+      if (r.lead) heard.push(r.lead);
+      if (r.rumor) heard.push(r.rumor.text);
+      say(null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town, but nobody tells you anything. They do notice you asking." }[r.outcome],
+        "Gather Intelligence: " + r.outcome + "." + (r.pick && r.pick.length ? " Pick what you want to hear about." : ""), heard);
+    },
+    "gatherpick": function (el) {
+      var r = PC.rumors.gatherPick(state, el.dataset.type);
+      var prev = state.location.say || {};
+      say(prev.who, prev.line, null, (prev.heard || []).concat(r ? [r.text] : []));
+    },
+    "hire": function (el) {
+      var r = PC.officers.hire(state, el.dataset.officer);
+      var o = r.officer;
+      var note = (r.replaced ? r.replaced.officer.first + " is dismissed with " + r.replaced.pay + " crew gold: " + r.replaced.line + " " : "") +
+        (r.mentorLine ? "[Mentor]: " + r.mentorLine : "");
+      say(null, (o.first + " " + (o.last || "")).trim() + " signs on as your " + o.type + ".", PC.text.render(note, state) || null);
+    },
+    "askfrench": function () { say("Bobby:", PC.rumors.askFrench(state), "A lead for your journal: the Hidden Haven (1 of 2)."); },
+    "offerclean": function () { say("Bobby:", N().nodeData(N().here(state)).lines.fence.offeredClean); },
+    "offerdirty": function () { var prov = N().slotNpc(N().here(state), "provisioner"); say(PC.npcs.get(state, prov).first + ":", N().nodeData(N().here(state)).lines.provisioner.dirty); },
     "lodging": function (el) {
       var r = N().lodging(state, Number(el.dataset.ap));
       say(PC.npcs.get(state, N().slotNpc(N().here(state), "keeper")).first + ":", r.line, "Crew morale +" + r.morale + ".");
-      var next = N().nextQueued(state);
-      if (next) PC.scenes.enterScene(state, next);
     },
     "repair": function (el) {
       var hp = el.dataset.all ? state.ship.hullMax - state.ship.hull : qty(el);
@@ -617,7 +723,8 @@
     "sell": function (el) {
       var r = N().sell(state, el.dataset.buyer, el.dataset.what, qty(el));
       var who = el.dataset.buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : N().slotNpc(N().here(state), "provisioner");
-      say(PC.npcs.get(state, who).first + ":", r.line, r.units ? "Sold " + r.units + " for " + gold(r.gold) + " crew gold." : null);
+      say(PC.npcs.get(state, who).first + ":", r.line, r.units ? "Sold " + r.units + " for " + gold(r.gold) + " crew gold." : null,
+        r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null);
     },
     "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; },
     "artpick": function (el) { articleDraft[el.dataset.slot] = el.dataset.opt; },
@@ -654,6 +761,14 @@
         '<button data-act="devtreasure" data-dirty="0">+10 clean treasure</button><button data-act="devtreasure" data-dirty="1">+10 dirty treasure</button>' +
         '<button data-act="devdamage">Damage the hull (-5)</button>' +
         '<button data-act="devarrive">Return from a hunt (4 wounded): the arrival popup</button></div>' +
+        '<h3>Testing Milestone 3</h3><p class="small">Loss variant: ' + ["A", "B", "C"].map(function (v) {
+          return '<button data-act="devloss" data-loss="' + v + '"' + (state.captain.loss === v ? ' class="primary"' : "") + ">" + v + "</button>";
+        }).join(" ") + ' · Frisian posture: ' + PC.state.POSTURES.map(function (p) {
+          return '<button data-act="devposture" data-posture="' + p + '"' + (state.world.posture === p ? ' class="primary"' : "") + ">" + p + "</button>";
+        }).join(" ") + "</p>" +
+        '<p class="small">Jump to a scene: <select class="devscene">' + Object.keys(PC.data.scenes).filter(function (id) { return id.indexOf("ocr_") === 0; }).map(function (id) {
+          return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
+        }).join("") + '</select> <button data-act="devjump">Go</button> <button data-act="devnewseason">Start the next season</button></p>' +
         '<p class="small muted">Ocracoke\'s people this world: ' + N().nodeData(N().here(state)).slots.map(function (sl) { var g = state.generated[sl.id]; return esc(sl.label + ": " + g.full + " (" + (g.gender === "f" ? "woman" : "man") + ", " + g.age + "; " + g.traits.join(", ") + ")"); }).join(" · ") + "</p>" : "") +
       '<p class="small muted">World seed: ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
       "<h3>Content check</h3><p><b>Errors</b></p>" + list(v.errors) + "<p><b>Warnings</b></p>" + list(v.warnings) +
@@ -1208,6 +1323,24 @@
     "devpurse": function () { state.money.purse += 500; },
     "devtreasure": function (el) { state.cargo.treasure[el.dataset.dirty === "1" ? "dirty" : "clean"] += 10; },
     "devdamage": function () { state.ship.hull = Math.max(1, state.ship.hull - 5); },
+    // Switch the loss variant (§12.5): the tag, the flag and the quest follow.
+    "devloss": function (el) {
+      var c = state.captain, v = el.dataset.loss;
+      var L = PC.data.creator.LOSSES;
+      L.forEach(function (l) { var i = c.tags.indexOf(l.tag); if (i >= 0) c.tags.splice(i, 1); delete state.flags["loss_" + l.id.toLowerCase()]; });
+      c.loss = v;
+      c.tags.splice(1, 0, L.filter(function (l) { return l.id === v; })[0].tag);
+      state.flags["loss_" + v.toLowerCase()] = true;
+      PC.quests.record(state, "what_was_lost").variant = v;
+    },
+    "devposture": function (el) { state.world.posture = el.dataset.posture; },
+    "devjump": function () {
+      var id = document.querySelector(".devscene").value;
+      if (state.location) state.location.place = /_(uw|oap)/.test(id) ? "tavern" : /_rr_/.test(id) ? "docks" : null;
+      PC.scenes.enterScene(state, id);
+      showDev = false;
+    },
+    "devnewseason": function () { PC.scenes.endSeason(state); showDev = false; },
     "devarrive": function () {
       var n = Math.min(4, state.crew.tiers.Green || 0);
       if (n) { PC.crew.removeHands(state, "Green", n); state.crew.wounded += n; }

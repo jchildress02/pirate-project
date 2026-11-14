@@ -206,7 +206,14 @@
     if (p.locked) throw new Error(p.why);
     state.location.place = place;
     state.location.say = null;
-    if (place === "docks" && !flag(state, F.docks)) return "ocr_restless_stub";
+    // Each walk into a place is one visit (one action covers every officer
+    // hire on a Tavern visit, §25.7).
+    state.location.visit = (state.location.visit || 0) + 1;
+    var id = here(state);
+    // The persistent Minors count as met once the captain walks into their place.
+    var meet = { docks: "shipwright", merchant: "provisioner" }[place];
+    if (meet) { var mid = slotNpc(id, meet); (state.npcs[mid] = state.npcs[mid] || {}).met = true; }
+    if (place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
     return null;
   }
 
@@ -220,8 +227,8 @@
     var queue = [];
     if (place === "tavern" && !flag(state, F.tavernDone)) {
       state.flags[F.tavernDone] = true;
-      if (!flag(state, F.underworld) && !(state.location.queue || []).length) queue.push("ocr_underworld_stub");
-      if (!flag(state, F.dyingWish)) queue.push("ocr_dying_wish_stub");
+      if (!flag(state, F.underworld) && !(state.location.queue || []).length) queue.push("ocr_uw_1");
+      if (!flag(state, F.dyingWish)) queue.push("ocr_dpw_1");
     }
     state.location.queue = (state.location.queue || []).concat(queue);
     return nextQueued(state);
@@ -241,7 +248,27 @@
   function tavernActionDone(state) {
     if (flag(state, F.tavernDone) || flag(state, F.tavernAction)) return;
     state.flags[F.tavernAction] = true;
-    if (!flag(state, F.underworld)) state.location.queue = (state.location.queue || []).concat(["ocr_underworld_stub"]);
+    if (!flag(state, F.underworld)) state.location.queue = (state.location.queue || []).concat(["ocr_uw_1"]);
+  }
+
+  // A season with an action spent at the Tavern is a visit for the keeper's
+  // ladder (§30.4): lodging, officer recruitment, Gather Intelligence.
+  function tavernVisit(state) {
+    return ladderTick(state, slotNpc(here(state), "keeper"), "visit");
+  }
+
+  // The one-armed pirate sits in the Tavern for Variants A and C until his
+  // lead is heard (§17.2).
+  function oneArmedHere(state) {
+    var loss = state.captain.loss;
+    return (loss === "A" || loss === "C") && !flag(state, "lead_trident_heard");
+  }
+
+  // Officer recruitment and Gather Intelligence open after the first visit.
+  function tavernServiceCheck(state, ap) {
+    if (!flag(state, F.tavernDone)) return { ok: false, why: "Not on your first visit" };
+    if (ap && state.ap.left < ap) return { ok: false, why: "Not enough time this season" };
+    return { ok: true };
   }
 
   // ---- The tavern keeper -----------------------------------------------------
@@ -253,7 +280,6 @@
     var first = !state.npcs[who] || !state.npcs[who].met;
     state.npcs[who] = state.npcs[who] || {};
     state.npcs[who].met = true;
-    tavernActionDone(state);
     return { refuse: g.refuse, line: g.refuse ? L.refuse : (first ? L.first : g.line) };
   }
 
@@ -404,7 +430,8 @@
     if (dirty) {
       ladderTick(state, who, "deal") && (line = L.rungUp);
       line = line || (units < n ? L.capReached : (gold >= 0.6 * nd.fence.cap ? L.bigHaul : L.sold));
-      // His Underworld rumors on deals arrive with the rumor system (Milestone 3).
+      var fr = PC.rumors ? PC.rumors.fenceDealRumor(state, who) : null; // a chance on each deal (§30.4)
+      if (fr) return { units: units, gold: gold, line: line, partial: units < n, rumor: fr };
     } else {
       line = noteTrade(state, who, gold, L) || (units < n ? L.capReached : (what === "treasure" ? L.treasureSold : L.goodsSold));
     }
@@ -685,6 +712,10 @@
     leave: leave,
     nextQueued: nextQueued,
     tavernActionDone: tavernActionDone,
+    tavernVisit: tavernVisit,
+    oneArmedHere: oneArmedHere,
+    tavernServiceCheck: tavernServiceCheck,
+    ladderTick: ladderTick,
     talkToKeeper: talkToKeeper,
     lodgingCost: lodgingCost,
     lodgingCheck: lodgingCheck,
