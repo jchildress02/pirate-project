@@ -21,11 +21,13 @@
   var PC = (globalThis.PC = globalThis.PC || {});
   PC.data = PC.data || {};
 
-  PC.data.start = { scene: "eng_test_gangway", hub: "test_harbor" };
+  // The engine tests start here; the game starts at Ocracoke
+  // (content/ocracoke.js sets PC.data.start).
+  PC.data.testStart = { scene: "eng_test_gangway", hub: "test_harbor" };
+  if (!PC.data.start) PC.data.start = { scene: "eng_test_gangway" };
 
-  PC.data.npcs = {
-    hob: { first: "Hob", last: "", gender: "m", role: "dockhand", test: true },
-  };
+  PC.data.npcs = PC.data.npcs || {};
+  PC.data.npcs.hob = { first: "Hob", last: "", gender: "m", role: "dockhand", test: true };
 
   PC.data.hubs = {
     test_harbor: {
@@ -38,7 +40,8 @@
     },
   };
 
-  PC.data.scenes = {
+  PC.data.scenes = PC.data.scenes || {};
+  var testScenes = {
     eng_test_gangway: {
       id: "eng_test_gangway",
       kind: "check",
@@ -175,4 +178,5 @@
       ],
     },
   };
+  Object.keys(testScenes).forEach(function (id) { PC.data.scenes[id] = testScenes[id]; });
 })();

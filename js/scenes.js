@@ -69,9 +69,17 @@
     state.current = { screen: "scene", sceneId: id, phase: "choosing", pending: null };
   }
 
+  // "hub" means back to where the captain is: the node's menus (and any
+  // scene queued to fire there next, §17.2), or the engine's test harbor.
   function goTo(state, exit) {
     if (!exit || exit === "hub") {
-      state.current = { screen: "hub", hubId: PC.data.start.hub };
+      if (state.location && state.location.node) {
+        var next = PC.node ? PC.node.nextQueued(state) : null;
+        if (next) return enterScene(state, next);
+        state.current = { screen: "node" };
+        return;
+      }
+      state.current = { screen: "hub", hubId: (PC.data.testStart || {}).hub || "test_harbor" };
       return;
     }
     enterScene(state, exit);
@@ -228,6 +236,7 @@
       return (e.gold > 0 ? "+" : "") + e.gold + " gold" + where;
     }
     if ("provisions" in e) return "Provisions " + signed(e.provisions);
+    if ("treasure" in e) return signed(e.treasure) + " " + (e.dirty ? "dirty" : "clean") + " treasure";
     if ("hull" in e) return "Hull " + signed(e.hull);
     if ("morale" in e) return "Crew morale " + signed(e.morale);
     if ("pressure" in e) return "Crew pressure " + signed(e.pressure);
@@ -252,6 +261,12 @@
       return (e.gold > 0 ? "+" : "") + e.gold + " gold to " + (p === "purse" ? "your purse" : "crew gold");
     }
     if ("provisions" in e) { state.provisions = Math.max(0, state.provisions + e.provisions); }
+    else if ("treasure" in e) {
+      // Treasure goes into the hold (§20.3). A purse-or-crew prompt for
+      // treasure rewards (§33.1.4) waits for the selling milestone.
+      var k = e.dirty ? "dirty" : "clean";
+      state.cargo.treasure[k] = Math.max(0, state.cargo.treasure[k] + e.treasure);
+    }
     else if ("hull" in e) { state.ship.hull = clamp(state.ship.hull + e.hull, 0, state.ship.hullMax); }
     else if ("morale" in e) { state.crew.morale = clamp(state.crew.morale + e.morale, 0, 100); }
     else if ("pressure" in e) { state.crew.pressure = Math.max(0, state.crew.pressure + e.pressure); }
@@ -265,8 +280,11 @@
       state.meters.heat[h] = clamp((state.meters.heat[h] || 0) + e.heat.delta, 0, 100);
     }
     else if ("ladder" in e) {
-      var npc = (state.npcs[e.ladder.npc] = state.npcs[e.ladder.npc] || { rung: 0 });
-      npc.rung += e.ladder.delta;
+      if (PC.npcs) PC.npcs.moveRung(state, e.ladder.npc, e.ladder.delta);
+      else {
+        var npc = (state.npcs[e.ladder.npc] = state.npcs[e.ladder.npc] || { rung: 0 });
+        npc.rung += e.ladder.delta;
+      }
     }
     else if ("tag" in e) {
       var tags = state.captain.tags;
@@ -284,7 +302,7 @@
   // ---- The hub (a placeholder location menu) --------------------------
 
   function viewHub(state) {
-    var hub = PC.data.hubs[state.current.hubId];
+    var hub = PC.data.hubs[state.current.hubId || (PC.data.testStart || {}).hub];
     return {
       title: hub.title,
       text: PC.text.render(hub.text, state),
@@ -298,7 +316,7 @@
 
   function endSeason(state) {
     PC.state.advanceSeason(state);
-    state.current = { screen: "hub", hubId: PC.data.start.hub };
+    goTo(state, "hub");
   }
 
   PC.scenes = {

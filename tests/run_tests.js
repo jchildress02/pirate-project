@@ -6,8 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/scenes.js", "js/validate.js", "js/creator.js",
-  "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/test_captain.js", "content/test_scenes.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/validate.js", "js/creator.js",
+  "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -20,7 +21,7 @@ function eq(a, b, msg) {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((msg || "") + " expected " + JSON.stringify(b) + ", got " + JSON.stringify(a));
 }
 function ok(v, msg) { if (!v) throw new Error(msg || "expected true"); }
-function fresh(seed) { return PC.state.newGame(PC.data.testCaptain, { seed: seed || "test-seed" }); }
+function fresh(seed) { return PC.state.newGame(PC.data.testCaptain, { seed: seed || "test-seed", startScene: PC.data.testStart.scene }); }
 
 console.log("Checks (§11)");
 
@@ -282,12 +283,28 @@ test("bad files are rejected with a clear message", function () {
 });
 
 
-test("a version 1 save upgrades to version 2", function () {
+test("a version 1 save upgrades to the current version", function () {
   var s = fresh();
   var old = JSON.parse(PC.state.serialize(s));
   old.saveVersion = 1; delete old.officers; delete old.quests;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 2); eq(back.officers, []); eq(back.quests, {});
+  eq(back.saveVersion, PC.state.SAVE_VERSION); eq(back.officers, []); eq(back.quests, {});
+});
+
+test("a version 2 (Milestone 1) save restarts at Ocracoke's arrival with its captain", function () {
+  var s = fresh();
+  var old = JSON.parse(PC.state.serialize(s));
+  old.saveVersion = 2;
+  ["location", "cargo", "articles", "nodes", "generated", "used"].forEach(function (k) { delete old[k]; });
+  delete old.world.names; delete old.ship.upgrades; delete old.crew.tiers;
+  old.money.crew = 777;
+  var back = PC.state.deserialize(JSON.stringify(old));
+  eq(back.saveVersion, 3);
+  eq(back.location.node, "ocracoke");
+  eq(back.current.sceneId, "ocr_opening");
+  eq(back.money.crew, 777);
+  eq(back.crew.tiers.Green, 12);
+  ok(back.generated.ocr_keeper && back.generated.ocr_provisioner && back.generated.ocr_shipwright, "slots filled");
 });
 
 console.log("Character creator (§12)");
@@ -534,6 +551,429 @@ test("every ship class has its woodcut (§21.2)", function () {
   eq(PC.data.shipClasses.length, 15);
   PC.data.shipClasses.forEach(function (c) { ok(fs.existsSync(path.join(root, PC.data.shipArt(c.id))), "missing " + c.id); });
   eq(PC.data.shipArt("Sloop"), "assets/ships/sloop.webp");
+});
+
+
+console.log("Names and Minor NPCs (§36, §15)");
+
+function ocr(seed) { return PC.state.newGame(PC.data.testCaptain, { seed: seed || "ocr-seed" }); }
+function playOpening(s) { PC.scenes.choose(s, 0); PC.scenes.commit(s); }
+
+test("a new game starts at Ocracoke with three persistent Minors named", function () {
+  var s = ocr();
+  eq(s.location.node, "ocracoke");
+  eq(s.current.sceneId, "ocr_opening");
+  ["ocr_keeper", "ocr_shipwright", "ocr_provisioner"].forEach(function (id) {
+    var g = s.generated[id];
+    ok(g && g.first && g.full, id + " named");
+    eq(g.traits.length, 2, id + " has two traits");
+    ok(s.world.names.indexOf(g.full) >= 0, "registered");
+  });
+  eq(s.generated.ocr_keeper.role, "Tavern Keeper");
+});
+
+test("the same world seed always gives the same people; another seed, other people", function () {
+  var a = ocr("same"), b = ocr("same"), c = ocr("other");
+  eq(a.generated, b.generated);
+  ok(JSON.stringify(a.generated) !== JSON.stringify(c.generated));
+});
+
+test("persistent Minor gender follows the role weights (§15.1)", function () {
+  var count = { "Tavern Keeper": 0, "Merchant": 0, "Craftsman": 0, "Dockhand/Laborer": 0 }, n = 2000;
+  var s = fresh();
+  Object.keys(count).forEach(function (role) {
+    for (var i = 0; i < n; i++) {
+      var g = PC.npcs.generate(s, { id: "x", role: role, pool: "master", key: "g|" + role + "|" + i });
+      if (g.gender === "f") count[role]++;
+      s.world.names = []; // keep the registry small for this sample
+    }
+  });
+  function near(role, p) { var f = count[role] / n; ok(Math.abs(f - p) < 0.04, role + " women " + f + " vs " + p); }
+  near("Tavern Keeper", 0.35); near("Merchant", 0.25); near("Craftsman", 0.10); near("Dockhand/Laborer", 0.05);
+});
+
+test("names never repeat in the world, never use reserved names, never 'Gordon Gordon'", function () {
+  var s = fresh(), seen = {};
+  var R = PC.data.names.RESERVED;
+  for (var i = 0; i < 1500; i++) {
+    var g = PC.npcs.generate(s, { id: "n" + i, role: "Pirate", pool: "master", key: "u|" + i });
+    ok(!seen[g.full], "duplicate " + g.full);
+    seen[g.full] = true;
+    ok(R.given.indexOf(g.first) < 0, "reserved given " + g.first);
+    ok(!g.last || R.surnames.indexOf(g.last) < 0, "reserved surname " + g.last);
+    ok(g.first !== g.last, "same given and surname");
+    ok(["Arthur Twopenny", "Bobby Rats"].indexOf(g.full) < 0, "a Named NPC's full name");
+  }
+});
+
+test("no generated NPC shares the captain's surname", function () {
+  var s = fresh();
+  for (var i = 0; i < 400; i++) {
+    var g = PC.npcs.generate(s, { id: "c", role: "Merchant", pool: "avalon", key: "cs|" + i });
+    ok(g.last !== s.captain.last, "relative of the captain: " + g.full);
+    s.world.names = [];
+  }
+});
+
+test("pirates take a nickname about half the time, and it replaces the surname", function () {
+  var s = fresh(), nick = 0, n = 1000;
+  for (var i = 0; i < n; i++) {
+    var g = PC.npcs.generate(s, { id: "p", role: "Pirate", pool: "master", key: "nk|" + i });
+    if (g.nickname) { nick++; eq(g.last, ""); }
+    s.world.names = [];
+  }
+  ok(Math.abs(nick / n - 0.5) < 0.05, "nickname rate " + nick / n);
+});
+
+test("Minor traits come from the role pool and never pair exclusives", function () {
+  var s = fresh(), R = PC.data.names.ROLES["Tavern Keeper"];
+  var pool = R.bold.concat(R.pool);
+  for (var i = 0; i < 300; i++) {
+    var t = PC.npcs.drawTraits(PC.rng.fromKey("t|" + i), "Tavern Keeper", 2);
+    t.forEach(function (x) { ok(pool.indexOf(x) >= 0, x + " not in the pool"); });
+    PC.data.names.EXCLUSIVE.forEach(function (p) { ok(!(t.indexOf(p[0]) >= 0 && t.indexOf(p[1]) >= 0), "exclusive pair " + p); });
+  }
+});
+
+test("titles by role: merchants get the pool's honorific, officers a rank (§36.2)", function () {
+  var s = fresh();
+  var m = PC.npcs.generate(s, { id: "m", role: "Merchant", pool: "frisian", key: "title|m", gender: "m" });
+  eq(m.title, "Mynheer");
+  var o = PC.npcs.generate(s, { id: "o", role: "Colonial Officer", pool: "avalon", key: "title|o" });
+  ok(["Lieutenant", "Captain", "Major"].indexOf(o.title) >= 0);
+  var k = PC.npcs.generate(s, { id: "k", role: "Tavern Keeper", pool: "avalon", key: "title|k" });
+  eq(k.title, "");
+});
+
+test("the creator's random names: Avalon captain names, ship names from the Pirate and Avalon merchant lists", function () {
+  var S = PC.data.names.SHIPS, A = PC.data.names.POOLS.avalon, B = PC.data.names.BRETON;
+  for (var i = 0; i < 200; i++) {
+    var c = PC.npcs.randomCaptainName(i % 2 ? "f" : "m", "cap|" + i);
+    var given = i % 2 ? A.women.concat(B.women) : A.men.concat(B.men);
+    ok(given.indexOf(c.first) >= 0, c.first);
+    ok(A.surnames.indexOf(c.last) >= 0, c.last);
+    var sh = PC.npcs.randomShipName("ship|" + i);
+    ok(S.pirate.indexOf(sh) >= 0 || S.avalon.indexOf(sh) >= 0, sh);
+    ok(S.avalonNavy.indexOf(sh) < 0, "never navy names");
+  }
+});
+
+test("pronoun tokens work for generated Minors by slot name ({keeper.he})", function () {
+  var s = ocr();
+  var g = s.generated.ocr_keeper;
+  g.gender = "f";
+  eq(PC.text.render("{keeper.He} pours. {shipwright.mr} Shipwright nods.", s).indexOf("She pours."), 0);
+  s.generated.ocr_shipwright.gender = "f";
+  ok(PC.text.render("{shipwright.mr} Shipwright", s) === "Missus Shipwright");
+  s.generated.ocr_shipwright.gender = "m";
+  ok(PC.text.render("{shipwright.mr} Shipwright", s) === "Mr. Shipwright");
+  ok(PC.text.render("[Mentor] waits.", s) === "your mentor waits.", "no mentor: a fallback");
+});
+
+console.log("Ocracoke (§17.2)");
+
+test("the opening placeholder collects the 25 harbor due and Twopenny goes Wary to Neutral", function () {
+  var s = ocr();
+  eq(PC.npcs.get(s, "twopenny").rungName, "Wary");
+  playOpening(s);
+  eq(s.money.crew, 575);
+  eq(PC.npcs.get(s, "twopenny").rungName, "Neutral");
+  eq(s.current.screen, "node");
+});
+
+test("first visit: only the Tavern and the Ship are open; lodging is locked", function () {
+  var s = ocr(); playOpening(s);
+  var p = {}; PC.node.places(s).forEach(function (x) { p[x.id] = x; });
+  ok(!p.tavern.locked && !p.ship.locked);
+  ok(p.docks.locked && p.merchant.locked && p.graveyard.locked);
+  PC.node.enter(s, "tavern");
+  eq(PC.node.lodgingCheck(s, 1).ok, false);
+});
+
+test("the first Tavern action fires Welcome to the Underworld; leaving fires A Dying Pirate's Wish", function () {
+  var s = ocr(); playOpening(s);
+  PC.node.enter(s, "tavern");
+  var r = PC.node.talkToKeeper(s);
+  ok(r.line.indexOf("Welcome in") >= 0, "first meeting line");
+  var next = PC.node.leave(s);
+  eq(next, "ocr_underworld_stub");
+  PC.scenes.enterScene(s, next);
+  PC.scenes.choose(s, 0); PC.scenes.commit(s, "crew");
+  eq(s.current.sceneId, "ocr_dying_wish_stub");
+  PC.scenes.choose(s, 0); PC.scenes.commit(s);
+  eq(s.current.screen, "node");
+  eq(s.money.crew, 575 + 385);
+  eq(s.cargo.treasure.clean, 10);
+  eq(s.ap.left, 5);
+  eq(PC.npcs.get(s, "bobby").rungName, "Friendly");
+  var p = {}; PC.node.places(s).forEach(function (x) { p[x.id] = x; });
+  ok(!p.docks.locked && !p.merchant.locked && !p.graveyard.locked);
+});
+
+test("leaving the Tavern without doing anything fires both, Underworld first", function () {
+  var s = ocr(); playOpening(s);
+  PC.node.enter(s, "tavern");
+  eq(PC.node.leave(s), "ocr_underworld_stub");
+  eq(s.location.queue, ["ocr_dying_wish_stub"]);
+});
+
+function opened(seed) {
+  var s = ocr(seed); playOpening(s);
+  PC.node.enter(s, "tavern"); PC.node.leave(s);
+  PC.scenes.enterScene(s, "ocr_underworld_stub"); PC.scenes.choose(s, 0); PC.scenes.commit(s, "crew");
+  PC.scenes.choose(s, 0); PC.scenes.commit(s);
+  return s;
+}
+
+test("Ocracoke's prices: provisions 24, treasure 70, fence 38.5 then 41.25 at Friendly, kill-devil 12", function () {
+  var s = opened();
+  PC.npcs.get(s, "ocr_provisioner"); // Neutral
+  eq(PC.node.provisionsPrice(s), 24);
+  eq(PC.node.unitPrice(s, "provisioner", "treasure"), 70);
+  eq(PC.node.shopPrice(s, "ocracoke", "Kill-devil rum", "ocr_provisioner"), 12);
+  // Bobby is Friendly after Welcome to the Underworld: 55% + 5% of 70.
+  eq(PC.node.unitPrice(s, "fence", "treasure"), 42);
+  s.npcs.bobby.rung = 0;
+  eq(PC.node.unitPrice(s, "fence", "treasure"), 38.5);
+});
+
+test("Spring 1754's stock is fixed: kill-devil 15, rice 6, tobacco 4, sugar 3", function () {
+  eq(PC.node.season(opened("a")).stock, { "Kill-devil rum": 15, "Rice": 6, "Tobacco": 4, "Sugar": 3 });
+  eq(PC.node.season(opened("b")).stock, { "Kill-devil rum": 15, "Rice": 6, "Tobacco": 4, "Sugar": 3 });
+});
+
+test("selling the pouch: 10 clean treasure to the provisioner for 700 crew gold", function () {
+  var s = opened();
+  var before = s.money.crew;
+  var r = PC.node.sell(s, "provisioner", "treasure", 10);
+  eq([r.units, r.gold], [10, 700]);
+  eq(s.money.crew - before, 700);
+  eq(s.cargo.treasure.clean, 0);
+});
+
+test("the provisioner refuses dirty goods; the fence takes only dirty, within his 2,000 cap", function () {
+  var s = opened();
+  s.cargo.treasure.dirty = 100;
+  var r = PC.node.sell(s, "fence", "treasure", 100);
+  // 42 a unit at Friendly: 47 units fit in 2,000.
+  eq(r.units, 47); eq(r.gold, 1974); ok(r.partial);
+  eq(PC.node.sell(s, "fence", "treasure", 1).units, 0, "cap spent");
+});
+
+test("the provisioner's cap is 5,000 a season", function () {
+  var s = opened();
+  s.cargo.treasure.clean = 100;
+  var r = PC.node.sell(s, "provisioner", "treasure", 100);
+  eq(r.units, 71); // 71 × 70 = 4,970
+  eq(PC.node.provisionerCapLeft(s), 30);
+});
+
+test("buying provisions and goods fills the hold; a full hold refuses", function () {
+  var s = opened();
+  eq(PC.crew.slotsUsed(s), 10 + Math.ceil(10 / 5));
+  PC.node.buyProvisions(s, 14);
+  eq(s.provisions, 24);
+  PC.node.buyGood(s, "Kill-devil rum", 2);
+  eq(s.cargo.goods["Kill-devil rum"].clean, 2);
+  eq(PC.node.season(s).stock["Kill-devil rum"], 13);
+  var free = PC.crew.slotsFree(s);
+  var threw = false; try { PC.node.buyProvisions(s, free + 1); } catch (e) { threw = true; }
+  ok(threw, "over the hold");
+});
+
+test("the first repair: 6 HP for 38 gold and 1 action, and the frayed rigging is fixed", function () {
+  var s = opened();
+  eq(PC.node.repairCost(s, 6), 38);
+  ok(PC.node.repairTakesAP(s, 6) && !PC.node.repairTakesAP(s, 4), "25% line");
+  var ap = s.ap.left, gold = s.money.crew;
+  PC.node.repair(s, 6);
+  eq(s.ship.hull, 20); eq(s.ap.left, ap - 1); eq(gold - s.money.crew, 38);
+  eq(s.ship.speed, 3); eq(s.ship.rigging, "sound");
+});
+
+test("upgrades: level 2 at 1,200; the yard tops out at level 2; hull +15%", function () {
+  var s = opened();
+  s.money.crew = 10000;
+  eq(PC.node.upgradeInfo(s, "hull").cost, 1200);
+  PC.node.upgrade(s, "hull");
+  eq(s.ship.hullMax, 23);
+  ok(PC.node.upgradeInfo(s, "hull").atCap, "level 3 isn't sold here");
+  eq(PC.node.gunPrice(s), 80);
+  PC.node.buyGuns(s, 10);
+  eq(s.ship.guns, 10);
+});
+
+test("crew pool: 15-25 hands, only Green, Seasoned and Veteran; signing at 12 / 36 / 60", function () {
+  var s = opened();
+  var p = PC.node.poolAvailable(s);
+  var total = p.Green + p.Able + p.Seasoned + p.Veteran;
+  ok(total >= 15 && total <= 25, "pool " + total);
+  eq(p.Able, 0);
+  eq([PC.node.signingCost(s, "Green"), PC.node.signingCost(s, "Seasoned"), PC.node.signingCost(s, "Veteran")], [12, 36, 60]);
+});
+
+test("recruiting caps at the ship's 30 berths and counts as raw hands", function () {
+  var s = opened();
+  s.money.crew = 5000;
+  var p = PC.node.poolAvailable(s);
+  ["Seasoned", "Green", "Veteran"].forEach(function (t) { if (p[t]) PC.node.recruit(s, t, p[t]); });
+  ok(s.crew.count <= 30);
+  eq(s.crew.count, Math.min(30, 12 + p.Green + p.Seasoned + p.Veteran));
+  ok(PC.crew.discipline(s) <= 1, "raw hands cost Discipline");
+});
+
+test("paying off hands: half a share, at least 50, no morale cost", function () {
+  var s = opened();
+  var each = PC.crew.payOffEach(s);
+  eq(each, 50); // ~960 gold over 12 hands + mentor-less officers + captain 2: a share is ~69
+  var m = s.crew.morale;
+  PC.node.payOff(s, "Green", 2);
+  eq(s.crew.count, 10); eq(s.crew.morale, m);
+});
+
+test("shore leave: once a season, 15 a crewman an action, +10 / +15, +5 at a free port", function () {
+  var s = opened();
+  PC.node.enter(s, "tavern");
+  eq(PC.node.lodgingCost(s, 2), 15 * 12 * 2);
+  var m = s.crew.morale;
+  PC.node.lodging(s, 2);
+  eq(s.crew.morale, m + 20);
+  eq(PC.node.lodgingCheck(s, 1).ok, false);
+});
+
+test("the harbor due on a return: 25, then the shortfall taken in kind, then the stocks", function () {
+  var s = opened();
+  eq(PC.node.portFee(s), 25);
+  s.money.crew = 10; s.cargo.treasure.clean = 1;
+  var r = PC.node.payPortFee(s);
+  eq(r.paid, 10); eq(r.taken, ["1 clean treasure"]); eq(s.cargo.treasure.clean, 0);
+  s.money.crew = 0; s.provisions = 0; s.cargo.goods = {};
+  var ap = s.ap.left;
+  r = PC.node.payPortFee(s);
+  ok(r.stocks); eq(s.ap.left, ap - 1);
+});
+
+test("Twopenny at Friend waives a due the captain can't cover", function () {
+  var s = opened();
+  s.npcs.twopenny.rung = 2;
+  s.money.crew = 5;
+  var r = PC.node.payPortFee(s);
+  eq(r.waived, 20);
+});
+
+test("Wary Standing with the pirates doubles the due and adds 10% to purchases", function () {
+  var s = opened();
+  s.meters.standing.pirates = -20;
+  eq(PC.node.portFee(s), 50);
+  eq(PC.node.provisionsPrice(s), 26.4);
+});
+
+test("the arrival popup: the wounded recover or are paid off, then the due", function () {
+  var s = opened();
+  s.crew.wounded = 10;
+  var pop = PC.node.arrive(s, "ocracoke", { fromHunt: true });
+  ok(pop.lines.length >= 3);
+  eq(s.crew.wounded, 0);
+});
+
+test("a Rival shipwright won't serve; Service Level cuts his prices", function () {
+  var s = opened();
+  s.npcs.ocr_shipwright.rung = 3;
+  eq(PC.node.repairPerHp(s), 5.44);
+  s.npcs.ocr_shipwright.rung = -2;
+  ok(PC.node.shipwrightGreeting(s).refuse);
+  eq(PC.node.repair(s, 1).line, PC.data.nodes.ocracoke.lines.shipwright.refuse);
+});
+
+console.log("The Ship layer (§17.1, §24, §26)");
+
+test("the Standard Articles: net Greed 0, accepted with no check", function () {
+  var s = opened();
+  var r = PC.articles.sign(s, PC.articles.defaults());
+  eq(r.greed, 0); eq(r.outcome, "accepted"); ok(!r.roll);
+  eq(PC.articles.currentReputation(s).name, "Fair");
+});
+
+test("generous Articles cheer the crew; hard ones need a Pirate Code reading", function () {
+  var s = opened(), m = s.crew.morale;
+  var t = PC.articles.defaults(); t.share = "lean"; t.officers = "even_hands";
+  eq(PC.articles.sign(s, t).outcome, "cheered");
+  eq(s.crew.morale, m + 5);
+  var s2 = opened();
+  var t2 = PC.articles.defaults(); t2.share = "half_haul";
+  var r = PC.articles.sign(s2, t2);
+  eq(r.greed, 4); eq(r.check.dr, 3); ok(r.roll);
+  eq(PC.articles.currentReputation(s2).name, "Hard");
+});
+
+test("between signings: loosen any time (+3 morale), Quarter freely, never tighten", function () {
+  var s = opened();
+  PC.articles.sign(s, PC.articles.defaults());
+  ok(!PC.articles.amendCheck(s, "share", "captains_due").ok, "no tightening");
+  var m = s.crew.morale;
+  PC.articles.amend(s, "share", "lean");
+  eq(s.crew.morale, m + 3);
+  PC.articles.amend(s, "quarter", "no_quarter");
+  eq(s.crew.morale, m + 3);
+});
+
+test("hard Articles shrink the crew pool (§26.5)", function () {
+  var s = opened();
+  var before = PC.node.poolAvailable(s);
+  var t = PC.articles.defaults(); t.share = "half_haul";
+  PC.articles.sign(s, t);
+  var after = PC.node.poolAvailable(s);
+  ok(after.Seasoned <= Math.floor(before.Seasoned * 0.8) + 0, "pool shrank");
+});
+
+test("Crew Rating for the Ash-Born start is 1 (§24.5)", function () {
+  var s = opened();
+  eq(PC.crew.skill(s), 0); eq(PC.crew.crewRating(s), 1);
+});
+
+test("crew actions: Rally (1 action, once a season), Drill, Give, the stores", function () {
+  var s = opened();
+  var ap = s.ap.left;
+  PC.crew.rally(s);
+  eq(s.ap.left, ap - 1);
+  var threw = false; try { PC.crew.rally(s); } catch (e) { threw = true; } ok(threw);
+  PC.crew.drill(s); ok(PC.crew.drilled(s));
+  s.money.purse = 300;
+  var m = s.crew.morale;
+  eq(PC.crew.give(s, 300), 5); // 300 / 12 hands / 5 = 5
+  eq(s.crew.morale, m + 5); eq(s.money.purse, 0);
+  PC.node.buyGood(s, "Kill-devil rum", 1);
+  eq(PC.crew.storeChoices(s).length, 1);
+  m = s.crew.morale;
+  PC.crew.openStores(s, "Kill-devil rum");
+  eq(s.crew.morale, m + 5);
+});
+
+test("Make an Example is only for a Sullen or Mutinous crew", function () {
+  var s = opened();
+  ok(!PC.crew.canMakeExample(s).ok);
+  s.crew.morale = 20;
+  ok(PC.crew.canMakeExample(s).ok);
+});
+
+test("jettisoning frees the hold at no cost", function () {
+  var s = opened();
+  var used = PC.crew.slotsUsed(s);
+  PC.crew.jettison(s, "provisions", 3);
+  eq(PC.crew.slotsUsed(s), used - 3);
+});
+
+test("a full game save round-trips at Ocracoke", function () {
+  var s = opened();
+  PC.articles.sign(s, PC.articles.defaults());
+  var back = PC.state.deserialize(PC.state.serialize(s));
+  eq(back, s);
+});
+
+test("the content check passes with Ocracoke loaded", function () {
+  var s = opened();
+  var v = PC.validate(s);
+  eq(v.errors, []);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 2;
+  var SAVE_VERSION = 3;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -20,7 +20,11 @@
   function newGame(captainTemplate, opts) {
     opts = opts || {};
     var c = clone(captainTemplate);
-    return {
+    var startScene = opts.startScene || PC.data.start.scene;
+    // A game that starts in a node (Ocracoke) lives there; the engine tests
+    // start in the test harbor instead (location null).
+    var startNode = opts.startScene ? (opts.node || null) : (opts.node || PC.data.start.node || null);
+    var state = {
       saveVersion: SAVE_VERSION,
       world: { seed: opts.seed || PC.rng.newWorldSeed(), createdAt: new Date().toISOString() },
       time: { year: 1754, season: 0 }, // index into SEASONS
@@ -39,10 +43,44 @@
       rolls: {},                // how many times each roll point has fired
       rerollsUsed: {},          // per source, reset each season
       log: [],
-      current: { screen: "scene", sceneId: opts.startScene || PC.data.start.scene, phase: "choosing" },
+      current: { screen: "scene", sceneId: startScene, phase: "choosing" },
       settings: { showDice: false },
     };
+    addMilestone2Fields(state, startNode);
+    return state;
   }
+
+  // Milestone 2: the node, the hold, the ship's upgrades, the crew's tiers,
+  // the Articles and the persistent Minors (§17, §21.6, §24, §26, §36).
+  function addMilestone2Fields(state, node) {
+    state.location = node ? { node: node, place: null } : null;
+    state.cargo = state.cargo || { treasure: { clean: 0, dirty: 0 }, goods: {} };
+    var sh = state.ship;
+    sh.upgrades = sh.upgrades || { hull: 1, rigging: 1, guns: 1 };
+    if (sh.baseHull == null) sh.baseHull = sh.hullMax;
+    if (sh.cargo == null) sh.cargo = 50;
+    if (sh.size == null) sh.size = 1;
+    if (sh.crewMin == null) sh.crewMin = 5;
+    if (sh.crewMax == null) sh.crewMax = 30;
+    if (sh.speed == null) sh.speed = 2;
+    if (sh.speedMax == null) sh.speedMax = 3;
+    if (sh.rigging == null) sh.rigging = "frayed";
+    var cr = state.crew;
+    if (!cr.tiers) cr.tiers = { Green: cr.count };
+    ["Green", "Able", "Seasoned", "Veteran"].forEach(function (t) { cr.tiers[t] = cr.tiers[t] || 0; });
+    cr.wounded = cr.wounded || 0;
+    cr.raw = cr.raw || 0;
+    cr.floor = cr.floor || 0;
+    cr.rationing = !!cr.rationing;
+    state.articles = state.articles || null;
+    state.nodes = state.nodes || {};
+    state.generated = state.generated || {};
+    state.world.names = state.world.names || [];
+    state.used = state.used || {};       // once-a-season actions, by season stamp
+    if (node && PC.node) PC.node.initNode(state, node);
+  }
+
+  function stamp(state) { return state.time.year + "-" + state.time.season; }
 
   function seasonName(state) { return SEASONS[state.time.season]; }
 
@@ -75,6 +113,14 @@
       data.quests = data.quests || {};
       data.saveVersion = 2;
     }
+    if (data.saveVersion === 2) {
+      // Version 3 (Milestone 2): Ocracoke. A Milestone 1 game was still in
+      // the placeholder scenes, so its captain starts over at Ocracoke's
+      // arrival with everything he had.
+      addMilestone2Fields(data, PC.data.start.node || null);
+      if (data.location) data.current = { screen: "scene", sceneId: PC.data.start.scene, phase: "choosing" };
+      data.saveVersion = 3;
+    }
     return data;
   }
 
@@ -102,6 +148,7 @@
     SEASONS: SEASONS,
     newGame: newGame,
     seasonName: seasonName,
+    stamp: stamp,
     advanceSeason: advanceSeason,
     addLog: addLog,
     serialize: serialize,

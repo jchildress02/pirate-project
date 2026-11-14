@@ -10,7 +10,7 @@
   var PC = (globalThis.PC = globalThis.PC || {});
 
   var KINDS = ["check", "choice", "beat"];
-  var EFFECT_KEYS = ["gold", "provisions", "hull", "morale", "pressure", "dread", "standing", "heat",
+  var EFFECT_KEYS = ["gold", "provisions", "treasure", "hull", "morale", "pressure", "dread", "standing", "heat",
     "ladder", "tag", "item", "ap", "flag"];
   var FACTIONS = ["frisia", "avalon", "pirates"];
 
@@ -98,7 +98,21 @@
       });
     });
     if (!d.scenes[d.start.scene]) err("start", "unknown start scene");
-    if (!d.hubs[d.start.hub]) err("start", "unknown start hub");
+    if (d.start.node && !(d.nodes || {})[d.start.node]) err("start", "unknown start node");
+    if (d.testStart && !d.hubs[d.testStart.hub]) err("start", "unknown test hub");
+
+    // Nodes: slots name real roles, lines render, places exist.
+    Object.keys(d.nodes || {}).forEach(function (id) {
+      var n = d.nodes[id], w = "node " + id;
+      (n.slots || []).forEach(function (s) {
+        if (!d.names.ROLES[s.role]) err(w, "slot " + s.id + " has unknown role " + s.role);
+      });
+      if (n.fence && !d.npcs[n.fence.npc]) err(w, "fence NPC unknown: " + n.fence.npc);
+      if (n.leader && !d.npcs[n.leader]) err(w, "leader unknown: " + n.leader);
+      Object.keys((n.market || {}).demand || {}).forEach(function (g) { if (!d.goods[g]) warn(w, "demand for a good with no price: " + g); });
+      Object.keys(((n.market || {}).bulk || {}).weights || {}).forEach(function (g) { if (!d.goods[g]) err(w, "stock weight for unknown good: " + g); });
+      if (!d.economy.TIERS[n.tier]) err(w, "unknown prosperity tier " + n.tier);
+    });
 
     return { errors: errors, warnings: warnings };
   }
