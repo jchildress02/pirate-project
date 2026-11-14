@@ -208,9 +208,8 @@ p { margin: 0 0 0.8em; }
     METER_MOD_CAP: 3,   // Dread and Standing slot, capped at +3 (§11.2)
     PARTIAL_AT: 6,
     CLEAN_AT: 9,
-    // OPEN (§11.2, pinned in §13.2): does the locked-option UI trigger at an
-    // unclamped edge of exactly -4, or only below it? This setting locks at
-    // -4 or lower. Change to -5 to lock only below the floor.
+    // Ruled (Milestone 0 chat, November 13, 2026): the locked-option UI
+    // triggers at an unclamped edge of -4 or lower (§11.2).
     LOCK_AT_OR_BELOW: -4,
     DR_MAX: 8, // data accepts 0-8; Year 1 content uses 0-5
   };
