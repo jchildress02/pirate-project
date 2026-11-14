@@ -21,4 +21,3 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 
 - Meter modifiers on checks (Dread and Standing, §11.8.5): `meterModifier()` in `js/checks.js` is a stub.
 - Social retries at DR -1 (§11.10); clocks (§11.9); approval tags are recorded on choices but not yet read by anything.
-- The -4 lock rule is OPEN in the docs; `RULES.LOCK_AT_OR_BELOW` holds the current guess (-4).
