@@ -16,7 +16,7 @@
       gender: "m",
       age: 30, // 26-35: two starting tags and one debuff (§12.3)
       homeCity: "Charleston",
-      portrait: null, // portraits arrive with the character creator
+      portrait: { set: "dewey" }, // his own portrait set (§12.10, ruled November 8)
       // Three stats at 2, three at 1 (§12.6)
       stats: { Cunning: 1, Daring: 2, Command: 2, Seamanship: 1, Charm: 2, Grit: 1 },
       // Six training points, max 2 per type (§12.6)

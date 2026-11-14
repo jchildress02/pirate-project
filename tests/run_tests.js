@@ -6,8 +6,8 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/scenes.js", "js/validate.js",
-  "content/check_types.js", "content/modifiers.js", "content/test_captain.js", "content/test_scenes.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/scenes.js", "js/validate.js", "js/creator.js",
+  "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/test_captain.js", "content/test_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -279,6 +279,254 @@ test("bad files are rejected with a clear message", function () {
     try { PC.state.deserialize(t); } catch (e) { threw = true; }
     ok(threw, "should reject " + t);
   });
+});
+
+
+test("a version 1 save upgrades to version 2", function () {
+  var s = fresh();
+  var old = JSON.parse(PC.state.serialize(s));
+  old.saveVersion = 1; delete old.officers; delete old.quests;
+  var back = PC.state.deserialize(JSON.stringify(old));
+  eq(back.saveVersion, 2); eq(back.officers, []); eq(back.quests, {});
+});
+
+console.log("Character creator (§12)");
+
+var C = PC.creator;
+function goodDraft() {
+  var d = C.blankDraft();
+  d.first = "Ned"; d.last = "Cobb"; d.age = 30; d.portraitSet = "flinty";
+  d.homeCity = "Charleston"; d.profession = "Sailor"; d.freePoint = "Navigate"; d.loss = "A";
+  d.stats.Daring = 2; d.stats.Command = 2; d.stats.Seamanship = 2;
+  d.training = { "Navigate": 1, "Marksmanship": 2, "Intimidate": 1, "Persuade": 1, "Pilot Shoals": 1 };
+  d.traits = ["Bold", "Weatherwise"]; d.flaw = "Reckless";
+  d.tags = ["Sharpshooter", "Storm-Born"]; d.debuffs = ["Bad Knee"];
+  d.mentor = { first: "Gideon", last: "Hale", portraitSet: "skully", type: "Navigator", voice: "Old Salt", secondary: "Lonesome" };
+  d.shipName = "Ember";
+  return d;
+}
+
+test("a finished draft has no errors", function () {
+  eq(C.allErrors(goodDraft()), []);
+});
+
+test("age bands set starting tags and debuffs (§12.3)", function () {
+  eq([15, 25, 26, 35, 36, 40].map(function (a) { var b = C.band(a); return [b.band, b.tags, b.debuffs]; }),
+     [["young", 1, 0], ["young", 1, 0], ["mid", 2, 1], ["mid", 2, 1], ["old", 3, 2], ["old", 3, 2]]);
+  ok(!C.band(14) && !C.band(41));
+});
+
+test("captain portraits follow the age band; all eight sets offered", function () {
+  var d = goodDraft();
+  var ch = C.captainPortraitChoices(d);
+  eq(ch.length, 8);
+  ok(ch.every(function (c) { return /_mid\.webp$/.test(c.path); }));
+  d.age = 18;
+  ok(C.captainPortraitChoices(d).every(function (c) { return /_young\.webp$/.test(c.path); }));
+});
+
+test("the mentor's portraits are old and never the captain's set", function () {
+  var d = goodDraft();
+  var ch = C.mentorPortraitChoices(d);
+  eq(ch.length, 7);
+  ok(ch.every(function (c) { return c.set !== "flinty" && /_old\.webp$/.test(c.path); }));
+  d.mentor.portraitSet = "flinty";
+  ok(C.stepErrors(d, "mentor").length > 0);
+});
+
+test("every portrait file exists", function () {
+  var fs = require("fs");
+  C.allPortraitPaths().forEach(function (p) { ok(fs.existsSync(path.join(root, p)), "missing " + p); });
+  eq(C.allPortraitPaths().length, 48);
+});
+
+test("stats: 3 points, cap 2, three at 2 and three at 1 (§12.6)", function () {
+  var d = C.blankDraft();
+  eq(C.statPointsLeft(d), 3);
+  d.stats.Grit = 2;
+  ok(!C.canRaiseStat(d, "Grit"), "cap 2");
+  d.stats.Charm = 2; d.stats.Cunning = 2;
+  ok(!C.canRaiseStat(d, "Daring"), "no points left");
+  eq(C.stepErrors(d, "stats"), []);
+});
+
+test("training: 6 points, cap 2 including the free point", function () {
+  var d = goodDraft();
+  eq(C.trainingTotal(d, "Navigate"), 2);
+  ok(!C.canRaiseType(d, "Navigate"), "free point counts toward the cap");
+  d.training.Navigate = 2;
+  ok(C.stepErrors(d, "training").length > 0);
+});
+
+test("changing profession gives back a point that the new free point would push over", function () {
+  var d = goodDraft();
+  d.training = { "Hold Your Ground": 2, "Navigate": 1, "Persuade": 1, "Intimidate": 1, "Pilot Shoals": 1 };
+  d.profession = "Soldier"; d.freePoint = "Hold Your Ground";
+  C.fitToProfession(d); // free point still valid for Soldier
+  eq(d.freePoint, "Hold Your Ground");
+  eq(d.training["Hold Your Ground"], 1);
+});
+
+test("Variant D is hidden; losses follow the profession", function () {
+  var d = goodDraft();
+  d.profession = "Official";
+  eq(C.lossChoices(d).map(function (l) { return l.id; }), ["A", "B", "C"]);
+  d.loss = "D";
+  ok(C.stepErrors(d, "origin").length > 0);
+});
+
+test("exclusions: Refined/Wild, Pious/Heathen, Drunkard/Heavy Drinker, Eagle Eyed/Failing Eyes", function () {
+  var d = goodDraft();
+  d.traits = ["Refined"]; ok(C.blockedBy(d, "Wild"));
+  d.traits = ["Pious"]; ok(C.blockedBy(d, "Heathen"));
+  d.flaw = "Heavy Drinker"; ok(C.blockedBy(d, "Drunkard"));
+  d.debuffs = ["Failing Eyes"]; ok(C.blockedBy(d, "Eagle Eyed"));
+  d.debuffs = ["Bad Back"]; ok(C.blockedBy(d, "Hauler"));
+  d.traits = ["Bold", "Wild"]; d.flaw = "Reckless"; d.debuffs = ["Bad Knee"];
+  ok(!C.blockedBy(d, "Sharpshooter"));
+});
+
+test("younger captains can't keep extra tags or debuffs", function () {
+  var d = goodDraft();
+  d.age = 20; C.fitToAge(d);
+  eq(d.tags.length, 1); eq(d.debuffs.length, 0);
+  eq(C.stepErrors(d, "tags"), []);
+});
+
+test("mentor: secondary trait can't clash with the voice (§25.6)", function () {
+  var d = goodDraft();
+  d.mentor.voice = "Kindly";
+  eq(C.secondaryBlocked(d, "Bloodthirsty"), "Clashes with Kindly");
+  eq(C.secondaryBlocked(d, "Kindly"), "Already his voice");
+  eq(C.secondaryBlocked(d, "Jovial"), null);
+});
+
+test("building the captain: starting package (§12.12)", function () {
+  var t = C.build(goodDraft(), "seed-1");
+  var s = PC.state.newGame(t, { seed: "seed-1" });
+  eq(s.captain.tags, ["Ash-Born", "Grief-Stricken", "Sharpshooter", "Storm-Born", "Bad Knee"]);
+  eq(s.captain.training.Navigate, 2);
+  eq(s.captain.gender, "m");
+  eq(s.money, { crew: 600, purse: 0 });
+  eq(s.provisions, 10);
+  eq([s.ship.name, s.ship.hull, s.ship.hullMax, s.ship.guns], ["Ember", 14, 20, 6]);
+  eq(s.crew.count, 12);
+  eq(s.officers.length, 1);
+  var m = s.officers[0];
+  eq([m.type, m.rung, m.mentor, m.quartermaster, m.unique, m.portrait.band], ["Navigator", 2, true, true, "Mentor", "old"]);
+  ok(PC.data.creator.DRIVES.indexOf(m.drive) >= 0 && PC.data.creator.FEARS.indexOf(m.fear) >= 0);
+  eq(s.npcs.charleston_merchant.rung, 2);
+  ok(s.flags.profession_sailor && s.flags.loss_a);
+  eq(s.quests.what_was_lost.status, "open");
+  eq(C.build(goodDraft(), "seed-1").officers[0].drive, m.drive, "drive is seeded");
+});
+
+test("Baltimore adds 500 gold; women's portraits make a woman captain", function () {
+  var d = goodDraft();
+  d.homeCity = "Baltimore"; d.portraitSet = "mary"; d.mentor.portraitSet = "anne";
+  var t = C.build(d, "s");
+  eq(t.money.crew, 1100);
+  eq(t.captain.gender, "f"); eq(t.officers[0].gender, "f");
+  eq(Object.keys(t.npcs), []);
+});
+
+test("an unfinished draft won't build", function () {
+  var threw = false;
+  try { C.build(C.blankDraft(), "s"); } catch (e) { threw = true; }
+  ok(threw);
+});
+
+test("the captain's portrait ages and takes the eyepatch with One Eye", function () {
+  var s = PC.state.newGame(C.build(goodDraft(), "s"), { seed: "s" });
+  eq(C.captainPortrait(s.captain), "assets/portraits/flinty_mid.webp");
+  s.captain.age = 37;
+  eq(C.captainPortrait(s.captain), "assets/portraits/flinty_old.webp");
+  s.captain.tags.push("One Eye");
+  eq(C.captainPortrait(s.captain), "assets/portraits/flinty_old_patch.webp");
+  eq(C.officerPortrait(s.officers[0]), "assets/portraits/skully_old.webp");
+});
+
+test("random drafts are always complete and build", function () {
+  for (var i = 0; i < 200; i++) {
+    var d = C.randomDraft("r" + i);
+    eq(C.allErrors(d), [], "draft " + i);
+    C.build(d, "w" + i);
+  }
+});
+
+test("every creator option has a modifier entry, and every modifier names real check types", function () {
+  var ids = C.allTags().concat(C.allTraits(), PC.data.creator.FLAWS, PC.data.creator.DEBUFFS).map(function (x) { return x.id; });
+  PC.data.creator.LOSSES.forEach(function (l) { ids.push(l.tag); });
+  ids.forEach(function (id) { ok(PC.data.modifiers[id], "no modifier entry for " + id); });
+  Object.keys(PC.data.modifiers).forEach(function (k) {
+    var m = PC.data.modifiers[k];
+    (m.edge || []).forEach(function (e) {
+      if (e.type) ok(PC.data.checkTypes[e.type], k + ": unknown type " + e.type);
+      if (e.group) ok(PC.data.checkGroups[e.group], k + ": unknown group " + e.group);
+    });
+    ((m.reroll && m.reroll.types) || []).forEach(function (t) { ok(PC.data.checkTypes[t], k + ": unknown reroll type " + t); });
+  });
+});
+
+console.log("Modifiers from the creator");
+
+function built(edit) {
+  var d = goodDraft(); if (edit) edit(d);
+  return PC.state.newGame(C.build(d, "s"), { seed: "s" });
+}
+
+test("a trait adds +1 on its types; a flaw -1", function () {
+  var s = built();
+  // Daring 2 + Bold 1 + Bad Knee -1 on Board = 2
+  eq(PC.checks.assess(s, { type: "Board", dr: 0 }).edge, 2);
+  // Cunning 1 + Reckless -1 on Notice Danger
+  eq(PC.checks.assess(s, { type: "Notice Danger", dr: 0 }).edge, 0);
+});
+
+test("group modifiers: Rheumy Hands hits all of Fine Work", function () {
+  var s = built(function (d) { d.debuffs = ["Rheumy Hands"]; });
+  ["Forge", "Repair at Sea", "Treat Wounds"].forEach(function (t) {
+    var a = PC.checks.assess(s, { type: t, dr: 0 });
+    ok(a.parts.some(function (p) { return p.label === "Rheumy Hands" && p.value === -1; }), t);
+  });
+});
+
+test("conditions: Deep Scar only under fire; Weak Chest on any check in the Cold", function () {
+  var s = built(function (d) { d.loss = "C"; d.debuffs = ["Weak Chest"]; });
+  var calm = PC.checks.assess(s, { type: "Hold Your Ground", dr: 0 });
+  var fire = PC.checks.assess(s, { type: "Hold Your Ground", dr: 0 }, { conditions: ["Under Fire"] });
+  eq(fire.edge, calm.edge - 1);
+  var cold = PC.checks.assess(s, { type: "Persuade", dr: 0 }, { conditions: ["Cold"] });
+  eq(cold.edge, PC.checks.assess(s, { type: "Persuade", dr: 0 }).edge - 1);
+});
+
+test("the season counts as a condition: Fiddler's reroll is Winter only", function () {
+  var s = built(function (d) { d.tags = ["Fiddler", "Storm-Born"]; });
+  ok(!PC.checks.availableReroll(s, { type: "Rally Crew" }, "setback"));
+  s.time.season = 3; // Winter
+  eq(PC.checks.availableReroll(s, { type: "Rally Crew" }, "setback").name, "Fiddler");
+});
+
+test("Dead Reckoner rerolls Navigate only in fog or open water", function () {
+  var s = built(function (d) { d.tags = ["Dead Reckoner", "Storm-Born"]; d.mentor.type = "Gunner"; });
+  ok(!PC.checks.availableReroll(s, { type: "Navigate" }, "partial", { conditions: ["Harbor"] }));
+  ok(PC.checks.availableReroll(s, { type: "Navigate" }, "partial", { conditions: ["Fog"] }));
+});
+
+test("the mentor's Old Lessons rerolls a setback (not a partial) on what he taught", function () {
+  var s = built(); // a Navigator mentor teaches Navigate, Outrun, Maneuver
+  eq(PC.checks.availableReroll(s, { type: "Outrun" }, "setback").name, "Old Lessons (Gideon)");
+  ok(!PC.checks.availableReroll(s, { type: "Outrun" }, "partial"));
+  ok(!PC.checks.availableReroll(s, { type: "Haggle" }, "setback"));
+  s.rerollsUsed["mentor:Old Lessons"] = 1;
+  ok(!PC.checks.availableReroll(s, { type: "Outrun" }, "setback"), "once a season");
+});
+
+test("a built captain can play the test scenes", function () {
+  var s = built();
+  eq(PC.validate(s).errors, []);
+  PC.scenes.choose(s, 0);
+  PC.scenes.commit(s, "crew");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

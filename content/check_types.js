@@ -25,4 +25,13 @@
     FAMILIES[stat].forEach(function (t) { types[t] = { stat: stat }; });
   });
   PC.data.checkTypes = types;
+
+  // Cross-stat groups for modifiers that span stats (§11.6).
+  PC.data.checkGroups = {
+    "Fine Work": ["Light Fingers", "Forge", "Decipher & Research", "Repair at Sea", "Treat Wounds"],
+    "Heavy Labor": ["Haul & Labor", "Refit & Careen"],
+    "Combat": ["Board", "Strike First", "Swordsmanship", "Brawling", "Marksmanship", "Storm a Position", "Hold Your Ground"],
+    "Underworld": ["Smuggle", "Fence", "Light Fingers", "Gather Intelligence", "Cards & Dice", "Bribe", "Tavern Talk"],
+    "Officialdom": ["Petition", "Negotiate", "Bribe", "Forge", "Bluff & Disguise"],
+  };
 })();
