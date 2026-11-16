@@ -110,7 +110,43 @@
     var nd = nodeData(id);
     var info = PC.data.goods[good];
     var raw = nd.market.produces && nd.market.produces[good] ? info.base * E().PRODUCED_PRICE : salePrice(state, id, good) * E().SHOP_MARKUP;
-    return money(raw * purchaseMult(state, id, npc, "merchant"));
+    return money(raw * purchaseMult(state, id, npc, "merchant") * (1 - haggleShift(state, npc)));
+  }
+
+  // ---- Haggle (§11.4, changed by §41.13) ----------------------------------
+  // One optional roll per merchant per season, before the first trade there:
+  // clean 10% in your favor, partial 5%, setback 10% against you. It works at
+  // fences too, and stacks with Standing and a friend's Service Level.
+  var HAGGLE = { clean: 0.10, partial: 0.05, setback: -0.10 };
+  var HAGGLE_DR = 2; // DEFAULT: §11.4 sets no DR for the Haggle roll
+
+  function haggleShift(state, npc) {
+    if (!npc || !state.nodes || !state.location) return 0;
+    var h = (season(state).haggle || {})[npc];
+    return h ? HAGGLE[h] : 0;
+  }
+  function dealt(state, npc) { var s = season(state); return !!((s.dealt || {})[npc] || (s.traded || {})[npc]); }
+  function markDealt(state, npc) { var s = season(state); (s.dealt = s.dealt || {})[npc] = true; }
+
+  function haggleCheck(state, npc) {
+    var s = season(state);
+    if ((s.haggle || {})[npc]) return { ok: false, done: true, why: "Haggled this season" };
+    if (dealt(state, npc)) return { ok: false, why: "Only before your first trade this season" };
+    if (PC.npcs.serviceLevel(state, npc) == null) return { ok: false, why: "He won't deal with you" };
+    return { ok: true };
+  }
+  function haggleRoll(state, npc) { return { type: "Haggle", dr: HAGGLE_DR }; }
+  function haggleConditions(state, npc) { return npc === (nodeData(here(state)).fence || {}).npc ? ["Harbor", "Underworld"] : ["Harbor", "Merchant"]; }
+
+  function haggle(state, npc) {
+    var c = haggleCheck(state, npc);
+    if (!c.ok) throw new Error(c.why);
+    var key = [state.world.seed, PC.state.stamp(state), "haggle", npc].join("|");
+    var r = PC.checks.resolve(state, haggleRoll(state, npc), key, { conditions: haggleConditions(state, npc) });
+    var s = season(state);
+    (s.haggle = s.haggle || {})[npc] = r.outcome;
+    PC.state.addLog(state, "Haggled with " + PC.npcs.get(state, npc).full + ": " + r.outcome + ".");
+    return { outcome: r.outcome, shift: HAGGLE[r.outcome], dice: r.dice, edge: r.assessment.edge };
   }
 
   // ---- Prices, Service Level and Standing ---------------------------------
@@ -273,6 +309,28 @@
 
   // ---- The tavern keeper -----------------------------------------------------
 
+  // ---- The keeper's questions (§38.11, §41.5) -----------------------------
+  // Information only: no action, no Tavern action for §17.2's first-visit
+  // trigger. Each can be asked once; answered ones fade (§41.1).
+  function keeperQuestions(state) {
+    var L = nodeData(here(state)).lines.keeper;
+    var asked = (state.flags.keeperAsked = state.flags.keeperAsked || {});
+    return (L.questions || []).filter(function (q) { return !q.after || asked[q.after]; })
+      .map(function (q) { return { id: q.id, label: q.label, asked: !!asked[q.id] }; });
+  }
+
+  function askKeeperQuestion(state, qid) {
+    var id = here(state), who = slotNpc(id, "keeper");
+    var q = (nodeData(id).lines.keeper.questions || []).filter(function (x) { return x.id === qid; })[0];
+    if (!q) throw new Error("He has nothing to say about that.");
+    if (greeting(state, id, who, "keeper").refuse) return { refuse: true, line: nodeData(id).lines.keeper.refuse };
+    state.npcs[who] = state.npcs[who] || {};
+    state.npcs[who].met = true;
+    (state.flags.keeperAsked = state.flags.keeperAsked || {})[qid] = true;
+    if (q.meets) (state.npcs[q.meets] = state.npcs[q.meets] || {}).met = true;
+    return { label: q.label, line: q.line.replace(/\{keeper\}/g, PC.npcs.get(state, who).first) };
+  }
+
   function talkToKeeper(state) {
     var id = here(state), who = slotNpc(id, "keeper");
     var L = nodeData(id).lines.keeper;
@@ -321,7 +379,7 @@
 
   function provisionsPrice(state) {
     var id = here(state);
-    return money(E().PROVISIONS_LOT * tierOf(state).goods * purchaseMult(state, id, slotNpc(id, "provisioner"), "merchant"));
+    return money(E().PROVISIONS_LOT * tierOf(state).goods * purchaseMult(state, id, slotNpc(id, "provisioner"), "merchant") * (1 - haggleShift(state, slotNpc(id, "provisioner"))));
   }
 
   function provisionerCap(state) {
@@ -334,6 +392,7 @@
 
   function noteTrade(state, who, gold, lines) {
     var s = season(state);
+    markDealt(state, who);
     s.traded[who] = (s.traded[who] || 0) + gold;
     var up = false;
     if (s.traded[who] >= E().MERCHANT_VISIT_GOLD && s.traded[who] - gold < E().MERCHANT_VISIT_GOLD) up = ladderTick(state, who, "visit");
@@ -382,11 +441,11 @@
     if (buyer === "fence") {
       var f = nodeData(id).fence;
       var sl = PC.npcs.serviceLevel(state, f.npc) || 0;
-      return money(base * (E().FENCE_RATE + E().FENCE_SL_STEP * sl));
+      return money(base * (E().FENCE_RATE + E().FENCE_SL_STEP * sl) * (1 + haggleShift(state, f.npc)));
     }
     var who = slotNpc(id, "provisioner");
     var psl = PC.npcs.serviceLevel(state, who) || 0;
-    return money(base * (1 + E().MERCHANT_SELL_STEP * psl + standingSaleBonus(state, id)));
+    return money(base * (1 + E().MERCHANT_SELL_STEP * psl + standingSaleBonus(state, id)) * (1 + haggleShift(state, who)));
   }
 
   function fenceOpen(state) {
@@ -419,6 +478,7 @@
     if (what === "treasure") state.cargo.treasure[k] -= units;
     else { PC.crew.removeGood(state, what, units, dirty); s.sold[what] = (s.sold[what] || 0) + units; }
     state.money.crew += gold;
+    markDealt(state, who);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
     // Selling here slowly raises prosperity (§20.2; fence sales count, assumption).
     s.soldGold += gold;
@@ -554,8 +614,77 @@
     var s = season(state);
     var m = poolMult(state);
     var out = {};
-    Object.keys(s.pool).forEach(function (t) { out[t] = Math.max(0, Math.floor(s.pool[t] * m) - s.hired[t]); });
+    Object.keys(s.pool).forEach(function (t) { out[t] = Math.max(0, Math.floor(s.pool[t] * m) - s.hired[t] - ((s.lost || {})[t] || 0)); });
     return out;
+  }
+
+  // ---- The Docks roll (§11.4, §41.8) ----------------------------------------
+  // One optional Recruit roll per Docks visit, before signing. Clean: a third
+  // of the hands signed this visit come aboard a tier better (minimum 1).
+  // Partial: the pool as listed. Setback: a third of the pool's Seasoned and
+  // Veteran hands have signed elsewhere (minimum 1, if there are any).
+  var DOCKS_DR = 2; // DEFAULT: §11.4 sets no DR for the Docks roll
+  var NEXT_TIER = { Green: "Able", Able: "Seasoned", Seasoned: "Veteran" };
+
+  function docksRollCheck(state) {
+    var d = state.location.docksRoll;
+    if (d && d.visit === state.location.visit) return { ok: false, done: true, why: "Once a visit" };
+    if (state.location.signedVisit != null && state.location.signedVisit === state.location.visit) return { ok: false, why: "Only before you sign" };
+    return { ok: true };
+  }
+  function docksCheck() { return { type: "Recruit", dr: DOCKS_DR }; }
+
+  function docksRoll(state) {
+    var c = docksRollCheck(state);
+    if (!c.ok) throw new Error(c.why);
+    var key = [state.world.seed, PC.state.stamp(state), "docks-roll", state.location.visit].join("|");
+    var r = PC.checks.resolve(state, docksCheck(), key, { conditions: ["Harbor", "Underworld"] });
+    var out = { visit: state.location.visit, outcome: r.outcome, upgraded: 0, signed: 0, lost: 0, dice: r.dice, edge: r.assessment.edge };
+    if (r.outcome === "setback") {
+      var avail = poolAvailable(state), S = avail.Seasoned || 0, V = avail.Veteran || 0;
+      if (S + V > 0) {
+        var k = Math.max(1, Math.floor((S + V) / 3));
+        var v = Math.min(V, Math.round(k * V / (S + V))), sn = Math.min(S, k - v);
+        var s = season(state); s.lost = s.lost || {};
+        s.lost.Seasoned = (s.lost.Seasoned || 0) + sn; s.lost.Veteran = (s.lost.Veteran || 0) + v;
+        out.lost = sn + v;
+      }
+    }
+    state.location.docksRoll = out;
+    PC.state.addLog(state, "Sized up the hands on the docks: " + r.outcome + (out.lost ? " (" + out.lost + " signed elsewhere)" : "") + ".");
+    return out;
+  }
+
+  // Sign several tiers at once (the one Sign button, §41.8). A clean Docks
+  // roll lifts a third of this visit's signings a tier (lowest first).
+  function recruitBatch(state, plan) {
+    var tiers = E().TIER_ORDER.filter(function (t) { return plan[t] > 0; });
+    if (!tiers.length) throw new Error("Choose how many hands to sign.");
+    var want = 0, total = 0;
+    tiers.forEach(function (t) { want += Math.floor(plan[t]); total += Math.round(signingCost(state, t) * Math.floor(plan[t])); });
+    if (want > PC.crew.berths(state)) throw new Error("Only " + PC.crew.berths(state) + " berths free.");
+    if (total > state.money.crew) throw new Error("Needs " + total + " crew gold.");
+    var n = 0, cost = 0, line = null, signed = [];
+    tiers.forEach(function (t) {
+      var r = recruit(state, t, plan[t]);
+      if (r.n) { n += r.n; cost += r.cost; for (var i = 0; i < r.n; i++) signed.push(t); }
+      line = r.line;
+    });
+    state.location.signedVisit = state.location.visit;
+    var d = state.location.docksRoll, up = 0;
+    if (d && d.visit === state.location.visit && d.outcome === "clean" && n) {
+      d.signed += n;
+      var owed = Math.max(1, Math.floor(d.signed / 3)) - d.upgraded;
+      signed.sort(function (a, b) { return E().TIER_ORDER.indexOf(a) - E().TIER_ORDER.indexOf(b); });
+      for (var j = 0; j < signed.length && up < owed; j++) {
+        var to = NEXT_TIER[signed[j]];
+        if (!to) continue;
+        PC.crew.removeHands(state, signed[j], 1); PC.crew.addHands(state, to, 1); up++;
+      }
+      d.upgraded += up;
+      if (up) PC.state.addLog(state, up + " of them turn out better than they looked.");
+    }
+    return { n: n, cost: cost, line: line, upgraded: up };
   }
 
   function signingCost(state, tier) {
@@ -695,6 +824,18 @@
 
   PC.node = {
     FLAGS: F,
+    keeperQuestions: keeperQuestions,
+    askKeeperQuestion: askKeeperQuestion,
+    haggleCheck: haggleCheck,
+    haggleRoll: haggleRoll,
+    haggleConditions: haggleConditions,
+    haggle: haggle,
+    haggleShift: haggleShift,
+    HAGGLE: HAGGLE,
+    docksRollCheck: docksRollCheck,
+    docksCheck: docksCheck,
+    docksRoll: docksRoll,
+    recruitBatch: recruitBatch,
     initNode: initNode,
     season: season,
     tierOf: tierOf,

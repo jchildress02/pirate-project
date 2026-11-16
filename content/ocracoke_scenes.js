@@ -1796,6 +1796,7 @@
         {
           "id": "knife",
           "label": "Draw your knife and prepare to fight it off.",
+          "strikeFirst": { "dr": 2 },
           "approval": [
             "Risk"
           ],
@@ -2412,7 +2413,7 @@
     },
     "ocr_uw_1": {
       "kind": "choice",
-      "ap": 1,
+      "ap": 0,
       "title": "Welcome to the Underworld",
       "where": "Ocracoke, Tavern",
       "repeat": "once",

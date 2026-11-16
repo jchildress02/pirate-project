@@ -1,8 +1,7 @@
 /* Pirate Chronicle — quest leads and the journal (§12.5, §30.6, §30.7).
  *
  * A quest record lives in state.quests by id; leads are ids in its list.
- * The journal's wording is the UI chat's job (§37.9): until then each entry
- * is a plain placeholder line from content/quests.js.
+ * The journal's wording is §41.14, in content/quests.js.
  *
  * No screen code here.
  */
@@ -32,31 +31,98 @@
     var r = record(state, quest);
     if (r.leads.indexOf(lead) >= 0) return false;
     r.leads.push(lead);
+    state.journalDot = true; // the Journal button's dot (§41.12)
     PC.state.addLog(state, "Journal: " + q.name + ", a lead (" + r.leads.length + " of " + q.needed + ").");
     return true;
   }
 
-  // The journal: every open quest, its leads heard, and where the trail goes.
+  // The journal (§41.12, §41.14): every quest with its one-line objective,
+  // its leads, where the trail goes and its deadline.
+  function seasonIdx(year, season) { return year * 4 + season; }
+  function nowIdx(state) { return seasonIdx(state.time.year, state.time.season); }
+  function deadlineOf(q) { return q.deadline ? seasonIdx(q.deadline.year, q.deadline.season) : null; }
+  function deadlineLine(q) {
+    return q.deadline ? "By the end of " + PC.state.SEASONS[q.deadline.season] + " " + q.deadline.year : null;
+  }
+
+  // The loss quest is delivered at creation whether or not it is pursued
+  // (§16.2), so it is in the journal before its first lead.
+  function ids(state) {
+    var list = Object.keys(state.quests || {}).filter(function (id) { return PC.data.quests[id]; });
+    if (state.captain && state.captain.loss && list.indexOf("what_was_lost") < 0) list.unshift("what_was_lost");
+    return list;
+  }
+
   function journal(state) {
-    return Object.keys(state.quests || {}).filter(function (id) { return PC.data.quests[id]; }).map(function (id) {
-      var q = Q(id), r = state.quests[id];
+    var out = ids(state).map(function (id) {
+      var q = Q(id), r = (state.quests || {})[id] || { status: "open", leads: [] }, v = state.captain.loss;
       var entries = r.leads.map(function (l) {
         var e = q.leads[l].journal;
-        return typeof e === "string" ? e : (e[state.captain.loss] || e.any || "");
+        return typeof e === "string" ? e : (e[v] || e.any || "");
       });
       var hereLeft = Object.keys(q.leads).filter(function (l) {
         var ld = q.leads[l];
-        return ld.node === "ocracoke" && (!ld.variants || ld.variants.indexOf(state.captain.loss) >= 0) && r.leads.indexOf(l) < 0;
+        return ld.node === "ocracoke" && (!ld.variants || ld.variants.indexOf(v) >= 0) && r.leads.indexOf(l) < 0;
       });
+      var summary = typeof q.summary === "string" ? q.summary : (q.summary[v] || "");
+      // The prototype carries only Ocracoke's beats (§37.5).
+      var beyond = r.leads.length > 0 && !hereLeft.length ? q.beyond : null;
+      var step = q.here && hereLeft.length ? q.here[v] : beyond;
+      var dl = deadlineOf(q);
       return {
         id: id, name: q.name, status: r.status, leads: r.leads.length, needed: q.needed,
-        summary: typeof q.summary === "string" ? q.summary : (q.summary[state.captain.loss] || ""),
-        entries: entries,
-        // The prototype carries only Ocracoke's beats (§37.5).
-        beyond: r.leads.length > 0 && !hereLeft.length ? q.beyond : null,
+        summary: step ? summary : "", objective: step || summary,
+        entries: entries, beyond: step === beyond ? null : beyond,
+        deadline: r.status !== "done" ? deadlineLine(q) : null,
+        lastSeason: dl != null && nowIdx(state) === dl,
       };
     });
+    return startupJournal(state).concat(out);
   }
 
-  PC.quests = { record: record, addLead: addLead, hasLead: hasLead, journal: journal };
+  // The startup quests read their scenes and flags (content/quests.js).
+  function inScene(state, prefix) {
+    var c = state.current;
+    return !!(c && c.screen === "scene" && c.sceneId && c.sceneId.indexOf(prefix) === 0);
+  }
+  function seenAny(state, prefix) {
+    return Object.keys(state.seen || {}).some(function (k) { return k.indexOf(prefix) === 0; });
+  }
+  function startupJournal(state) {
+    var S = PC.data.startupQuests || {}, f = state.flags, out = [];
+    var entry = function (key, status, objective) {
+      return { id: key, name: S[key].name, status: status, leads: 0, needed: 0, summary: "", objective: objective, entries: [], beyond: null, deadline: null };
+    };
+    var w = S.dying_wish;
+    if (w && (f[w.done] || inScene(state, w.scenes) || seenAny(state, w.scenes))) {
+      if (f[w.done]) out.push(entry("dying_wish", "done", w.doneLine));
+      else {
+        var atYard = (state.seen || {}).ocr_dpw_4 || (inScene(state, w.scenes) && /Graveyard/.test((PC.data.scenes[state.current.sceneId] || {}).where || ""));
+        out.push(entry("dying_wish", "open", f.dpw_retry ? w.steps.retry : atYard ? w.steps.dive : w.steps.follow));
+      }
+    }
+    var u = S.underworld;
+    if (u && (f[u.done] || inScene(state, u.scenes) || seenAny(state, u.scenes))) {
+      out.push(f[u.done] ? entry("underworld", "done", u.doneLine) : entry("underworld", "open", u.steps.collect));
+    }
+    var rr = S.restless;
+    if (rr && PC.officers) {
+      var aboard = PC.officers.aboard ? PC.officers.aboard(state).some(function (o) { return o.id === "davey"; }) : false;
+      if (aboard) out.push(entry("restless", "done", rr.doneLine));
+      else if (f.davey_at_tavern) out.push(entry("restless", "open", (state.seen || {}).ocr_rr_tab && !f.rr_paid ? rr.steps.tab : rr.steps.waiting));
+    }
+    return out;
+  }
+
+  // A quest whose deadline falls this season gets one warning, at the start
+  // of that season (§41.12). Returns the quests to warn about now.
+  function expiringNow(state) {
+    var now = nowIdx(state);
+    return ids(state).filter(function (id) {
+      var q = PC.data.quests[id], r = (state.quests || {})[id] || {};
+      return r.status !== "done" && deadlineOf(q) === now && r.warned !== now;
+    }).map(function (id) { record(state, id).warned = now; return Q(id).name; });
+  }
+
+  PC.quests = { record: record, addLead: addLead, hasLead: hasLead, journal: journal, expiringNow: expiringNow };
 })();

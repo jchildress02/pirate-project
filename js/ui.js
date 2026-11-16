@@ -188,6 +188,17 @@
 
   // ---- The frame -----------------------------------------------------------
 
+  // The expiry warning (§41.12): at the start of the season a quest
+  // expires, a popup, and a dot on the Journal button until it is opened.
+  function expiryWarning() {
+    if (!state.location || state.location.popup) return;
+    var names = PC.quests.expiringNow(state);
+    if (!names.length) return;
+    state.journalDot = true;
+    state.location.popup = { title: "Running out of time", chips: [],
+      text: names.map(function (n) { return n + " must be done by the end of this season."; }).join("\n\n") };
+  }
+
   function frame(inner) {
     return '<div class="desk' + (reducedMotion() ? " reduce-motion" : "") + '"><div class="rope"><div class="page">' + CORNERS + inner + "</div></div></div>";
   }
@@ -197,6 +208,7 @@
     if (!state && creating) return drawCreator();
     if (!state) return drawTitle();
     liveTotals = [];
+    expiryWarning();
     var screen = state.current.screen;
     var content = screen === "hub" ? hubPanel() : screen === "node" ? nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
@@ -242,7 +254,7 @@
   }
 
   function topBar() {
-    var b = function (k, t, m) { return '<button class="menubtn' + (menu === m ? " on" : "") + '" data-act="openmenu" data-menu="' + m + '">' + ic(k) + t + "</button>"; };
+    var b = function (k, t, m) { return '<button class="menubtn' + (menu === m ? " on" : "") + '" data-act="openmenu" data-menu="' + m + '">' + ic(k) + t + (m === "journal" ? jdot() : "") + "</button>"; };
     return '<header class="topbar"><div><span class="brand">Pirate Chronicle</span><span class="wt">(working title)</span></div>' +
       '<span class="when">' + esc(PC.state.seasonName(state)) + " " + state.time.year + "</span>" +
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
@@ -300,10 +312,12 @@
       }).join("") + '<span class="note">Officers · tap for cards</span></div>' : "");
   }
 
+  function jdot() { return state.journalDot ? '<span class="jdot" title="Something new in your Journal"></span>' : ""; }
+
   function tabBar() {
     var atNode = state.current.screen === "node";
     var b = function (k, t, a, extra) { return '<button data-act="' + a + '"' + (extra || "") + ">" + ic(k) + t + "</button>"; };
-    return '<nav class="tabbar">' + b("journal", "Journal", "openmenu", ' data-menu="journal"') + b("rumor", "Rumors", "openmenu", ' data-menu="rumors"') +
+    return '<nav class="tabbar">' + b("journal", "Journal" + jdot(), "openmenu", ' data-menu="journal"') + b("rumor", "Rumors", "openmenu", ' data-menu="rumors"') +
       b("captain", "Captain", "openmenu", ' data-menu="captain"') + b("ship", "Ship", "goplace", ' data-place="ship"' + (atNode ? "" : " disabled")) + b("menu", "Menu", "openmenu", ' data-menu="menu"') + "</nav>";
   }
 
@@ -354,7 +368,7 @@
     var known = PC.npcs.known(state, id);
     var name = known ? n.full || (n.first + " " + n.last) : (n.label ? titleCase(n.label.replace(/^the /, "")) : "A stranger");
     var art = PC.data.npcPortraits[id];
-    return '<div class="castframe">' + (art ? '<img class="frame" src="' + assetUrl(art) + '" alt="">' : '<div class="frame">Portrait<br>' + esc(name) + "<br><small>2 : 3 · 640 × 960</small></div>") +
+    return '<div class="castframe">' + (art ? '<img class="frame" src="' + assetUrl(art) + '" alt="">' : '<div class="frame"><span>Portrait<br>' + esc(name) + "<br><small>2 : 3 · 640 × 960</small></span></div>") +
       '<div class="cap">' + esc(known ? name : "") + "</div></div>";
   }
 
@@ -419,10 +433,19 @@
     return faces.length ? { icon: "officer", ink: "good", html: faces.join(" ") + " Officers" } : null;
   }
 
+  // Strike First (§11.4): the automatic opening roll of a close fight, in
+  // the same result styling (§38.6).
+  function strikeFirstLine(sf) {
+    if (!sf) return "";
+    var t = sf.value > 0 ? "You strike first: +1 on the first clash." : sf.value < 0 ? "It gets the jump: −1 to you on the first clash." : "Neither of you gets the jump.";
+    return '<p class="sfline" style="color:' + (sf.value > 0 ? INK.good : sf.value < 0 ? INK.bad : "inherit") + '">' + esc(t) +
+      (state.settings.showDice && sf.dice ? ' <span class="note">(Strike First: dice ' + sf.dice.join(" + ") + ", edge " + sf.edge + ")</span>" : "") + "</p>";
+  }
+
   function resultBits(r, compact) {
     var html = '<p class="you-chose">' + inline(r.choiceLabel || r.label) + "</p>";
     if (r.firstRoll) html += '<p class="note">First roll: ' + OUTCOME[r.firstRoll.outcome][0] + ". Rerolled with " + esc(r.firstRoll.by) + ".</p>";
-    html += badge(r.outcome) + diceLine(r.roll);
+    html += strikeFirstLine(r.strikeFirst) + badge(r.outcome) + diceLine(r.roll);
     if (r.text) html += '<div class="prose">' + prose(r.text) + "</div>";
     var list = (r.chips || []).slice();
     var ap = approvalChip(r.approval);
@@ -585,8 +608,8 @@
     var html = '<div class="block">' + nameCard(keeper, "Tavern Keeper") + sayFor(keeper);
     var list = [opt({ act: "rumors", label: "“" + L.askRumors + "”", check: asked ? null : talk, done: asked,
       meta: asked ? "You've heard this season's rumors." : "No action. A clean Tavern Talk gets one more." })];
-    // The keeper's other questions (§38.11) arrive with the author's text.
-    (N().keeperQuestions ? N().keeperQuestions(state) : []).forEach(function (q) {
+    // The keeper's other questions (§38.11, §41.5).
+    N().keeperQuestions(state).forEach(function (q) {
       list.push(opt({ act: "keeperq", attrs: 'data-q="' + esc(q.id) + '"', label: "“" + q.label + "”", meta: "No action", done: q.asked }));
     });
     html += opts(list);
@@ -703,7 +726,7 @@
     // Hands on the Docks (§24.7, §41.8)
     var avail = N().poolAvailable(state);
     var berths = PC.crew.berths(state);
-    html += '<div class="block"><div class="h4">Hands on the Docks</div>' + sayFor("hands") + (N().docksRollBlock ? N().docksRollBlock(state) : "");
+    html += '<div class="block"><div class="h4">Hands on the Docks</div>' + sayFor("hands") + docksRollBlock();
     var tiers = PC.data.economy.TIER_ORDER.filter(function (t) { return avail[t] || (N().season(state).pool[t]); });
     if (!tiers.length) html += '<p class="note">Nobody is looking for a berth.</p>';
     else {
@@ -730,6 +753,37 @@
         }).join("") + "</table></details>";
     }
     return html + "</div>";
+  }
+
+  // ---- Optional rolls (§41.1): marked optional, every outcome stated ----
+
+  // Haggle (§11.4 as changed by §41.13): once per merchant per season,
+  // before the first trade there.
+  function haggleBlock(npc) {
+    var c = N().haggleCheck(state, npc), h = (N().season(state).haggle || {})[npc];
+    if (h) {
+      var pct = Math.round(Math.abs(N().HAGGLE[h]) * 100);
+      return '<p class="small"><b>Haggled:</b> prices ' + pct + "% " + (N().HAGGLE[h] > 0 ? "in your favor" : "against you") + " this season.</p>";
+    }
+    if (!c.ok) return "";
+    return opts([opt({ act: "haggle", attrs: 'data-npc="' + esc(npc) + '"', label: "Haggle (optional)",
+      check: PC.checks.assess(state, N().haggleRoll(state, npc), { conditions: N().haggleConditions(state, npc) }),
+      meta: "No action · once a season, before your first trade here. Clean: prices 10% in your favor. Partial: 5% in your favor. Setback: 10% against you." })]);
+  }
+
+  // The Docks roll (§11.4, §41.8): once a visit, before signing.
+  function docksRollBlock() {
+    var d = state.location.docksRoll;
+    if (d && d.visit === state.location.visit) {
+      var t = d.outcome === "clean" ? "a third of the hands you sign come aboard a tier better" + (d.upgraded ? " (" + d.upgraded + " so far)" : "") :
+        d.outcome === "setback" ? (d.lost ? plural(d.lost, "Seasoned or Veteran hand") + " signed elsewhere" : "nobody worth losing was waiting") : "the hands are what they look like";
+      return '<p class="small"><b>Sized up the hands (' + OUTCOME[d.outcome][0].toLowerCase() + "):</b> " + esc(t) + ".</p>";
+    }
+    var c = N().docksRollCheck(state);
+    if (!c.ok) return "";
+    return opts([opt({ act: "docksroll", label: "Size up the hands (optional)",
+      check: PC.checks.assess(state, N().docksCheck(state), { conditions: ["Harbor", "Underworld"] }),
+      meta: "No action · once a visit, before you sign. Clean: a third of the hands you sign come a tier better. Setback: a third of the pool's Seasoned and Veteran hands are gone." })]);
   }
 
   // ---- Merchant (§41.9) ----
@@ -778,7 +832,7 @@
     html += state.location.say && state.location.say.to === prov ? sayFor(prov) : '<div class="say">' + inline(g.line) + "</div>";
     if (!g.refuse) {
       var free = PC.crew.slotsFree(state);
-      html += (N().haggleBlock ? N().haggleBlock(state, prov) : "") + holdBar();
+      html += haggleBlock(prov) + holdBar();
       var pp = N().provisionsPrice(state);
       var provMax = Math.min(free, afford(pp));
       html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
@@ -807,7 +861,7 @@
         '<div class="pmain">' + nameCard(f.npc, "Fence") +
         (state.location.say && state.location.say.to === f.npc ? sayFor(f.npc) : '<div class="say">' + inline(fg.line) + "</div>") + "</div></div>";
       if (!fg.refuse) {
-        html += (N().haggleBlock ? N().haggleBlock(state, f.npc) : "") + sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), f.cap, "dirty");
+        html += haggleBlock(f.npc) + sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), f.cap, "dirty");
         var links = [];
         if (!state.flags.bobby_french_heard) links.push('<button class="link" data-act="askfrench">Ask about the French</button>');
         if (hasCargo("clean") && !said.offerclean) links.push('<button class="link" data-act="offerclean">Offer him clean goods</button>');
@@ -1269,7 +1323,7 @@
     var q = PC.quests.journal(state);
     var open = q.filter(function (j) { return j.status !== "done"; }), done = q.filter(function (j) { return j.status === "done"; });
     var card = function (j) {
-      return '<div class="qcard"><h4>' + esc(j.name) + "</h4>" + (j.objective ? '<p class="obj">' + inline(j.objective) + "</p>" : '<div class="small">' + prose(j.summary) + "</div>") +
+      return '<div class="qcard"><h4>' + esc(j.name) + "</h4>" + (j.objective ? '<p class="obj">' + inline(j.objective) + "</p>" : "") + (j.summary ? '<p class="small">' + inline(j.summary) + "</p>" : "") +
         (j.needed ? '<p class="small">Leads: ' + j.leads + " of " + j.needed + "</p>" : "") +
         (j.entries.length ? '<ul class="small" style="padding-left:1.1em">' + j.entries.map(function (e) { return "<li>" + inline(e) + "</li>"; }).join("") + "</ul>" : "") +
         (j.beyond ? '<p class="small"><i>' + esc(j.beyond) + "</i></p>" : "") +
@@ -1489,6 +1543,13 @@
       say(id, firstName(id), g.line, null, heard, { ask: L.askRumors, heardNote: heard.length ? "Added to your Rumors." : null,
         chips: state.settings.showDice ? [{ icon: "ap", text: "Tavern Talk: " + r.talk.outcome + " (dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge + ")" }] : null });
     },
+    // The keeper's other questions (§41.5): information only, no action.
+    "keeperq": function (el) {
+      var id = who("keeper");
+      var r = N().askKeeperQuestion(state, el.dataset.q);
+      if (r.refuse) { say(id, firstName(id), r.line); return; }
+      say(id, firstName(id), r.line, null, null, { ask: r.label });
+    },
     "nextqueued": function () {
       var next = N().nextQueued(state);
       state.location.say = null;
@@ -1547,13 +1608,21 @@
     "guns": function (el) { var id = who("shipwright"); var r = N().buyGuns(state, qty(el)); say(id, firstName(id), r.line); },
     // One Sign button for every tier (§41.8).
     "signhands": function (el) {
-      var n = 0, cost = 0, line = null;
-      el.dataset.tiers.split(",").forEach(function (t) {
-        var k = val("q-hire-" + t);
-        if (k > 0) { var r = N().recruit(state, t, k); n += r.n || 0; cost += r.cost || 0; line = r.line; }
-      });
-      if (!line) throw new Error("Choose how many hands to sign.");
-      say("hands", null, line, n ? plural(n, "hand") + " for " + gold(cost) + " crew gold." : null);
+      var plan = {};
+      el.dataset.tiers.split(",").forEach(function (t) { plan[t] = val("q-hire-" + t); });
+      var r = N().recruitBatch(state, plan);
+      say("hands", null, r.line, r.n ? plural(r.n, "hand") + " for " + gold(r.cost) + " crew gold." + (r.upgraded ? " " + plural(r.upgraded, "of them turns", "of them turn") + " out better than they looked." : "") : null);
+    },
+    "docksroll": function () {
+      var r = N().docksRoll(state);
+      say("hands", null, "You walk the docks and size up who's looking for a berth.", null, null,
+        state.settings.showDice ? { chips: [{ icon: "ap", text: "Recruit: " + r.outcome + " (dice " + r.dice.join(" + ") + ", edge " + r.edge + ")" }] } : null);
+    },
+    "haggle": function (el) {
+      // The result stays as a line at the top of the block (§41.9).
+      var r = N().haggle(state, el.dataset.npc);
+      state.location.say = null;
+      if (state.settings.showDice) toast("Haggle: " + r.outcome + " (dice " + r.dice.join(" + ") + ", edge " + r.edge + ")");
     },
     "payoff": function (el) { var r = N().payOff(state, el.dataset.tier, qty(el)); say("hands", null, r.line, gold(r.cost) + " crew gold."); },
     "buyprov": function (el) { var id = who("provisioner"); var r = N().buyProvisions(state, qty(el)); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
@@ -2228,7 +2297,7 @@
     "copy": copySave,
     "pickfile": pickSaveFile,
     "loadpasted": function () { var t = document.querySelector(".pastebox").value; if (t.trim()) loadSaveText(t); else toast("Paste a save first."); },
-    "openmenu": function (el) { menu = el.dataset.menu; if (menu === "journal") journalTab = journalTab || "quests"; },
+    "openmenu": function (el) { menu = el.dataset.menu; if (menu === "journal") { journalTab = journalTab || "quests"; state.journalDot = false; } },
     "closemenu": function () { menu = null; },
     "jtab": function (el) { journalTab = el.dataset.tab; },
     "allskills": function () { showAllSkills = !showAllSkills; },
@@ -2244,7 +2313,7 @@
       if (r && r.outcome !== "result" && !r.reroll && !r.needsPot) {
         var ex = PC.scenes.peekExit(state);
         if (ex && ex.to && ex.to !== "hub") {
-          var lead = { label: r.choiceLabel, outcome: r.outcome, roll: r.roll, text: ex.carry || ex.same ? null : r.text, chips: r.chips, approval: r.approval };
+          var lead = { label: r.choiceLabel, outcome: r.outcome, roll: r.roll, strikeFirst: r.strikeFirst, text: ex.carry || ex.same ? null : r.text, chips: r.chips, approval: r.approval };
           PC.scenes.commit(state);
           if (state.current.screen === "scene") state.current.lead = lead;
         }

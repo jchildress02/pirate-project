@@ -208,6 +208,7 @@
     var live = (o.effects || []).filter(function (e) { return test(state, e.when); });
     return {
       chips: live.map(function (e) { return effectChip(state, e); }).filter(Boolean),
+      strikeFirst: p.strikeFirst || null,
       approval: ch.approval || [],
       info: !!(ch.info || s.info),
       choiceLabel: PC.text.render(textOf(state, ch.label), state),
@@ -243,14 +244,27 @@
 
     var pending = { choiceIndex: index, outcome: "result" };
     if (ch.check) {
+      // Strike First opens every close fight (§11.4): an automatic roll,
+      // never a choice. Clean +1 on the first clash, setback +1 to the foe.
+      if (ch.strikeFirst) {
+        var sf = PC.checks.resolve(state, { type: "Strike First", dr: ch.strikeFirst.dr || 2 }, rollKey(state, s.id, (ch.id || index) + "-strike"), { conditions: s.conditions || [] });
+        pending.strikeFirst = { outcome: sf.outcome, value: sf.outcome === "clean" ? 1 : sf.outcome === "setback" ? -1 : 0, dice: sf.dice, edge: sf.assessment.edge };
+      }
       var key = rollKey(state, s.id, ch.id || index);
-      var r = PC.checks.resolve(state, ch.check, key, { conditions: s.conditions || [] });
+      var r = PC.checks.resolve(state, withStrike(ch.check, pending), key, { conditions: s.conditions || [] });
       pending.outcome = r.outcome;
       pending.roll = { dice: r.dice, total: r.total, edge: r.assessment.edge, tier: r.assessment.tier, type: ch.check.type };
       pending.key = key;
     }
     state.current.phase = "result";
     state.current.pending = pending;
+  }
+
+  function withStrike(check, p) {
+    if (!p || !p.strikeFirst || !p.strikeFirst.value) return check;
+    var c = {}; Object.keys(check).forEach(function (k) { c[k] = check[k]; });
+    c.extra = (check.extra || []).concat([{ label: "Strike First", value: p.strikeFirst.value }]);
+    return c;
   }
 
   function reroll(state) {
@@ -260,7 +274,7 @@
     var r = PC.checks.availableReroll(state, ch.check, p.outcome, { conditions: s.conditions || [] });
     if (!r || p.rerolled) throw new Error("No reroll available.");
     state.rerollsUsed[r.id] = (state.rerollsUsed[r.id] || 0) + 1;
-    var res = PC.checks.resolve(state, ch.check, p.key + "|reroll", { conditions: s.conditions || [] });
+    var res = PC.checks.resolve(state, withStrike(ch.check, p), p.key + "|reroll", { conditions: s.conditions || [] });
     p.firstRoll = { roll: p.roll, outcome: p.outcome, by: r.name };
     p.outcome = res.outcome; // the new result stands
     p.roll = { dice: res.dice, total: res.total, edge: res.assessment.edge, tier: res.assessment.tier, type: ch.check.type };
