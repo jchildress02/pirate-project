@@ -5,6 +5,7 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 ## Ground rules
 
 - **The design docs are the source of truth** (the claude.ai project "Pirate Chronicle"; § numbers are global). Code comments cite the § they implement. If code and docs disagree, flag it to the author; don't invent around it.
+- **The look is §38 and each screen's contents §41.** `css/style.css` holds the §38.2 token sheet (inks, IM Fell, the page and rope); the IM Fell fonts live in `assets/fonts/` and ride inside the single-file build.
 - **Rules in `js/`, data in `content/`, drawing in `js/ui.js` only.** Engine files never touch the DOM, so `tests/run_tests.js` can load them in Node.
 - **Plain JavaScript, no build step, no packages.** Each file is an IIFE that attaches to `globalThis.PC`. Files load with `<script>` tags in `index.html` (order matters: engine, content, then UI). This keeps `index.html` working from a double-click (`file://`) and on GitHub Pages.
 - **Scenes follow the §33 template.** See the header comment in `content/test_scenes.js` for the field names, and `content/ocracoke_scenes.js` for the extras the real scenes use (text pieces shown under a condition, exits by condition, information steps that return to their menu, `carry`). IDs are plain lowercase ASCII.
@@ -31,6 +32,7 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 - The hunt (Milestone 5): its menu entry shows "Arrives in Milestone 5". The minigames are built (Milestone 4: `js/salvage.js`, `js/drinking.js`, `js/liarsdice.js`, shared plumbing in `js/minigames.js`, numbers and lines in `content/minigames.js`); not yet: displays (the Giant Tooth and the Kingly Goblet count while carried), the Gambler flaw's stake temptation, item selling, and the giant shark's own cryptid scenes (PLACEHOLDER lines).
 - Rumors: only the base Patrol danger spot rolls (Heat-driven spots, Hunter's Waters and the Frisian Sweep wait for Heat and the hunt); a Prize rumor is recorded but adds no ship until Milestone 5; the Hidden Haven's chart reveal waits for the map.
 - Officers: approval points, barks, bonds, the Quartermaster vote and officer events. Officers join, show their traits and can be replaced (dismissed); nothing reads their likes yet.
-- The journal's wording (the UI chat): its lines are marked PLACEHOLDER.
+- The journal's wording: its lines are marked PLACEHOLDER until the walkthrough's objectives land (§41.14).
+- Named NPC portraits: Twopenny, Bobby, Davey, Ollie and Geezer show labeled frames until the art lands in `PC.data.npcPortraits` (content/ocracoke.js).
 - The Dread bonus on crew pools, the Drunkard/Heavy Drinker temptations, world-state price modifiers and the No Quarter tag's lag.
 - Captain ageing over the years: the portrait already follows `captain.age`, but nothing advances it yet.

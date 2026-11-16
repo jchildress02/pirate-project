@@ -3,7 +3,7 @@
     python3 tools/build_single.py
 
 Writes dist/pirate-chronicle.html: every stylesheet and script from
-index.html inlined, and every image under assets/ embedded, so the game
+index.html inlined, and every image under assets/ embedded (and the IM Fell fonts), so the game
 runs from a single file with no folder around it (to keep offline, email,
 or open on another machine). No packages needed.
 """
@@ -18,8 +18,15 @@ src = (ROOT / "index.html").read_text(encoding="utf-8")
 MIME = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
 
+def embed_font(m):
+    # url("../assets/fonts/X.woff") in the stylesheet becomes a data URL (§38.2: IM Fell rides in the file).
+    path = (ROOT / "css" / m.group(1)).resolve()
+    return 'url("data:font/woff;base64,' + base64.b64encode(path.read_bytes()).decode("ascii") + '")'
+
+
 def inline_css(m):
     css = (ROOT / m.group(1)).read_text(encoding="utf-8")
+    css = re.sub(r'url\("(\.\./assets/fonts/[^"]+\.woff)"\)', embed_font, css)
     return "<style>\n" + css + "</style>"
 
 
