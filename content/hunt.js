@@ -242,7 +242,7 @@
     youStrike: "PLACEHOLDER: You haul down your colors.",
     lost: "PLACEHOLDER: Your flagship is taken.",
     sinking: "PLACEHOLDER: Your flagship is going down.",
-    repair: { clean: "PLACEHOLDER: The carpenter's crew patches her up well.", partial: "PLACEHOLDER: You stop the worst of the leaks.", setback: "PLACEHOLDER: The patches won't hold. She'll need a yard." },
+    repair: { clean: "PLACEHOLDER: The crew patches her up well.", partial: "PLACEHOLDER: You stop the worst of the leaks.", setback: "PLACEHOLDER: The patches won't hold. She'll need a yard." },
     treat: { clean: "PLACEHOLDER: The cook stitches you up properly. You'll live.", partial: "PLACEHOLDER: The cook does what he can. It'll hold until port.", setback: "PLACEHOLDER: The cook shakes his head. You'll need a real surgeon." },
     backgroundYou: "PLACEHOLDER: Your {ship} rakes the {enemy}.",
     backgroundBoth: "PLACEHOLDER: Your {ship} and the {enemy} trade broadsides.",

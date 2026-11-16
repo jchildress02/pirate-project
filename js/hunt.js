@@ -145,6 +145,10 @@
 
   function afterBattle(state, game) {
     var b = game.battle, chips = [];
+    // Hull points are whole numbers outside a battle (a part-point of
+    // damage counts as a whole one).
+    state.ship.hull = Math.max(0, Math.floor(state.ship.hull + 1e-9));
+    fleet(state).forEach(function (f) { f.hull = Math.max(0, Math.floor(f.hull + 1e-9)); });
     var fought = b.round > 0;
     // Morale: −1 for every 2% of the crew killed (§24.2).
     var killed = b.killed.flagship || 0;
@@ -199,8 +203,8 @@
     var a = game.after;
     a.repairDone = true;
     var share = H().REPAIR_AT_SEA[p.outcome] || 0;
-    var hp = Math.round(a.hpLost * share * 10) / 10;
-    if (hp) state.ship.hull = Math.min(state.ship.hullMax, Math.round((state.ship.hull + hp) * 10) / 10);
+    var hp = share ? Math.max(1, Math.round(a.hpLost * share)) : 0;
+    if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
     a.chips.push({ icon: "hull", text: hp ? "Repaired at sea: hull +" + hp : "No repairs at sea" });
   }
