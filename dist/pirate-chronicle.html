@@ -515,6 +515,27 @@ button.big { font-size: 22px; padding: 12px 30px; }
   .menubtn:hover:not(.on) { background: rgba(255,250,235,.45); }
   .choice .pick:hover, .stepper button:hover:not(:disabled) { background: none; }
 }
+
+/* The prize hunt (Milestone 5) */
+.scout { display: flex; gap: 14px; align-items: flex-start; border: 1px solid var(--rule); background: rgba(255,251,238,.55); padding: 10px 12px; margin: 8px 0; max-width: 680px; }
+.scout .ledger { margin: 6px 0; }
+.shipart { height: auto; flex: none; mix-blend-mode: multiply; }
+.notice.warn { color: var(--bad); border-color: var(--bad); }
+.qm { border-left: 3px solid var(--gold, #8a6414); padding: 6px 12px; margin: 10px 0; max-width: 680px; background: rgba(201,159,69,.10); font-size: 18px; }
+.battle { display: flex; gap: 16px; flex-wrap: wrap; max-width: 760px; }
+.bside { flex: 1; min-width: 260px; }
+.bship { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border: 1px solid var(--rule); background: rgba(255,251,238,.5); margin: 4px 0; }
+.bship.target { box-shadow: inset 0 0 0 2px var(--oxblood); }
+.bship.out { opacity: .55; }
+.bship .shipart { width: 80px !important; }
+.badge-out { font-family: var(--sc); font-size: 14px; color: var(--bad); border: 1px solid currentColor; padding: 0 5px; }
+.prize label.pick { display: block; padding: 6px 4px; font-size: 18px; cursor: pointer; }
+.prize label.pick.locked { opacity: .55; cursor: not-allowed; }
+.prize .hofficer { margin: 0 0 6px 26px; font: inherit; font-size: 16px; }
+@media (max-width: 760px) {
+  .scout { flex-direction: column; }
+  .bship .shipart { width: 60px !important; }
+}
 </style>
 </head>
 <body>
@@ -7612,6 +7633,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function afterBattle(state, game) {
     var b = game.battle, chips = [];
+    // Hull points are whole numbers outside a battle (a part-point of
+    // damage counts as a whole one).
+    state.ship.hull = Math.max(0, Math.floor(state.ship.hull + 1e-9));
+    fleet(state).forEach(function (f) { f.hull = Math.max(0, Math.floor(f.hull + 1e-9)); });
     var fought = b.round > 0;
     // Morale: −1 for every 2% of the crew killed (§24.2).
     var killed = b.killed.flagship || 0;
@@ -7666,8 +7691,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var a = game.after;
     a.repairDone = true;
     var share = H().REPAIR_AT_SEA[p.outcome] || 0;
-    var hp = Math.round(a.hpLost * share * 10) / 10;
-    if (hp) state.ship.hull = Math.min(state.ship.hullMax, Math.round((state.ship.hull + hp) * 10) / 10);
+    var hp = share ? Math.max(1, Math.round(a.hpLost * share)) : 0;
+    if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
     a.chips.push({ icon: "hull", text: hp ? "Repaired at sea: hull +" + hp : "No repairs at sea" });
   }
@@ -13079,7 +13104,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     youStrike: "PLACEHOLDER: You haul down your colors.",
     lost: "PLACEHOLDER: Your flagship is taken.",
     sinking: "PLACEHOLDER: Your flagship is going down.",
-    repair: { clean: "PLACEHOLDER: The carpenter's crew patches her up well.", partial: "PLACEHOLDER: You stop the worst of the leaks.", setback: "PLACEHOLDER: The patches won't hold. She'll need a yard." },
+    repair: { clean: "PLACEHOLDER: The crew patches her up well.", partial: "PLACEHOLDER: You stop the worst of the leaks.", setback: "PLACEHOLDER: The patches won't hold. She'll need a yard." },
     treat: { clean: "PLACEHOLDER: The cook stitches you up properly. You'll live.", partial: "PLACEHOLDER: The cook does what he can. It'll hold until port.", setback: "PLACEHOLDER: The cook shakes his head. You'll need a real surgeon." },
     backgroundYou: "PLACEHOLDER: Your {ship} rakes the {enemy}.",
     backgroundBoth: "PLACEHOLDER: Your {ship} and the {enemy} trade broadsides.",
@@ -13797,7 +13822,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function aboard() { return (state.officers || []).filter(function (o) { return !o.gone; }); }
 
   function officerRole(o) {
-    return [o.mentor ? "Mentor" : null, o.quartermaster ? "Quartermaster" : null].filter(Boolean).join(" · ");
+    var f = o.aboard && o.aboard !== "flagship" ? (state.fleet || []).filter(function (x) { return x.id === o.aboard; })[0] : null;
+    return [o.mentor ? "Mentor" : null, o.quartermaster ? "Quartermaster" : null, f ? "captains the " + (f.name || f.cls) : null].filter(Boolean).join(" · ");
   }
 
   function relWord(n) { return '<span class="rel rel-' + esc(n) + '">' + esc(n) + "</span>"; }
@@ -13811,7 +13837,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<p class="capname">' + esc((c.first + " " + c.last).trim()) + '</p><p class="muted" style="margin:3px 0 0;font-size:17.5px;font-style:italic">Age ' + c.age + "</p>" +
       '<table class="ledger">' + lrow("Your purse", gold(state.money.purse)) + lrow("Crew gold", gold(state.money.crew)) +
       lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
-      lrow("Hull", sh.hull + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
+      lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
       lrow("Crew", plural(state.crew.count, "hand")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
@@ -13834,7 +13860,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
       '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse " + gold(state.money.purse) + " · Crew " + gold(state.money.crew) +
-      "<br>Hull " + sh.hull + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + " · Morale " + state.crew.morale + '</span><span class="go">›</span></button>' +
+      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + " · Morale " + state.crew.morale + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
       }).join("") + '<span class="note">Officers · tap for cards</span></div>' : "");
@@ -14125,7 +14151,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     html += '<div class="h4" style="max-width:680px">Your ship</div>' + opts(ps.filter(function (p) { return p.id === "ship"; }).map(row));
     html += '<div class="h4" style="max-width:680px">To sea</div>' + opts([
       // Leaving Ocracoke without Articles fires the first signing (§40.5).
-      opt({ act: state.articles ? "nop" : "firstsigning", label: "Hunt for Prizes", meta: state.articles ? null : "Sign the Articles before you sail", lock: state.articles ? notInPrototype() : null }),
+      // Hunt for Prizes (§22.1, §37.3): Ocracoke's own waters, 1 action a batch.
+      (function () {
+        if (!state.articles) return opt({ act: "firstsigning", label: "Hunt for Prizes", meta: "Sign the Articles before you sail" });
+        var c = PC.hunt.canHunt(state);
+        return opt({ act: "hunt", label: "Hunt for Prizes", ap: 1, meta: "1 action a batch of sightings, up to 3 · the Hatteras Banks · back to Ocracoke for free (the harbor due again)", lock: c.ok ? null : c.why });
+      })(),
       opt({ act: state.articles ? "nop" : "firstsigning", label: "Set Sail", meta: "The world map" + (state.articles ? "" : " · sign the Articles before you sail"), lock: state.articles ? notInPrototype() : null }),
     ]);
     if (!state.ap.left) html += '<p class="notice" style="margin-top:16px">No actions left this season.</p>';
@@ -14259,6 +14290,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         (room <= 0 ? '<p class="note">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qstep("q-guns", 1, gunsMax) + '<button class="secondary" data-act="guns" data-for="q-guns">Buy guns</button> ' +
           totalSlot(function () { var n = val("q-guns"); return plural(n, "gun") + " · " + gold(n * N().gunPrice(state)) + " gold"; }) + "</div>" : '<p class="note">You can\'t pay for a gun right now.</p>') + "</div>";
     }
+    // Your other ships: sell a prize hull, or strip her guns (§22.7, Milestone 5).
+    var fl = state.fleet || [];
+    if (fl.length) {
+      html += '<div class="svc"><h4>Your other ships</h4>' + fl.map(function (f) {
+        var p = N().hullSalePrice(state, f);
+        var room = state.ship.gunsMax - state.ship.guns;
+        return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + esc(f.name || f.cls) + '</b> <span class="note">' + esc(f.cls + " · " + (f.kind === "fleet" ? "fleet ship" : "prize ship") + (f.dirty ? " · dirty" : "") +
+          " · hull " + Math.round(f.hull) + "/" + f.hullMax + " · " + f.guns + " guns · " + f.crew + " aboard") + "</span></span> " +
+          (p.ok ? '<button class="secondary" data-act="sellhull" data-ship="' + esc(f.id) + '">Sell her · ' + gold(p.total) + " gold</button>" : '<span class="note">' + esc(p.why) + "</span>") +
+          (f.guns && room > 0 ? '<button class="secondary" data-act="stripguns" data-ship="' + esc(f.id) + '">Move ' + Math.min(f.guns, room) + " guns to your flagship</button>" : "") + "</div>" +
+          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off.</p>" : "");
+      }).join("") + "</div>";
+    }
     html += "</div>" + DIVIDER;
     // Hands on the Docks (§24.7, §41.8)
     var avail = N().poolAvailable(state);
@@ -14333,7 +14377,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function holdBar() {
     var p = state.provisions, goods = PC.crew.goodsUnits(state), tc = state.cargo.treasure.clean, td = state.cargo.treasure.dirty;
-    var per = PC.data.economy.TREASURE_PER_SLOT, cap = state.ship.cargo;
+    var per = PC.data.economy.TREASURE_PER_SLOT, cap = PC.crew.holdCapacity(state);
     var tSlots = Math.ceil((tc + td) / per), tcS = tc + td ? tSlots * tc / (tc + td) : 0;
     var seg = function (n, color, label) { return n > 0 ? '<i title="' + esc(label) + '" style="position:static;display:inline-block;height:100%;width:' + (100 * n / cap) + "%;background:" + color + '"></i>' : ""; };
     var manifest = ["Provisions: " + p + " lots"].concat(Object.keys(state.cargo.goods).map(function (g) {
@@ -14513,7 +14557,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function minigamePanel() {
     var v = PC.minigames.view(state);
-    return '<div class="mg-' + v.kind + '">' + ({ dive: divePanel, drink: drinkPanel, dice: dicePanel })[v.kind](v) + "</div>";
+    if (v.kind === "hunt") v.hunt = v; // the hunt's own view rides on the minigame view
+    return '<div class="mg-' + v.kind + '">' + ({ dive: divePanel, drink: drinkPanel, dice: dicePanel, hunt: huntPanel })[v.kind](v) + "</div>";
   }
 
   // The dive (§41.10): the clickable wreck with Hull, Hold and Cabin.
@@ -14557,6 +14602,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return html + '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
   }
   var diveZone = null;
+  var devForce = null; // the Developer panel's next sighting (Milestone 5)
 
   // Under the Table (§41.6): the hotspot table.
   function drinkPanel(v) {
@@ -14609,6 +14655,210 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
   }
   var drinkSpot = null;
+
+  // ---- The prize hunt (§22.3, §22.10, §38.5; Milestone 5) ----
+  // The rules are in js/hunt.js and js/combat.js; this draws them.
+
+  var CA_INK = { "3": "t-good", "2": "t-good", "1": "t-good", "0": "t-mid", "-1": "t-bad", "-2": "t-bad", "-3": "t-bad", "-4": "t-bad" };
+  function caWord(b) { return '<span class="tier ' + (CA_INK[String(b)] || "t-mid") + '">' + shape(CA_INK[String(b)] || "t-mid") + esc(PC.combat.caName(b)) + "</span>"; }
+
+  function shipArtHtml(cls, faded) {
+    var art = PC.data.shipArt(cls), c = PC.data.hunt.CLASSES[cls] || { size: 1 };
+    var w = 70 + c.size * 26;
+    return art ? '<img class="shipart" src="' + assetUrl(art) + '" alt="' + esc(cls) + '" style="width:' + w + "px" + (faded ? ";opacity:.4" : "") + '">' : "";
+  }
+
+  // A raw-edge roll shown like a check (the Exchange): tier and odds.
+  function rawCheck(type, edge, parts) {
+    return { type: type, tier: PC.checks.tier(edge), odds: PC.checks.odds(edge), parts: parts || [], edge: edge, rawEdge: edge };
+  }
+  function chk(c) { return c ? PC.checks.assess(state, c, { conditions: ["Battle"] }) : null; }
+
+  function qmSays(line, v) {
+    if (!line) return "";
+    var who = v.qm || "Your Quartermaster";
+    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(PC.text.render(line, state)) + "</div>";
+  }
+
+  function huntStatus(v) {
+    var bits = ["Action " + v.apUsed + " of up to " + v.maxAp];
+    if (v.batch) bits.push("sighting " + Math.min(v.batch.next, v.batch.n) + " of " + v.batch.n + " this action");
+    bits.push("hold " + (v.holdMax - v.holdFree) + " of " + v.holdMax);
+    if (v.prizesTaken) bits.push(plural(v.prizesTaken, "prize") + " taken");
+    return '<p class="small" style="margin:0 0 8px">' + esc(bits.join(" · ")) + "</p>";
+  }
+
+  // The scouting card (§22.3): only what a lookout could see.
+  function scoutCard(s, v) {
+    var rows = [["Flag", s.flag + (s.name ? " · the " + s.name : "")], ["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
+      ["Speed", s.speed + " · " + s.handling], ["Draft", s.draft], ["Carries", s.lootTypes.join(", ")], ["Loot", s.loot]];
+    return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + "A " + esc(s.cls) + ' <span class="note">· ' + esc(s.role === "War" ? "warship" : s.role === "Raider" ? "raider" : s.role === "Hybrid" ? "armed trader" : "merchant") + "</span></h4>" +
+      '<table class="ledger">' + rows.map(function (r) { return lrow(r[0], esc(r[1])); }).join("") + "</table>" +
+      '<p class="small" style="margin:4px 0"><i>The lookout: ' + esc(PC.text.render(s.cue, state).replace(/^PLACEHOLDER: /, "")) + "</i></p>" +
+      '<p class="small" style="margin:0">' + esc(s.legit) + "</p></div></div>";
+  }
+
+  function huntPanel(v) {
+    var H = v.hunt, html = mgHead("Ocracoke · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
+    if (H.phase === "gameover") return html + gameOverPanel(v);
+    html += huntStatus(H) + mgLatest(v.log);
+    if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
+    var home = H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">Sail home to Ocracoke</button>' : "";
+    if (H.phase === "empty") {
+      html += '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
+    } else if (H.phase === "scout" || H.phase === "hunter") {
+      var sv = H.scout;
+      html += '<p class="sc" style="margin:8px 0 4px">' + (sv.ships.length > 1 ? (sv.shape === "convoy" ? "A convoy of " + sv.ships.length : "A merchant under escort") : "A sail") + " · " + caWord(sv.ca) + "</p>";
+      html += sv.ships.map(function (s) { return scoutCard(s, H); }).join("");
+      var war = sv.ships.some(function (s) { return s.warship; });
+      if (war && sv.ca < 2 && !sv.hunter) html += '<p class="notice warn">☠ A warship at these odds will tear a ship your size apart. Let her go unless you mean it.</p>';
+      html += qmSays(H.advice, H);
+      html += sv.hunter ? '<div class="actions"><button class="primary" data-act="hhunter">Face her</button></div>' :
+        '<div class="actions"><button class="primary" data-act="hengage">Engage</button><button class="secondary" data-act="hnext">Let her pass</button>' + home + "</div>";
+    } else if (H.phase === "battle") {
+      html += battlePanel(H.battle, H);
+    } else if (H.phase === "after") {
+      html += afterPanel(H.after, H);
+    } else if (H.phase === "batchEnd") {
+      html += '<p>The horizon is empty for now.</p><div class="actions">' +
+        (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
+        '<button class="secondary" data-act="hhome">Sail home to Ocracoke</button></div>';
+    }
+    return html + mgLog(v.log);
+  }
+
+  function shipRow(s, enemy, target) {
+    var hp = s.hullMax ? Math.max(0, Math.round(100 * s.hull / s.hullMax)) : 0;
+    var outWord = { struck: "struck", captured: "taken", sunk: "sunk", escaped: "escaped", taken: "taken", left: "left behind" }[s.out] || "";
+    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + '">' + shipArtHtml(s.cls, !!s.out) +
+      '<div><b>' + esc((s.mine && s.id === "flagship" ? "" : "") + (s.name ? s.name : "A " + s.cls)) + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
+      (outWord ? ' <span class="badge-out">' + esc(outWord) + "</span>" : "") +
+      '<div class="hbar" style="height:9px;max-width:200px;margin:3px 0"><i style="width:' + hp + "%;background:" + (hp < 50 ? "#8f2a1c" : "#5e4528") + '"></i></div>' +
+      '<span class="small">Hull ' + s.hull + "/" + s.hullMax + " · Guns " + s.guns + " · Crew " + s.crew + (s.speed != null ? " · Speed " + s.speed : "") +
+      (enemy && s.shaken ? ' · <span style="color:#8f2a1c">Shaken ' + s.shaken + "</span>" : "") + (enemy && s.leaderless ? ' · <span style="color:#8f2a1c">Leaderless</span>' : "") + "</span></div></div>";
+  }
+
+  function battlePanel(b, H) {
+    var html = '<div class="battle"><div class="bside"><div class="h4">Your side</div>' + b.mine.map(function (s) { return shipRow(s, false, false); }).join("") + "</div>" +
+      '<div class="bside"><div class="h4">Theirs</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
+    if (b.ca != null) html += '<p class="sc" style="margin:6px 0">Round ' + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
+    var B = function (fn, arg, label, cls, extra) { return '<button class="' + (cls || "secondary") + '" data-act="hb" data-fn="' + fn + '"' + (arg != null ? ' data-arg="' + esc(arg) + '"' : "") + (extra || "") + ">" + label + "</button>"; };
+    var O = function (fn, arg, label, check, meta, lock, extra) {
+      return opt({ act: "hb", attrs: 'data-fn="' + fn + '"' + (arg != null ? ' data-arg="' + esc(arg) + '"' : "") + (extra || ""), label: label, check: check, meta: meta || null, lock: lock || null });
+    };
+    var A = PC.data.huntLines.advice, me = b.mine[0], en = b.enemies.filter(function (e) { return e.id === b.target; })[0];
+    switch (b.step) {
+      case "setup":
+        html += '<div class="svc"><h4>Before you close</h4><p class="small">Pick your flagship\'s target' + (b.mine.length > 1 ? " and what your fleet ships do" : "") + ".</p>" +
+          '<p class="small">Your flagship takes: ' + b.enemies.map(function (e) { return '<button class="' + (b.target === e.id ? "primary" : "secondary") + '" data-act="hb" data-fn="setTarget" data-arg="' + e.id + '">' + esc(e.name || e.cls) + "</button>"; }).join(" ") + "</p>" +
+          b.mine.filter(function (s) { return s.id !== "flagship" && s.kind === "fleet"; }).map(function (s) {
+            var tgt = b.pairs[s.id], sup = b.support[s.id];
+            return '<p class="small">' + esc(s.name || s.cls) + ": " + b.enemies.filter(function (e) { return e.id !== b.target; }).map(function (e) {
+              return '<button class="' + (tgt === e.id ? "primary" : "secondary") + '" data-act="hassign" data-ship="' + s.id + '" data-what="' + e.id + '">Fight ' + esc(e.name || e.cls) + "</button>";
+            }).join(" ") + ' <button class="' + (sup ? "primary" : "secondary") + '" data-act="hassign" data-ship="' + s.id + '" data-what="support">Support your flagship</button></p>';
+          }).join("") +
+          '<p class="small">Fleet order: ' + B("setFleetOrder", "take", "Take Prizes", b.fleetOrder === "take" ? "primary" : "secondary") + " " + B("setFleetOrder", "sink", "Sink Them", b.fleetOrder === "sink" ? "primary" : "secondary") + "</p></div>" +
+          '<div class="actions">' + B("engage", null, "Close and call on her to strike", "primary") + "</div>";
+        break;
+      case "showOfForce":
+        html += opts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
+        break;
+      case "hunterChoice":
+        html += qmSays(A.hunter, H) + opts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
+          O("hunterChoice", "flee", "Run for it", chk({ type: "Outrun", dr: en ? 3 : 3 }), "Morale −15. Clean: escaped. Partial: escaped with a parting hit. Setback: she catches you, +1 to her Position.")]);
+        break;
+      case "chase": case "press":
+        var fleeing = b.chaseMode === "flee";
+        html += b.step === "press" ? '<p>She\'s pulling away. You\'re faster: you can keep after her, giving up your next sighting this action.</p>' + '<div class="actions">' + B("press", "yes", "Press the chase", "primary") + B("press", "no", "Let her go") + "</div>" :
+          opts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
+        break;
+      case "position":
+        html += opts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
+        break;
+      case "posChoice":
+        html += '<p class="sc">You have the position. What now?</p>' + opts([
+          O("choosePosition", "rake", "Rake her", null, "+2 on this round's Exchange."),
+          O("choosePosition", "close", "Close for boarding", null, "Skip the Exchange and grapple, +1 to the grapple."),
+          O("choosePosition", "open", "Open the range", null, "Your next attempt to flee needs no roll.")]);
+        break;
+      case "exchange":
+        var ex = b.exchange, rc = rawCheck("Exchange", ex.edge, ex.parts);
+        var shots = [["round", "Round shot", "Full damage. Sink or cripple her."], ["chain", "Chain shot", "Half damage; a heavy hit costs her 1 Speed. Stops a runner."], ["grape", "Grapeshot", "Quarter damage, double crew losses. Thins her crew before boarding and keeps the prize whole."]];
+        if (b.gunnersEye) { shots.push(["rigging", "Called shot: her rigging", "Gunner's Eye. Half damage; a heavy hit costs her 1 Speed."]); shots.push(["rudder", "Called shot: her rudder", "Gunner's Eye. Half damage; a heavy hit costs her −1 on her next Position."]); }
+        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + opts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
+        html += qmSays(me && en && me.crew >= 0.75 * en.crew ? A.grape : en && en.speed >= me.speed ? A.chain : A.fire, H);
+        break;
+      case "decision":
+        var hurt = me.hull < 0.6 * me.hullMax;
+        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + opts([
+          O("decide", "fire", "Fire again", null, "A new round, starting with Position."),
+          O("decide", "board", "Board her", null, "Grapple (Board), then up to three clashes."),
+          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun.")),
+          O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]);
+        break;
+      case "grapple":
+        html += opts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
+        break;
+      case "repel":
+        html += '<p class="notice">She\'s coming alongside to board you.</p>' + opts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
+        break;
+      case "clash":
+        var bd = b.board || {};
+        html += '<p class="sc" style="margin:4px 0">' + (bd.meBoarding ? "On her deck" : "On your deck") + " · clash " + (bd.clash + 1) + " of 3" + (bd.sf && bd.clash === 0 ? " · " + esc(PC.data.huntLines.strikeFirst[bd.sf]) : "") + "</p>" +
+          opts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
+        break;
+      case "retarget":
+        html += '<p class="sc">Your target is out of the fight. Who next?</p><div class="actions">' + b.enemies.filter(function (e) { return !e.out; }).map(function (e) { return B("retarget", e.id, esc(e.name || e.cls)); }).join("") + "</div>";
+        break;
+      case "endure":
+        html += opts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
+        break;
+    }
+    if (state.settings.showDice && b.lastExchange) html += '<div class="dice">Last Exchange: dice ' + b.lastExchange.dice.join(" + ") + ", edge " + signed(b.lastExchange.edge) + " · " + b.lastExchange.outcome + "</div>";
+    if (state.settings.showDice && b.lastClash) html += '<div class="dice">Last clash: dice ' + b.lastClash.dice.join(" + ") + ", edge " + signed(b.lastClash.edge) + " · " + b.lastClash.outcome + "</div>";
+    return html;
+  }
+
+  function afterPanel(a, H) {
+    var html = a.chips.length ? chips(a.chips) : "";
+    if (!a.repairDone) {
+      return html + opts([opt({ act: "hrepair", label: "Repairs at sea", check: chk(a.repairCheck), meta: "Repair & Refit on the " + Math.round(a.hpLost) + " hull lost. Clean restores a quarter of it, partial a tenth." })]);
+    }
+    var p = a.prize;
+    if (p) {
+      var goods = Object.keys(p.goods).map(function (g) { return p.goods[g] + " " + g; });
+      html += '<div class="svc prize"><h4 style="margin:0">' + esc(p.name ? "The " + p.name : "A " + p.cls) + ' <span class="note">· ' + esc(p.flag + " " + p.cls + " · " + p.level) + "</span></h4>" +
+        (p.captain ? '<p class="small" style="margin:2px 0">' + esc((p.title ? p.title + " " : "") + p.captain) + " hands over her papers.</p>" : "") +
+        '<p class="small">In her hold: ' + esc([p.treasure ? p.treasure + " treasure" : null].concat(goods).concat(p.provisions ? [p.provisions + " provisions"] : []).filter(Boolean).join(", ") || "nothing much") +
+        " · her ship's chest " + p.chest + " gold" + (p.dirty ? " · <b>dirty</b>: only Bobby will buy it" : " · clean") + ".</p>";
+      var radio = function (name, val, label, note, lock, on) {
+        return '<label class="pick' + (lock ? " locked" : "") + '"><input type="radio" name="' + name + '" value="' + esc(val) + '"' + (on ? " checked" : "") + (lock ? " disabled" : "") + "> <b>" + esc(label) + "</b>" +
+          (note || lock ? '<span class="note"> · ' + esc(lock || note) + "</span>" : "") + "</label>";
+      };
+      html += '<div class="h4">Her hull</div>' + p.hullOptions.map(function (o, i) {
+        var off = o.id === "fleet" && !o.lock && o.officers.length ? ' <select class="hofficer">' + o.officers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name + " (" + x.type + ")") + "</option>"; }).join("") + "</select>" : "";
+        return radio("h-hull", o.id, o.label, o.note, o.lock, o.id === "release") + off;
+      }).join("");
+      html += '<div class="h4">Her crew (' + p.crew + ")</div>" +
+        radio("h-crew", "release", "Release them", "With their ship, or in her boats", null, true) +
+        radio("h-crew", "recruit", "Recruit the willing", p.volunteers ? p.volunteers + " " + p.volTier + " hands want to sign on" : "Nobody wants to", p.volunteers ? null : "Nobody wants to", false) +
+        radio("h-crew", "execute", "Execute them", "Dead men tell no tales: no Heat, Dread +3" + (p.execute.legal ? "" : ". " + p.execute.why), null, false);
+      if (p.captives) html += '<div class="h4">' + plural(p.captives, "captive") + " aboard her</div>" +
+        radio("h-cap", "free", "Take them aboard to free them", "Freed at Ocracoke for a reward", null, true) +
+        radio("h-cap", "recruit", "Recruit the willing", "Half join as Green hands", null, false) +
+        radio("h-cap", "leave", "Leave them with her", null, null, false);
+      html += '<div class="actions"><button class="primary" data-act="hprize">Settle her' + (a.left ? " (" + a.left + " more to go)" : "") + "</button></div></div>";
+      return html;
+    }
+    return html + '<div class="actions"><button class="primary" data-act="hcarry" data-top="1">Back to the hunt</button></div>';
+  }
+
+  function gameOverPanel(v) {
+    var go = v.hunt.gameOver || {};
+    return '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[go.how === "died" ? "died" : "captured"]) + "</div>" +
+      '<p class="note">This is the end of the run for the prototype. Imprisonment and heirs come in later milestones.</p>' +
+      '<div class="actions"><button class="primary" data-act="quit">Back to the title</button></div>';
+  }
 
   // Liar's Dice (§41.6): drawn dice, cups, a bid stepper and tappable faces.
   var PIPS = { 1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[26, 26], [50, 50], [74, 74]], 4: [[28, 28], [72, 28], [28, 72], [72, 72]], 5: [[26, 26], [74, 26], [50, 50], [26, 74], [74, 74]], 6: [[28, 24], [72, 24], [28, 50], [72, 50], [28, 76], [72, 76]] };
@@ -14954,9 +15204,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       lines(c.traits || []) + lines(c.flaws || [], "flaw") + lines(c.debuffs || []) + lines((c.tags || []).filter(function (t) { return (c.debuffs || []).indexOf(t) < 0; })) + "</ul>" +
       '<div class="h4">Items and equipment</div><p class="small">' + esc((c.items || []).join(", ") || "Nothing yet.") + ' <span class="note">The equipment screen comes later.</span></p>' +
       '<div class="h4">Ship and stores</div><table class="ledger wide">' +
-      lrow("Ship", esc(state.ship.type) + " <i>" + esc(state.ship.name) + "</i>") + lrow("Hull · Speed", state.ship.hull + " / " + state.ship.hullMax + " · " + state.ship.speed) +
+      lrow("Ship", esc(state.ship.type) + " <i>" + esc(state.ship.name) + "</i>") + lrow("Hull · Speed", Math.round(state.ship.hull) + " / " + state.ship.hullMax + " · " + state.ship.speed) +
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Provisions", state.provisions + " lots") +
-      lrow("Hold", PC.crew.slotsUsed(state) + " of " + state.ship.cargo) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
+      lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
       meters(true) + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
@@ -15008,6 +15258,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         '<p class="small">Jump to a scene: <select class="devscene">' + Object.keys(PC.data.scenes).filter(function (id) { return id.indexOf("ocr_") === 0; }).map(function (id) {
           return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
         }).join("") + "</select> " + b("devjump", "Go") + "</p>") : "") +
+      (state.location ? grp("The hunt", '<p class="small">Next sighting: ' + b("devforce", "Avalon hunter", ' data-kind="hunter" data-flag="Avalon"') + b("devforce", "Frisian hunter", ' data-kind="hunter" data-flag="Frisia"') +
+        b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
+        b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
+        '<p class="small">Add a fleet ship (generated officer-captain): ' + ["Sloop", "Schooner", "Brigantine", "Brig"].map(function (c) { return b("devfleet", c, ' data-cls="' + c + '"'); }).join("") + "</p>" +
+        '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
+        " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
       grp("Info", '<p class="small">World seed ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
         (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) { var g = state.generated[sl.id]; return esc(sl.label + ": " + g.full + " (" + (g.gender === "f" ? "woman" : "man") + ", " + g.age + "; " + g.traits.join(", ") + ")"); }).join(" · ") + "</p>" : "") +
@@ -15079,6 +15335,34 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     "mgnextround": function () { PC.liarsdice.nextRound(state); },
     "mgclosegame": function () { PC.liarsdice.closeGame(state); },
     "mgstop": function () { PC.liarsdice.stop(state); },
+    // ---- The prize hunt (Milestone 5) ----
+    "hunt": function () { mgMark = 0; var f = devForce; devForce = null; PC.hunt.start(state, { force: f }); },
+    "hnext": function () { markLog(); PC.hunt.next(state, state.minigame); },
+    "hengage": function () { markLog(); PC.hunt.engage(state, state.minigame); },
+    "hhunter": function () { markLog(); PC.hunt.meetHunter(state, state.minigame); },
+    "hb": function (el) {
+      markLog();
+      var a = el.dataset.arg, fn = el.dataset.fn;
+      if (fn === "showOfForce" || fn === "press") a = a === "yes";
+      PC.hunt.battle(state, state.minigame, fn, a);
+    },
+    "hassign": function (el) { PC.hunt.battle(state, state.minigame, "assignFleetShip", el.dataset.ship, el.dataset.what); },
+    "hrepair": function () { markLog(); PC.hunt.doRepair(state, state.minigame); },
+    "hprize": function () {
+      var pick = function (n, d) { var x = document.querySelector('input[name="' + n + '"]:checked'); return x ? x.value : d; };
+      var off = document.querySelector(".hofficer");
+      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null });
+    },
+    "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
+    "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
+    "hhome": function () { PC.hunt.sailHome(state, state.minigame); PC.minigames.leave(state); },
+    "sellhull": function (el) {
+      var id = who("shipwright");
+      var r = N().sellHull(state, el.dataset.ship);
+      say(id, firstName(id), r.line, r.gold ? gold(r.gold) + " crew gold." + (r.home ? " " + plural(r.home, "hand") + " come back aboard." : "") + (r.paid ? " " + plural(r.paid, "hand") + " paid off: no berths." : "") : null);
+      if (r.gold) toast("Sold her · +" + gold(r.gold) + " crew gold");
+    },
+    "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
     "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },
     "leaveplace": function () {
       var fire = N().leave(state);
@@ -15922,6 +16206,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       PC.quests.record(state, "what_was_lost").variant = v;
     },
     "devposture": function (el) { state.world.posture = el.dataset.posture; },
+    // The hunt's Developer tools (Milestone 5 plan, §2C).
+    "devforce": function (el) {
+      var f = { kind: el.dataset.kind, flag: el.dataset.flag || null, cls: el.dataset.cls || null };
+      if (state.minigame && state.minigame.kind === "hunt") { state.minigame.force = f; toast("The next batch starts with that ship."); }
+      else { devForce = f; toast("Your next hunt starts with that ship."); }
+      menu = null;
+    },
+    "devfleet": function (el) { var r = PC.hunt.devFleetShip(state, el.dataset.cls); toast("A " + r.ship + " joins your fleet under " + r.officer + "."); },
+    "devheat": function (el) { state.meters.heat[el.dataset.f] = Number(el.dataset.v); },
+    "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {
       var id = document.querySelector(".devscene").value;
       if (state.location) state.location.place = /_(uw|oap)/.test(id) ? "tavern" : /_rr_/.test(id) ? "docks" : null;
