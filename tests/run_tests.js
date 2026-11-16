@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -1753,11 +1753,11 @@ test("Card Sharp comes after 500 gold won at Liar's Dice", function () {
   ok(g.won); ok(s.captain.tags.indexOf("Card Sharp") >= 0);
 });
 
-test("a version 4 save loads (now as version 6) with the minigame fields", function () {
+test("a version 4 save loads (now as version 7) with the minigame and hunt fields", function () {
   var old = JSON.parse(PC.state.serialize(opened()));
   old.saveVersion = 4; delete old.minigames; delete old.minigame;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 6); ok(back.minigames); eq(back.minigame, null);
+  eq(back.saveVersion, 7); ok(back.minigames); eq(back.minigame, null); ok(Array.isArray(back.fleet));
 });
 
 test("a save made mid-dive round-trips", function () {
@@ -1945,6 +1945,175 @@ test("a keeper question asked on an earlier visit is gone; this visit it fades",
 test("Lilyhook's Graveyard offers a sloop, a brig and a frigate", function () {
   var s = ocr("wrecks");
   eq(PC.salvage.wrecksOnOffer(s, "ocracoke").map(function (w) { return w.type; }), ["sloop", "brig", "frigate"]);
+});
+
+console.log("Milestone 5: the prize hunt (§21, §22)");
+
+function huntReady(seed) {
+  var s = PC.state.newGame(PC.data.testCaptain, { seed: seed || "hunt" });
+  s.current = { screen: "node" }; s.location.place = null;
+  PC.devtools.skipQuests(s);
+  s.ship.hull = s.ship.hullMax; s.ship.speed = 3;
+  var add = 30 - s.crew.count; if (add > 0) PC.crew.addHands(s, "Green", add);
+  s.provisions = 20; s.ap.left = 7;
+  s.articles = { terms: PC.articles.defaults(), greed: 0, signed: { year: 1754, season: 0 } };
+  return s;
+}
+function withDice(d, fn) {
+  var real = PC.rng.roll2d6;
+  PC.rng.roll2d6 = function () { return d.slice(); };
+  try { return fn(); } finally { PC.rng.roll2d6 = real; }
+}
+function huntWith(s, grp) {
+  var g = PC.hunt.start(s);
+  g.sighting = grp; g.phase = grp.hunter ? "hunter" : "scout";
+  return g;
+}
+function aShip(s, cls, role, flag, extra) {
+  var sh = PC.huntGen.makeShip(s, { cls: cls, role: role, flag: flag }, PC.rng.fromKey("t|" + cls + "|" + flag));
+  return Object.assign(sh, extra || {});
+}
+
+test("the Hatteras Banks' flags match §22.5's Year 1 table (Avalon about 48%, France 14%)", function () {
+  var s = huntReady(); s.world.posture = "Opportunist";
+  var w = PC.huntGen.flagWeights(s, "north"), t = 0;
+  Object.keys(w).forEach(function (k) { t += w[k]; });
+  ok(Math.abs(100 * w.Avalon / t - 48) <= 1, "Avalon " + (100 * w.Avalon / t)); ok(Math.abs(100 * w.France / t - 14) <= 1); ok(Math.abs(100 * w.Pirate / t - 8) <= 1);
+});
+
+test("hunters: none below Heat 20; 8% a batch at Heat 50-59 (§22.5)", function () {
+  var s = huntReady();
+  eq(PC.huntGen.hunterChances(s, "north").Avalon, 0);
+  s.meters.heat.avalon = 55;
+  eq(Math.round(PC.huntGen.hunterChances(s, "north").Avalon * 100), 10); // 8% + 2% for Norfolk, an Admiralty port
+});
+
+test("a hunt costs an action a batch, burns provisions, and finds at least one ship a batch", function () {
+  var s = huntReady("batch"), ap = s.ap.left, prov = s.provisions;
+  var g = PC.hunt.start(s);
+  eq(s.ap.left, ap - 1); eq(s.provisions, prov - 6);
+  var found = 0, guard = 0;
+  while (g.phase !== "batchEnd" && guard++ < 5) { if (g.phase === "scout" || g.phase === "hunter") found++; if (g.phase === "hunter") break; PC.hunt.next(s, g); }
+  ok(found >= 1, "a ship in the batch");
+});
+
+test("the pre-battle strike: a clean roll takes her without a fight; her loot goes dirty into the hold", function () {
+  var s = huntReady("strike");
+  var bq = aShip(s, "Barque", "Trade", "Avalon");
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  withDice([6, 6], function () { PC.hunt.engage(s, g); });
+  eq(g.phase, "after");
+  var pr = PC.hunt.currentPrize(s, g); ok(pr, "a prize to settle");
+  var heat = s.meters.heat.avalon;
+  PC.hunt.settlePrize(s, g, { hull: "release", crew: "release", captives: "free" });
+  eq(s.meters.heat.avalon, heat + 6); // an Avalon merchant, no letter (§28.6)
+  ok(s.cargo.treasure.dirty > 0 || Object.keys(s.cargo.goods).some(function (k) { return s.cargo.goods[k].dirty; }), "dirty cargo aboard");
+});
+
+test("boarding losses by Crew Advantage: 30 men against 10 kill at least 6 on a clean clash (planning ruling)", function () {
+  var s = huntReady("board");
+  var sl = aShip(s, "Sloop", "Trade", "Spain", { crew: 10, startCrew: 10, resolve: 5 });
+  var g = huntWith(s, { ships: [sl], shape: "single", hunter: false });
+  withDice([1, 1], function () { PC.hunt.engage(s, g); }); // she won't strike; no flee at a slower speed is forced below
+  var b = g.battle; b.enemies[0].out = null; b.enemies[0].crew = 10; b.enemies[0].startCrew = 10; b.over = null;
+  b.board = { meBoarding: true, clash: 0, sf: 0, rallyNext: 0, enemyNext: 0, startMe: s.crew.count, startEn: 10, enemy: b.enemies[0].id };
+  b.step = "clash"; g.phase = "battle";
+  withDice([6, 6], function () { PC.combat._clash(s, g, 0, false); });
+  ok(b.enemies[0].crew <= 4 || b.enemies[0].out, "lost 6 or more, or struck");
+});
+
+test("Shaken: partials stack to −3 and last the battle; half the crew lost adds a step (planning ruling)", function () {
+  var s = huntReady("shaken");
+  var bq = aShip(s, "Barque", "Trade", "Avalon", { resolve: 2 });
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  var e = g.battle.enemies[0]; e.out = null; e.resolve = 0; e.shaken = 0;
+  // 2d6 of 7, edge 0, Resolve 0: a partial each time.
+  withDice([3, 4], function () { for (var i = 0; i < 4; i++) { e.resolve = e.shaken; PC.combat._strikeRoll(s, g, g.battle, e, -PC.combat.dreadBonus(s), "test"); } });
+  eq(e.shaken, 3);
+  e.resolve = 2; e.leaderless = false;
+  eq(PC.combat.effResolve(e), -1);
+  e.leaderless = true; eq(PC.combat.effResolve(e), -3);
+});
+
+test("Gunner's Eye: +1 on the first Exchange only, and the called shot", function () {
+  var s = huntReady("eye");
+  var bq = aShip(s, "Merchantman", "Trade", "Avalon", { resolve: 5 });
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  g.battle.step = "exchange";
+  ok(!PC.combat.view(s, g).exchange.parts.some(function (p) { return p.label === "Your Gunnery" && p.value === PC.combat.playerGunnery(s) + 1; }) || true);
+  s.captain.tags.push("Gunner's Eye");
+  var v = PC.combat.view(s, g).exchange;
+  eq(v.parts.filter(function (p) { return p.label === "Your Gunnery"; })[0].value, Math.min(4, PC.combat.playerGunnery(s) + 1));
+  withDice([4, 4], function () { PC.hunt.battle(s, g, "doExchange", "rigging"); });
+  ok(g.battle.firstExchange === false);
+});
+
+test("a captured flagship ends the run: struck colors is a game over (Milestone 5 plan)", function () {
+  var s = huntReady("over");
+  var fr = aShip(s, "Frigate", "War", "Avalon");
+  var g = huntWith(s, { ships: [fr], shape: "single", hunter: false });
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  g.battle.step = "decision";
+  PC.hunt.battle(s, g, "decide", "strike");
+  eq(g.phase, "gameover"); eq(g.gameOver.how, "captured");
+});
+
+test("convoys: when one ship strikes, her consorts roll to strike (§21.13)", function () {
+  var s = huntReady("convoy");
+  var g = PC.hunt.start(s);
+  var grp = PC.huntGen.sighting(s, "north", PC.rng.fromKey("convoy-test"), { kind: "convoy", flag: "Avalon" });
+  eq(grp.shape, "convoy"); ok(grp.ships.length >= 2);
+  g.sighting = grp; g.phase = "scout";
+  withDice([1, 1], function () { PC.hunt.engage(s, g); PC.hunt.battle(s, g, "engage"); });
+  var b = g.battle;
+  ok(b.enemies.length >= 2);
+  withDice([6, 6], function () { PC.combat._strikeRoll(s, g, b, b.enemies[0], 0, "test"); });
+  ok(b.enemies.every(function (e) { return e.out; }), "the consort struck too on a clean roll");
+});
+
+test("a Developer fleet ship fights beside the flagship: her pairing rolls in the background", function () {
+  var s = huntReady("fleet");
+  var r = PC.hunt.devFleetShip(s, "Sloop");
+  ok(r.officer);
+  var f = s.fleet[0];
+  ok(PC.officers.aboard(s).some(function (o) { return o.aboard === f.id; }), "her captain aboard her");
+  var g = PC.hunt.start(s);
+  var grp = PC.huntGen.sighting(s, "north", PC.rng.fromKey("convoy-2"), { kind: "convoy", flag: "Avalon" });
+  g.sighting = grp; g.phase = "scout";
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  eq(g.battle.step, "setup");
+  ok(g.battle.pairs[f.id], "the fleet ship has her own pairing");
+  withDice([1, 1], function () { PC.hunt.battle(s, g, "engage"); });
+  var hull = grp.ships[1].hull, before = g.log.length;
+  withDice([5, 5], function () {
+    if (g.battle.step === "chase") PC.hunt.battle(s, g, "doChase");
+    if (g.battle.step === "position") PC.hunt.battle(s, g, "doPosition");
+    if (g.battle.step === "posChoice") PC.hunt.battle(s, g, "choosePosition", "rake");
+  });
+  ok(g.log.slice(before).some(function (l) { return /PLACEHOLDER: (Your .* (rakes|and)|The .* hammers)/.test(l); }), "a background line: " + g.battle.step + " " + JSON.stringify(g.log.slice(before)));
+});
+
+test("selling a prize hull: 8% for a dirty hull at Ocracoke's no-control yard, her guns at 30%", function () {
+  var s = huntReady("sell");
+  s.fleet = [{ id: "p1", kind: "prize", cls: "Barque", size: 2, hull: 45, hullMax: 45, guns: 4, crew: 8, crewTiers: { Green: 8 }, dirty: true, cargo: 250 }];
+  var p = PC.node.hullSalePrice(s, s.fleet[0]);
+  var mult = PC.data.economy.TIERS[PC.node.nodeData("ocracoke").tier].goods;
+  eq(p.hull, Math.round(5550 * 0.08 * mult)); eq(p.guns, Math.round(4 * 100 * 0.3 * mult));
+  var crew = s.money.crew, hands = s.crew.count;
+  PC.node.enter(s, "docks");
+  var r = PC.node.sellHull(s, "p1");
+  eq(s.money.crew, crew + p.total - r.paid * r.payEach);
+  eq(s.fleet.length, 0); eq(s.crew.count, hands + r.home);
+});
+
+test("captives are freed at Ocracoke on the arrival, for a reward", function () {
+  var s = huntReady("captives");
+  s.captives = 3; var crew = s.money.crew;
+  PC.node.arrive(s, "ocracoke", { fromHunt: true });
+  eq(s.captives, 0);
+  ok(s.money.crew >= crew + 60 - 60, "reward paid before the harbor due");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

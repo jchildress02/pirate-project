@@ -578,6 +578,57 @@
     return { cost: u.cost, line: L.upgrade };
   }
 
+  // ---- Selling a prize hull (§22.7, Milestone 5 plan) -------------------------
+  // The yard pays 15% of hull value (8% for a dirty hull, only at a
+  // no-control yard) × the node's sale multiplier, minus the repair cost of
+  // her missing HP; her guns go at 30% of a gun's price. Her prize crew
+  // come home; any the berths can't take are paid off.
+  function hullSalePrice(state, f) {
+    var id = here(state), nd = nodeData(id), H = PC.data.hunt;
+    var dirty = !!f.dirty;
+    if (dirty && nd.control !== "No control") return { ok: false, why: "This yard won't touch a dirty hull" };
+    var mult = tierOf(state).goods;
+    var size = f.size || 1;
+    var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[size] * Math.max(0, f.hullMax - f.hull));
+    var hull = Math.max(0, Math.round(H.HULL_VALUE[f.cls] * (dirty ? H.HULL_SALE.dirty : H.HULL_SALE.clean) * mult) - repair);
+    var guns = Math.round(f.guns * E().GUN * H.LOOSE_GUN_SALE * mult);
+    return { ok: true, hull: hull, guns: guns, total: hull + guns, dirty: dirty, repair: repair };
+  }
+
+  function sellHull(state, fid) {
+    var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
+    if (!f) throw new Error("No such ship.");
+    if (shipwrightGreeting(state).refuse) return { line: nodeData(here(state)).lines.shipwright.refuse };
+    var p = hullSalePrice(state, f);
+    if (!p.ok) throw new Error(p.why);
+    state.money.crew += p.total;
+    state.fleet = state.fleet.filter(function (x) { return x !== f; });
+    // Her captain-officer comes back aboard the flagship.
+    (state.officers || []).forEach(function (o) { if (o.aboard === fid) o.aboard = "flagship"; });
+    // Her hands come home to the flagship's berths; the rest are paid off.
+    var home = 0, paid = 0, each = PC.crew.payOffEach(state);
+    var tiers = f.crewTiers || { Green: f.crew };
+    E().TIER_ORDER.forEach(function (t) {
+      var n = tiers[t] || 0;
+      var k = Math.min(n, PC.crew.berths(state));
+      if (k) { state.crew.tiers[t] = (state.crew.tiers[t] || 0) + k; state.crew.count += k; home += k; }
+      if (n - k) { paid += n - k; }
+    });
+    if (paid) state.money.crew = Math.max(0, state.money.crew - paid * each);
+    PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
+    return { gold: p.total, home: home, paid: paid, payEach: each, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+  }
+
+  // Move a fleet or prize ship's guns to the flagship, free (§21.6).
+  function stripGuns(state, fid) {
+    var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
+    if (!f) throw new Error("No such ship.");
+    var n = Math.min(f.guns, state.ship.gunsMax - state.ship.guns);
+    if (n <= 0) throw new Error("Every gun port on your flagship is full.");
+    f.guns -= n; state.ship.guns += n;
+    return n;
+  }
+
   function gunPrice(state) { return money(E().GUN * craftMult(state)); }
 
   function buyGuns(state, n) {
@@ -813,10 +864,17 @@
       var back = 0;
       for (var i = 0; i < c.wounded; i++) if (r() < rate) back++;
       var maimed = c.wounded - back;
-      // Recovered hands rejoin as Green here; the hunt milestone tracks
-      // the wounded by tier.
-      if (back) { c.tiers.Green += back; c.count += back; lines.push(L.recovered.replace(/\[number\]/i, back)); }
-      c.wounded = 0;
+      // Recovered hands rejoin at their own tier (the hunt tracks the
+      // wounded by tier, §24.9); any untracked rejoin as Green.
+      if (back) {
+        var wt = c.woundedTiers || {}, left = back;
+        PC.data.economy.TIER_ORDER.slice().reverse().forEach(function (t) {
+          var k = Math.min(left, wt[t] || 0); if (k) { c.tiers[t] += k; left -= k; }
+        });
+        c.tiers.Green += left;
+        c.count += back; lines.push(L.recovered.replace(/\[number\]/i, back));
+      }
+      c.wounded = 0; c.woundedTiers = {};
       if (maimed) {
         var comp = PC.crew.articleOption(state, "compensation");
         var each = Math.max(comp.min, Math.round(PC.crew.oneShare(state) * comp.shares));
@@ -832,7 +890,14 @@
         }
       }
     }
-    // Captives and holdings come with the prize hunt and after the prototype.
+    // Captives are freed at a free port, for a reward (§20.9, §22.7).
+    if (state.captives && nd.freePort) {
+      var reward = state.captives * PC.data.hunt.CAPTIVE_REWARD;
+      state.money.crew += reward;
+      lines.push("PLACEHOLDER: You set " + state.captives + " captive" + (state.captives === 1 ? "" : "s") + " ashore, free. Their thanks come with " + reward + " gold.");
+      state.captives = 0;
+    }
+    // Holdings come after the prototype.
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
     state.location.popup = { title: "Arrival at " + nd.name, lines: lines };
@@ -842,6 +907,9 @@
   PC.node = {
     FLAGS: F,
     keeperQuestions: keeperQuestions,
+    hullSalePrice: hullSalePrice,
+    sellHull: sellHull,
+    stripGuns: stripGuns,
     askKeeperQuestion: askKeeperQuestion,
     haggleCheck: haggleCheck,
     haggleRoll: haggleRoll,

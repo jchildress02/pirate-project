@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 6;
+  var SAVE_VERSION = 7;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -49,6 +49,7 @@
     addMilestone2Fields(state, startNode);
     addMilestone3Fields(state);
     addMilestone4Fields(state);
+    addMilestone5Fields(state);
     if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
   }
@@ -73,6 +74,14 @@
   // Milestone 4: the minigames (§18). The game in play (state.minigame) and
   // what carries across sessions: Liar's Dice winnings toward Card Sharp,
   // the Heavy Drinker's "One more round" count, session counters.
+  function addMilestone5Fields(state) {
+    state.fleet = state.fleet || [];          // fleet and prize ships (§21.8)
+    state.captives = state.captives || 0;     // captives aboard, to free at a free port (§22.7)
+    state.records = state.records || { prizes: 0, duels: 0 }; // Prize Taker, Duelist (§14.4)
+    state.world.grudge = state.world.grudge || { France: 0, Sicily: 0 }; // §22.5
+    state.gameOver = state.gameOver || null;
+  }
+
   function addMilestone4Fields(state) {
     state.minigames = state.minigames || { diceWinnings: 0, oneMoreRounds: 0, drinkSessions: 0, diceSessions: 0 };
     if (state.minigame === undefined) state.minigame = null;
@@ -201,6 +210,11 @@
       renameSkillsAndTags(data);
       if (PC.officers && data.world) PC.officers.ensureQuartermaster(data);
       data.saveVersion = 6;
+    }
+    if (data.saveVersion === 6) {
+      // Milestone 5: the fleet, captives aboard, prize records, grudges.
+      addMilestone5Fields(data);
+      data.saveVersion = 7;
     }
     return data;
   }

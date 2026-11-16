@@ -115,12 +115,19 @@
     return state.provisions + goodsUnits(state) + Math.ceil(treasureUnits(state) / E().TREASURE_PER_SLOT);
   }
 
-  function slotsFree(state) { return Math.max(0, state.ship.cargo - slotsUsed(state)); }
+  // The hold is pooled across the flagship, fleet ships and prize ships (§22.7).
+  function holdCapacity(state) {
+    var n = state.ship.cargo;
+    (state.fleet || []).forEach(function (f) { if (!f.out) n += f.cargo || 0; });
+    return n;
+  }
+
+  function slotsFree(state) { return Math.max(0, holdCapacity(state) - slotsUsed(state)); }
 
   // How many treasure units still fit.
   function treasureRoom(state) {
     var used = state.provisions + goodsUnits(state);
-    return Math.max(0, (state.ship.cargo - used) * E().TREASURE_PER_SLOT - treasureUnits(state));
+    return Math.max(0, (holdCapacity(state) - used) * E().TREASURE_PER_SLOT - treasureUnits(state));
   }
 
   function addGood(state, good, n, dirty) {
@@ -315,6 +322,7 @@
     goodsUnits: goodsUnits,
     slotsUsed: slotsUsed,
     slotsFree: slotsFree,
+    holdCapacity: holdCapacity,
     treasureRoom: treasureRoom,
     addGood: addGood,
     removeGood: removeGood,
