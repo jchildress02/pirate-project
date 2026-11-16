@@ -275,5 +275,6 @@
     dismiss: dismiss,
     dismissPay: dismissPay,
     namedType: namedType,
+    generate: generate,
   };
 })();

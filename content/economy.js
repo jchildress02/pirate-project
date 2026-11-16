@@ -81,5 +81,23 @@
     "Ambergris": { base: 400, kind: "fine" },
     "Pearls": { base: 600, kind: "fine" },
     "Silver bars": { base: 150, kind: "precious" },
+    // Prize goods (§20.9, §22.6), added with the hunt (Milestone 5).
+    "Scottish broadcloth": { base: 40, kind: "bulk" },
+    "Pepper": { base: 90, kind: "fine" },
+    "Cochineal": { base: 150, kind: "fine" },
+    "Cinnamon": { base: 150, kind: "fine" },
+    "Vanilla": { base: 180, kind: "fine" },
+    "Bengali muslin and calico": { base: 120, kind: "fine" },
+    "Frisian linen and lace": { base: 150, kind: "fine" },
+    "Burgundian velvet and brocade": { base: 160, kind: "fine" },
+    "Ming silk": { base: 300, kind: "fine" },
+    "Ming tea": { base: 100, kind: "fine" },
+    "Tortoiseshell": { base: 120, kind: "fine" },
+    "Abyssinian ivory": { base: 200, kind: "fine" },
+    "Ming lacquerware": { base: 200, kind: "fine" },
+    // DEFAULT prices: §22.6 names these but §20.9 gives no figure.
+    "Gold dust": { base: 400, kind: "precious" },
+    "Emeralds": { base: 600, kind: "precious" },
+    "Bengali gems": { base: 800, kind: "precious" },
   };
 })();
