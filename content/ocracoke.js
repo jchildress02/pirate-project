@@ -138,5 +138,64 @@
     },
   };
 
+  // ---- How Ocracoke's places and scenes are presented (§38.3, §41.1) ----
+  // A place's heading, its banner slot and the hint line under it on the
+  // town screen (hints drafted by Claude, approved November 16).
+  PC.data.nodes.ocracoke.present = {
+    prosperityWord: "Very Poor",
+    places: {
+      sandbar: { heading: "The Sandbar", banner: "the sandbar and the beach at Ocracoke" },
+      beach: { heading: "The Beach", banner: "the sandbar and the beach at Ocracoke" },
+      town: { heading: "Ocracoke", banner: "Ocracoke from the water" },
+      tavern: { heading: "The Tavern", banner: "the Ocracoke Tavern", hint: "Rumors, drink, dice, officers for hire" },
+      docks: { heading: "The Docks", banner: "the Ocracoke docks", hint: "Shipwright, hands for hire" },
+      merchant: { heading: "The Merchant", banner: "the provisioner's shack", hint: "Provisions and goods", hintFence: "Bobby Rats" },
+      outside: { heading: "Outside the Tavern", banner: "the Ocracoke Tavern" },
+      graveyard: { heading: "Lilyhook's Graveyard", banner: "Lilyhook's Graveyard", hint: "Dive the wrecks" },
+      ship: { heading: "The Ship", banner: "your ship at anchor", hint: "Articles, crew, officers, cargo" },
+    },
+    // Per scene: the place it happens, the quest ribbon above the heading,
+    // and the person the heading names once the captain knows them (until
+    // then the place). namedIn: the scene where that person gives a name.
+    scenes: {
+      ocr_sandbar: { place: "sandbar" },
+      ocr_mentor: { place: "beach" },
+      ocr_twopenny_1: { place: "beach", person: "twopenny" },
+      ocr_twopenny_fee: { place: "beach", person: "twopenny" },
+      ocr_twopenny_partial: { place: "beach", person: "twopenny" },
+      ocr_twopenny_setback: { place: "beach", person: "twopenny" },
+      ocr_twopenny_pointer: { place: "beach", person: "twopenny" },
+      ocr_twopenny_exit: { place: "beach" },
+      ocr_rr_1: { place: "docks", quest: "Restless & Ruined", person: "davey" },
+      ocr_rr_2: { place: "docks", quest: "Restless & Ruined", person: "davey", namedIn: true },
+      ocr_rr_tab: { place: "docks", quest: "Restless & Ruined", person: "davey" },
+      ocr_rr_recruited: { place: "docks", quest: "Restless & Ruined", person: "davey" },
+      ocr_dpw_1: { place: "outside", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_2: { place: "outside", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_3: { place: "outside", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_4: { place: "beach", quest: "A Dying Pirate's Wish", person: "ollie", namedIn: true },
+      ocr_dpw_5: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "geezer" },
+      ocr_dpw_6: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "geezer", namedIn: true },
+      ocr_dpw_7: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_dive: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_shark: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_8: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_9: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "geezer", plate: "Geezer's last moment" },
+      ocr_dpw_10: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "geezer" },
+      ocr_dpw_11: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_dpw_end: { place: "graveyard", quest: "A Dying Pirate's Wish", person: "ollie" },
+      ocr_oap: { place: "tavern", heading: "The One-Armed Pirate" },
+      ocr_oap_lead: { place: "tavern", quest: "What Was Lost", heading: "The One-Armed Pirate" },
+      ocr_uw_1: { place: "tavern", quest: "Welcome to the Underworld", person: "bobby" },
+      ocr_uw_2: { place: "tavern", quest: "Welcome to the Underworld", person: "bobby" },
+      ocr_uw_drunk: { place: "tavern", quest: "Welcome to the Underworld" },
+      ocr_uw_reward: { place: "tavern", quest: "Welcome to the Underworld", person: "bobby" },
+    },
+  };
+
+  // Named NPCs who get woodcut busts (§38.3, §41.13). No art yet: the game
+  // shows a labeled frame until the author's portrait drops into assets/.
+  PC.data.npcPortraits = { twopenny: null, bobby: null, davey: null, ollie: null, geezer: null };
+
   PC.data.start = { scene: "ocr_sandbar", node: "ocracoke" }; // the scenes are in content/ocracoke_scenes.js
 })();

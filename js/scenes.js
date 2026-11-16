@@ -69,8 +69,22 @@
 
   function seasonStamp(state) { return state.time.year + "-" + state.time.season; }
 
+  // How a scene is presented (its place, quest ribbon and person; §41.1),
+  // from the node's content. A scene where a person gives a name marks
+  // them met as it opens.
+  function sceneMeta(id) {
+    var nodes = PC.data.nodes || {};
+    for (var k in nodes) {
+      var p = nodes[k].present;
+      if (p && p.scenes && p.scenes[id]) return p.scenes[id];
+    }
+    return null;
+  }
+
   function enterScene(state, id) {
     var s = sceneById(id);
+    var meta = sceneMeta(id);
+    if (meta && meta.namedIn && meta.person) (state.npcs[meta.person] = state.npcs[meta.person] || {}).met = true;
     if (s.ap) state.ap.left = Math.max(0, state.ap.left - s.ap); // a scene that fires on its own never blocks on time
     state.current = { screen: "scene", sceneId: id, phase: "choosing", pending: null };
   }
@@ -137,6 +151,17 @@
     return null;
   }
 
+  function opener(state, cond) {
+    if (!cond) return null;
+    if (Array.isArray(cond)) { for (var i = 0; i < cond.length; i++) { var a = opener(state, cond[i]); if (a) return a; } return null; }
+    if (cond.all || cond.any) return opener(state, cond.all || cond.any);
+    var c = state.captain;
+    if (cond.flaw && (c.flaws || []).indexOf(cond.flaw) >= 0) return { kind: "flaw", name: cond.flaw };
+    if (cond.trait && (c.traits || []).indexOf(cond.trait) >= 0) return { kind: "trait", name: cond.trait };
+    if (cond.tag && (c.tags || []).indexOf(cond.tag) >= 0) return { kind: "trait", name: cond.tag };
+    return null;
+  }
+
   function choiceView(state, s, ch, index) {
     var v = { index: index, label: PC.text.render(textOf(state, ch.label), state), status: "open", reason: null, check: null, cost: ch.cost || null };
     if (ch.hiddenUnless && !test(state, ch.hiddenUnless)) v.status = "hidden";
@@ -145,6 +170,9 @@
       var cp = costProblem(state, ch.cost);
       if (cp) { v.status = "locked"; v.reason = cp; }
     }
+    // An option opened by the captain's own flaw, trait or tag gets a
+    // manicule on screen (§41.1), so the player sees it is in character.
+    if (v.status !== "hidden" && ch.hiddenUnless) v.opener = opener(state, ch.hiddenUnless);
     if (ch.check && v.status !== "hidden") {
       v.check = PC.checks.assess(state, ch.check, { conditions: s.conditions || [] });
       if (v.status === "open" && v.check.locked) { v.status = "locked"; v.reason = "Needs a tag or a clock"; }
@@ -177,7 +205,11 @@
     var o = outcomeFor(ch, p.outcome);
     var reroll = ch.check ? PC.checks.availableReroll(state, ch.check, p.outcome, { conditions: s.conditions || [] }) : null;
     if (p.rerolled) reroll = null; // at most one reroll per roll
+    var live = (o.effects || []).filter(function (e) { return test(state, e.when); });
     return {
+      chips: live.map(function (e) { return effectChip(state, e); }).filter(Boolean),
+      approval: ch.approval || [],
+      info: !!(ch.info || s.info),
       choiceLabel: PC.text.render(textOf(state, ch.label), state),
       outcome: p.outcome, // "clean" | "partial" | "setback" | "result"
       roll: p.roll || null,
@@ -185,6 +217,7 @@
       text: PC.text.render(textOf(state, o.text), state),
       effects: (o.effects || []).filter(function (e) { return test(state, e.when); }).map(function (e) { return describeEffect(state, e); }),
       needsPot: (o.effects || []).some(function (e) { return e.gold > 0 && (!e.pot || e.pot === "prompt") && test(state, e.when); }),
+      potGold: live.reduce(function (n, e) { return n + (e.gold > 0 && (!e.pot || e.pot === "prompt") ? e.gold : 0); }, 0),
       reroll: reroll,
     };
   }
@@ -232,6 +265,17 @@
     p.outcome = res.outcome; // the new result stands
     p.roll = { dice: res.dice, total: res.total, edge: res.assessment.edge, tier: res.assessment.tier, type: ch.check.type };
     p.rerolled = true;
+  }
+
+  // Where the pending result goes next, without applying anything: the
+  // screen uses it to show a check result and the next menu together
+  // (the M3 review, §37.9: Davey's tab, Twopenny's pay-or-shove).
+  function peekExit(state) {
+    var s = sceneById(state.current.sceneId);
+    var p = state.current.pending;
+    if (!p) return null;
+    var o = outcomeFor(s.choices[p.choiceIndex], p.outcome);
+    return { to: resolveExit(state, o.exit), carry: !!o.carry, same: resolveExit(state, o.exit) === s.id };
   }
 
   // Apply the outcome's effects and follow its exit. `pot` answers the
@@ -316,6 +360,39 @@
     if ("item" in e) return "Gained: " + e.item;
     if ("ap" in e) return "Time " + signed(e.ap);
     if ("flag" in e) return null; // flags are silent
+    return null;
+  }
+
+  // The same effect as a chip for the result screen (§38.6): an icon key, a
+  // short line and an ink. Flags, meetings, deaths and regard stay off the
+  // screen (a death stays in the text, §41.1). Read before the effect lands,
+  // so a relationship chip names where the person ends up ("now Friendly").
+  var INKS = { frisia: "frisia", avalon: "avalon", pirates: "pirates" };
+  var FACTION_NAME = { frisia: "Frisia", avalon: "Avalon", pirates: "Pirates" };
+  function effectChip(state, e) {
+    if ("gold" in e) return { icon: "gold", text: (e.gold > 0 ? "+" : "−") + Math.abs(e.gold) + " gold" + (e.pot === "purse" ? " · your purse" : e.pot === "crew" ? " · crew gold" : ""), ink: "mid" };
+    if ("provisions" in e) return { icon: "prov", text: "Provisions " + signed(e.provisions) };
+    if ("treasure" in e) return { icon: "treasure", text: signed(e.treasure) + " " + (e.dirty ? "dirty" : "clean") + " treasure", ink: "mid" };
+    if ("hull" in e) return { icon: "hull", text: "Hull " + signed(e.hull) };
+    if ("morale" in e) return { icon: "morale", text: "Crew morale " + signed(e.morale) };
+    if ("pressure" in e) return { icon: "pressure", text: "Pressure " + signed(e.pressure) };
+    if ("dread" in e) return { icon: "dread", text: "Dread " + signed(e.dread), ink: "pirates" };
+    if ("standing" in e) return { icon: "standing", text: FACTION_NAME[e.standing.faction] + " " + signed(e.standing.delta), ink: INKS[e.standing.faction] };
+    if ("heat" in e) return { icon: "heat", text: FACTION_NAME[e.heat.faction] + " Heat " + signed(e.heat.delta), ink: INKS[e.heat.faction] };
+    if ("ladder" in e || "rung" in e) {
+      var who = "ladder" in e ? e.ladder.npc : e.rung.npc;
+      var n = PC.npcs ? PC.npcs.get(state, who) : null;
+      var to = "ladder" in e ? Math.max(-3, Math.min(3, (n ? n.rung : 0) + e.ladder.delta)) : PC.npcs.RUNG_VALUE[e.rung.set];
+      var up = "ladder" in e ? e.ladder.delta > 0 : to >= (n ? n.rung : 0);
+      var name = n ? (n.full || n.first) : who;
+      if (PC.npcs && PC.npcs.known && !PC.npcs.known(state, who)) name = n && n.label ? cap(n.label) : name;
+      return { icon: "rel", text: name + " · now " + PC.npcs.rungName(to), ink: up ? "good" : "bad" };
+    }
+    if ("join" in e) { var jn = PC.data.npcs[e.join]; return { icon: "officer", text: (jn ? jn.first + " " + jn.last : e.join) + " joins your officers", ink: "good" }; }
+    if ("lead" in e) return { icon: "lead", text: "A new lead · Journal updated", ink: "oxblood" };
+    if ("tag" in e) return e.tell === false ? null : { icon: "tag", text: (e.remove ? "Lost: " : "New tag: ") + e.tag + (e.untilSeasonEnd ? " (this season)" : "") };
+    if ("item" in e) return { icon: "item", text: "Gained: " + e.item };
+    if ("ap" in e) return { icon: "ap", text: (e.ap < 0 ? "Costs " + Math.abs(e.ap) + " action" + (e.ap < -1 ? "s" : "") : "+" + e.ap + " action" + (e.ap > 1 ? "s" : "")), ink: "oxblood" };
     return null;
   }
 
@@ -410,5 +487,8 @@
     commit: commit,
     endSeason: endSeason,
     applyEffect: applyEffect,
+    effectChip: effectChip,
+    sceneMeta: sceneMeta,
+    peekExit: peekExit,
   };
 })();

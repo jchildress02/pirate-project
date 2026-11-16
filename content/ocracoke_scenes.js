@@ -1754,6 +1754,7 @@
       "id": "ocr_dpw_dive"
     },
     "ocr_dpw_shark": {
+      "note": "One step easier in UI pass 1 (§38.8): Swim DR 1 (was 2), the knife DR 2 (was 3).",
       "kind": "check",
       "where": "Ocracoke, Lilyhook's Graveyard",
       "setup": "You surface and take big gulps of air. You hold the ivory mermaid aloft for Ollie on the beach, who whoops and cheers. Suddenly, he stops cheering. \"Look behind you!\" he shouts.\n\nYou turn around and spot a large, grey fin rapidly cutting through the water, heading right toward you.",
@@ -1766,7 +1767,7 @@
           ],
           "check": {
             "type": "Dive",
-            "dr": 2
+            "dr": 1
           },
           "outcomes": {
             "clean": {
@@ -1802,7 +1803,7 @@
           ],
           "check": {
             "type": "Brawling",
-            "dr": 3
+            "dr": 2
           },
           "outcomes": {
             "clean": {

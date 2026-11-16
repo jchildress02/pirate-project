@@ -1525,7 +1525,7 @@ test("the Miranda: a blackout never loses the mermaid", function () {
   ok(s.minigame.kept.some(function (i) { return i.tier === "quest"; }));
 });
 
-test("the loot envelope (§32.15): four clean grabs land about 2 / 3 / 5-6 treasure on a sloop, brig, frigate", function () {
+test("the loot envelope (§32.15, raised in UI pass 1 §38.8): four clean grabs land about 5-6 / 8-9 / 10 treasure on a sloop, brig, frigate", function () {
   var S = PC.data.minigames.salvage, avg = {};
   ["sloop", "brig", "frigate"].forEach(function (type) {
     var tot = 0, n = 400;
@@ -1538,9 +1538,9 @@ test("the loot envelope (§32.15): four clean grabs land about 2 / 3 / 5-6 treas
     }
     avg[type] = tot / n;
   });
-  ok(avg.sloop > 1.2 && avg.sloop < 3, "sloop " + avg.sloop);
-  ok(avg.brig > 2.5 && avg.brig < 4.5, "brig " + avg.brig);
-  ok(avg.frigate > 4 && avg.frigate < 7, "frigate " + avg.frigate);
+  ok(avg.sloop > 4.5 && avg.sloop < 7, "sloop " + avg.sloop);
+  ok(avg.brig > 7 && avg.brig < 10.5, "brig " + avg.brig);
+  ok(avg.frigate > 8.5 && avg.frigate < 12, "frigate " + avg.frigate);
 });
 
 test("drinking: locked on the first visit, then once a season for an action, counting as a Tavern visit", function () {

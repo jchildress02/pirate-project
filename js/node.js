@@ -193,8 +193,8 @@
     var firstVisit = !flag(state, F.tavernDone);
     return ["tavern", "docks", "merchant", "graveyard", "ship"].map(function (p) {
       var out = { id: p, name: nd.locations[p].name, locked: false, why: null };
-      if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Visit the Tavern first"; }
-      else if (p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.why = "Locked until A Dying Pirate's Wish"; }
+      if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Come back after your first visit"; }
+      else if (p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.hidden = true; out.why = "Come back after A Dying Pirate's Wish"; }
       return out;
     });
   }
@@ -211,7 +211,7 @@
     state.location.visit = (state.location.visit || 0) + 1;
     var id = here(state);
     // The persistent Minors count as met once the captain walks into their place.
-    var meet = { docks: "shipwright", merchant: "provisioner" }[place];
+    var meet = { tavern: "keeper", docks: "shipwright", merchant: "provisioner" }[place];
     if (meet) { var mid = slotNpc(id, meet); (state.npcs[mid] = state.npcs[mid] || {}).met = true; }
     if (place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
     return null;

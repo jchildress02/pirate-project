@@ -297,6 +297,13 @@
     };
   }
 
+  // Has the captain learned this person's name? (§41.1: a heading and a
+  // portrait frame name a person only once met.)
+  function known(state, who) {
+    var id = resolveId(state, who);
+    return !!(state && state.npcs && state.npcs[id] && state.npcs[id].met);
+  }
+
   function rung(state, who) { var n = get(state, who); return n ? n.rung : 0; }
 
   // Service Level (§15.6): Wary -1, Neutral 0, Friendly 1, Friend 2,
@@ -327,6 +334,7 @@
     randomShipName: randomShipName,
     resolveId: resolveId,
     get: get,
+    known: known,
     rung: rung,
     serviceLevel: serviceLevel,
     moveRung: moveRung,

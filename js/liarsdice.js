@@ -126,20 +126,26 @@
     var g = game.round, P = play(game.opp);
     if (game.sized === "setback" && g.hisPeek == null) g.hisPeek = 0; // he reads you: plays sharper this game
     if (g.bid && hisOdds(game, g.bid.q, g.bid.f) < P.callBelow) return call(state, game, "him");
-    // Raise: the likeliest valid bid; bold or chasing players push past it.
+    // Raise. He ladders (ruled in the M4 review, §13.2): usually the
+    // smallest believable raise, otherwise the likeliest valid bid. Bold or
+    // chasing players now and then push one die past it.
     var r = M().rand(state, game, "bid");
-    var best = null;
+    var best = null, cands = [];
     for (var f = 1; f <= 6; f++) {
       var q = g.bid ? (f > g.bid.f ? g.bid.q : g.bid.q + 1) : 1;
       if (!valid(g, q, f)) continue;
       var pr = hisOdds(game, q, f);
+      cands.push({ q: q, f: f, p: pr });
       if (!best || pr > best.p || (pr === best.p && r() < 0.5)) best = { q: q, f: f, p: pr };
     }
     if (!best) return call(state, game, "him");
-    var push = (P.bold && r() < 0.5) || (P.chases && game.lost > game.won && r() < 0.5);
+    cands.sort(function (a, b) { return a.q - b.q || a.f - b.f; });
+    var believable = cands.filter(function (c) { return c.p >= 0.5; });
+    if (believable.length && r() < 0.75) best = believable[0];
+    var push = (P.bold && r() < 0.2) || (P.chases && game.lost > game.won && r() < 0.2);
     if (push && valid(g, best.q + 1, best.f)) best = { q: best.q + 1, f: best.f, p: hisOdds(game, best.q + 1, best.f) };
     g.bid = { q: best.q, f: best.f, by: "him", bluff: best.p < 0.5 };
-    var line = game.opp.name.split(" ")[0] + " bids " + best.q + " " + face(best.f) + (best.q > 1 ? "s" : "") + ".";
+    var line = game.opp.name.split(" ")[0] + " bids " + faces(best.q, best.f) + ".";
     if (g.bid.bluff && game.sized === "clean") line += " " + D().lines.tell;
     else if (g.bid.bluff && game.sized === "partial" && r() < 0.6) line += " " + D().lines.vague;
     g.history.push(line);
@@ -149,6 +155,8 @@
 
   var FACES = ["", "one", "two", "three", "four", "five", "six"];
   function face(f) { return FACES[f]; }
+  // "1 six", "3 sixes", "2 fives"
+  function faces(q, f) { return q + " " + (q === 1 ? FACES[f] : f === 6 ? "sixes" : FACES[f] + "s"); }
 
   function bid(state, q, f) {
     var game = state.minigame, g = game && game.round;
@@ -156,7 +164,7 @@
     q = Math.round(q); f = Math.round(f);
     if (!valid(g, q, f)) throw new Error("A raise must bid more dice, or the same number of a higher face.");
     g.bid = { q: q, f: f, by: "me" };
-    g.history.push("You bid " + q + " " + face(f) + (q > 1 ? "s" : "") + ".");
+    g.history.push("You bid " + faces(q, f) + ".");
     g.turn = "him";
     return hisTurn(state, game);
   }
@@ -167,7 +175,7 @@
     var have = count(g.mine, g.bid.f) + count(g.his, g.bid.f);
     var holds = have >= g.bid.q;
     var loser = holds ? who : g.bid.by;
-    g.history.push((who === "me" ? "You call" : game.opp.name.split(" ")[0] + " calls") + " Liar! The cups lift: " + have + " " + face(g.bid.f) + (have === 1 ? "" : "s") + ". " +
+    g.history.push((who === "me" ? "You call" : game.opp.name.split(" ")[0] + " calls") + " Liar! The cups lift: " + faces(have, g.bid.f) + ". " +
       (loser === "me" ? "You lose a die." : "He loses a die."));
     g.revealed = { mine: g.mine.slice(), his: g.his.slice(), loser: loser };
     if (loser === "me") g.myN -= 1; else g.hisN -= 1;

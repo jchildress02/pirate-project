@@ -1,8 +1,9 @@
 /* Pirate Chronicle — drawing the screen.
  *
- * Plain placeholder styling: the UI chat designs the real look. Everything
- * here reads from the engine (PC.scenes, PC.checks) and calls back into it;
- * no game rules live in this file.
+ * The look is §38 (the signed-off mockup is the visual spec) and what each
+ * screen holds is §41. Everything here reads from the engine (PC.scenes,
+ * PC.checks, PC.node...) and calls back into it; no game rules live in this
+ * file.
  */
 (function () {
   "use strict";
@@ -10,6 +11,7 @@
 
   var state = null;
   var root = null;
+  var BUILD = "Prototype build 0.5 · UI pass 1";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -20,8 +22,17 @@
   // Paragraphs on blank lines; *stage business* in italics (§33.3.3).
   function prose(text) {
     return String(text || "").split(/\n\n+/).filter(Boolean).map(function (p) {
-      return "<p>" + esc(p).replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/\n/g, "<br>") + "</p>";
+      return "<p>" + inline(p) + "</p>";
     }).join("");
+  }
+  function inline(t) { return esc(smart(t)).replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/\n/g, "<br>"); }
+
+  // Printer's quotes: IM Fell has no straight quote that reads as an
+  // opening one, so "this" becomes “this” and don't becomes don’t.
+  function smart(t) {
+    return String(t == null ? "" : t)
+      .replace(/(^|[\s(\[\u2014-])"/g, "$1\u201c").replace(/"/g, "\u201d")
+      .replace(/(^|[\s(\[\u2014-])'/g, "$1\u2018").replace(/'/g, "\u2019");
   }
 
   // Images: a file path, or the inlined copy in the single-file build.
@@ -29,439 +40,772 @@
 
   // "a sailor", "an official"
   function aOrAn(word) { return (/^[aeiou]/i.test(word) ? "an " : "a ") + word; }
-
   function pct(x) { return Math.round(x * 100) + "%"; }
   function signed(n) { return (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n); }
+  function gold(n) { return (Math.round(n * 100) / 100).toLocaleString("en-US"); }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function titleCase(s) { return String(s).replace(/(^|\s)([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); }); }
 
-  // ---- Save after every action ----------------------------------------
+  // ---- Settings (kept in this browser, apart from any save; §41.2) -------
+
+  var SETTINGS_KEY = "pirate-chronicle-settings";
+  function loadSettings() {
+    var s = { dev: false, reduceMotion: false };
+    try { var t = JSON.parse(globalThis.localStorage.getItem(SETTINGS_KEY) || "{}"); Object.keys(t).forEach(function (k) { s[k] = t[k]; }); } catch (e) { /* ignore */ }
+    return s;
+  }
+  var settings = loadSettings();
+  function saveSettings() { try { globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
+  function reducedMotion() {
+    if (settings.reduceMotion) return true;
+    try { return globalThis.matchMedia && globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; }
+  }
+
+  // ---- Inks, icons and ornaments (§38.2, §38.6) ---------------------------
+
+  var INK = { ink: "#2a1c10", faded: "#5e4528", oxblood: "#7a2416", good: "#2f5a22", mid: "#7a5608", bad: "#8f2a1c",
+    frisia: "#a14c17", avalon: "#8a6414", pirates: "#2b2622", sea: "#235066", none: "#5e4528" };
+  var FACTION = { frisia: "Frisia", avalon: "Avalon", pirates: "Pirates" };
+
+  var I = {
+    gold: '<circle cx="10" cy="10" r="7.5"/><circle cx="10" cy="10" r="4.8"/><path d="M10 7.5v5"/>',
+    treasure: '<path d="M3 9h14v8H3z"/><path d="M3 9q0-5 7-5t7 5"/><path d="M3 12h14"/><rect x="8.5" y="11" width="3" height="3"/>',
+    prov: '<path d="M5 3h10q2 7 0 14H5q-2-7 0-14z"/><path d="M4 7h12M4 13h12"/>',
+    hull: '<path d="M2 10h16l-3 6H5z"/><path d="M10 10V2l6 6h-6"/>',
+    morale: '<circle cx="10" cy="10" r="7.5"/><path d="M6.5 11.5q3.5 3.5 7 0"/><path d="M7.5 7.5v1M12.5 7.5v1"/>',
+    pressure: '<path d="M5 12a4 4 0 0 1 1-8a5 5 0 0 1 9 2a3 3 0 0 1 0 6z"/><path d="M10 12l-2 4h3l-2 3"/>',
+    standing: '<path d="M5 18V2"/><path d="M5 3h10l-3 3.5L15 10H5z" fill="currentColor" fill-opacity=".85"/>',
+    heat: '<path d="M10 2q5 5 4 10a4 4 0 0 1-8 0q0-3 2-5q0 3 2 3q1-4 0-8z" fill="currentColor" fill-opacity=".8"/>',
+    dread: '<path d="M4 9a6 6 0 0 1 12 0v3l-2 1v3H6v-3l-2-1z"/><circle cx="7.5" cy="9.5" r="1.5"/><circle cx="12.5" cy="9.5" r="1.5"/><path d="M8.5 16v-2M11.5 16v-2"/>',
+    rel: '<circle cx="6.5" cy="6" r="2.6"/><circle cx="13.5" cy="6" r="2.6"/><path d="M1.5 17q0-6 5-6q2.5 0 3.5 1.5q1-1.5 3.5-1.5q5 0 5 6"/><path d="M10 15.5l-1.2-1.1a.9.9 0 0 1 1.2-1.3a.9.9 0 0 1 1.2 1.3z" fill="currentColor"/>',
+    officer: '<circle cx="8" cy="6" r="3"/><path d="M2 17q0-6 6-6t6 6"/><path d="M16 4v8M13.5 6.5L16 4l2.5 2.5"/>',
+    cond: '<path d="M3 13L13 3l4 4L7 17z"/><path d="M8 8l4 4M9 7l1 1M12 10l1 1"/>',
+    tag: '<path d="M3 3h7l7 7l-7 7l-7-7z"/><circle cx="7" cy="7" r="1.5"/>',
+    item: '<path d="M10 2l6 6l-6 10L4 8z"/><path d="M4 8h12M7 8l3 10l3-10"/>',
+    rumor: '<path d="M4 3h10v14H6a2 2 0 0 1-2-2z"/><path d="M14 3a2 2 0 0 1 2 2v2h-2M7 7h5M7 10h5M7 13h3"/>',
+    lead: '<circle cx="10" cy="10" r="7.5"/><path d="M10 4l2 6l-2 6l-2-6z"/>',
+    clock: '<path d="M5 2h10M5 18h10M6 2q0 5 4 8q4-3 4-8M6 18q0-5 4-8q4 3 4 8"/>',
+    port: '<path d="M4 18V7h12v11M4 7V3h2.5v2h2.5V3h2v2h2.5V3H16v4"/><path d="M8.5 18v-4a1.5 1.5 0 0 1 3 0v4"/>',
+    dfear: '<circle cx="10" cy="10" r="8"/><path d="M6 9a4 4 0 0 1 8 0v2l-1.3.7V14H7.3v-2.3L6 11z" fill="currentColor" fill-opacity=".25"/><circle cx="8.3" cy="9.3" r="1"/><circle cx="11.7" cy="9.3" r="1"/>',
+    dgood: '<circle cx="10" cy="10" r="8"/><path d="M10 14.5l-3.6-3.4a2.2 2.2 0 0 1 3.6-2.6a2.2 2.2 0 0 1 3.6 2.6z" fill="currentColor" fill-opacity=".35"/>',
+    dsea: '<circle cx="10" cy="10" r="8"/><circle cx="10" cy="6.3" r="1.3"/><path d="M10 7.6v7.4M7.5 9.5h5M5.8 12.2q1.2 2.8 4.2 2.8t4.2-2.8"/>',
+    ap: '<circle cx="10" cy="10" r="3.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8"/>',
+    journal: '<path d="M4 3h11v14H4z"/><path d="M7 3v14M9 7h4M9 10h4"/>',
+    captain: '<path d="M3 8q7-6 14 0q-2 2-7 2t-7-2z"/><circle cx="10" cy="13" r="3"/><path d="M5 19q0-3 5-3t5 3"/>',
+    notes: '<path d="M4 16l1-4L14 3l3 3l-9 9z"/><path d="M12 5l3 3"/>',
+    menu: '<path d="M4 6h12M4 10h12M4 14h12"/>',
+    ship: '<path d="M3 13h14l-3 4H6z"/><path d="M10 13V2M10 3l5 7h-5M10 4l-5 7h5"/>',
+    up: '<path d="M4 13l6-7l6 7"/>',
+    down: '<path d="M4 7l6 7l6-7"/>',
+    x: '<path d="M5 5l10 10M15 5L5 15"/>',
+  };
+  function ic(k, cls, sw) {
+    return '<svg' + (cls ? ' class="' + cls + '"' : "") + ' viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="' + (sw || 1.4) + '" stroke-linecap="round" stroke-linejoin="round">' + I[k] + "</svg>";
+  }
+  function med(k, ink) { return '<span class="med" style="color:' + (INK[ink] || INK.ink) + '">' + ic(k) + "</span>"; }
+  function chip(c) { return '<li class="fx">' + med(c.icon, c.ink) + (c.html || esc(c.text)) + "</li>"; }
+  function chips(list) { return list.length ? '<ul class="effects">' + list.map(chip).join("") + "</ul>" : ""; }
+
+  var CORNER_SVG = '<svg viewBox="0 0 60 60" aria-hidden="true"><path d="M6 56V24Q6 6 24 6H56" fill="none" stroke="#8a6414" stroke-width="2"/><path d="M11 56V26Q11 11 26 11H56" fill="none" stroke="#c99f45" stroke-width="1"/><path d="M6 38q12 0 12-12q0-7-7-7" fill="none" stroke="#8a6414" stroke-width="1.4"/><path d="M38 6q0 12-12 12q-7 0-7-7" fill="none" stroke="#8a6414" stroke-width="1.4"/><path d="M20 12L22 18L28 20L22 22L20 28L18 22L12 20L18 18Z" fill="#7a2416"/></svg>';
+  var CORNERS = [["left:6px;top:6px", ""], ["right:6px;top:6px", "transform:scaleX(-1)"], ["left:6px;bottom:6px", "transform:scaleY(-1)"], ["right:6px;bottom:6px", "transform:scale(-1,-1)"]]
+    .map(function (p) { return '<div class="corner" style="' + p[0] + ";" + p[1] + '">' + CORNER_SVG + "</div>"; }).join("");
+  var DIVIDER = '<svg class="divider" viewBox="0 0 680 18" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="M90 9H318M362 9H590" stroke="#8c6c3c" stroke-width="1"/><path d="M318 9q-10-8-20 0q10 8 20 0M362 9q10-8 20 0q-10 8-20 0" fill="none" stroke="#8c6c3c" stroke-width="1"/><path d="M340 2L347 9L340 16L333 9Z" fill="#7a2416"/><circle cx="326" cy="9" r="2" fill="#8a6414"/><circle cx="354" cy="9" r="2" fill="#8a6414"/></svg>';
+  var CARET = '<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+
+  // The generated officer's silhouette: hatched head and shoulders, no hat (§38.3).
+  var silN = 0;
+  function sil(w, h) {
+    var id = "hx" + (silN++);
+    return '<svg class="sil" viewBox="0 0 44 66" role="img" aria-label="No portrait yet" style="width:' + w + "px;height:" + h + 'px;background:#e2d2ad">' +
+      '<defs><pattern id="' + id + '" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1.2" height="3" fill="#2a1c10"/></pattern></defs>' +
+      '<ellipse cx="22" cy="27" rx="9" ry="11" fill="url(#' + id + ')"/><path d="M4 66Q4 46 22 43Q40 46 40 66Z" fill="url(#' + id + ')"/></svg>';
+  }
+  function officerFace(o, w, h) {
+    var pic = PC.creator.officerPortrait(o);
+    return pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:' + w + "px;height:" + h + 'px">' : sil(w, h);
+  }
+
+  // Tier words carry a shape as well as a color (§38.2).
+  var TIER_CLASS = { "Trivial": "t-good", "Very Easy": "t-good", "Easy": "t-good", "Medium": "t-mid", "Hard": "t-bad", "Very Hard": "t-bad" };
+  var SHAPE = { "t-good": '<circle cx="6" cy="6" r="4.5" fill="currentColor"/>', "t-mid": '<path d="M6 1.5L10.5 6L6 10.5L1.5 6Z" fill="currentColor"/>', "t-bad": '<path d="M6 1.5L10.8 10.5H1.2Z" fill="currentColor"/>' };
+  function shape(cls) { return '<svg viewBox="0 0 12 12" aria-hidden="true">' + SHAPE[cls] + "</svg>"; }
+  function tierWord(t) { var c = TIER_CLASS[t] || "t-mid"; return '<span class="tier ' + c + '">' + shape(c) + esc(t) + "</span>"; }
+
+  var OUTCOME = { clean: ["Clean success", "t-good"], partial: ["Partial success", "t-mid"], setback: ["Setback", "t-bad"] };
+  function badge(outcome) {
+    var o = OUTCOME[outcome];
+    return o ? '<div class="badge ' + o[1] + '">' + shape(o[1]) + o[0] + "</div>" : "";
+  }
+
+  // ---- Bands (§28.1, §28.4) ----------------------------------------------
+
+  function standingBand(v) {
+    return v >= 70 ? "Honored" : v >= 40 ? "Trusted" : v >= 20 ? "Favored" : v >= -9 ? "Neutral" : v >= -39 ? "Wary" : v >= -69 ? "Hostile" : "Enemy";
+  }
+  function heatBand(v) { return v >= 90 ? "Most Wanted" : v >= 70 ? "Hunted" : v >= 40 ? "Wanted" : v >= 20 ? "Noticed" : "Cold"; }
+
+  function standingBar(f, v) {
+    var left = v >= 0 ? 50 : 50 + v / 2, width = Math.abs(v) / 2;
+    return '<div class="meterrow"><span>' + FACTION[f] + '</span><span class="sc">' + standingBand(v) + "</span></div>" +
+      '<div class="hbar"><i style="left:' + left + "%;width:" + width + "%;background:" + INK[f] + '"></i><i style="left:50%;width:1px;background:#4a3418"></i>' +
+      '<i style="left:60%;width:1px;background:rgba(74,52,24,.4)"></i><i style="left:70%;width:1px;background:rgba(74,52,24,.4)"></i><i style="left:45%;width:1px;background:rgba(74,52,24,.4)"></i></div>';
+  }
+  function vbar(label, v, ink, band) {
+    return '<div class="vbar"><div class="tube"><i style="height:' + Math.max(0, Math.min(100, v)) + "%;background:" + INK[ink] + '"></i></div><span>' + esc(label) + '</span><span class="sc">' + esc(band) + "</span></div>";
+  }
+  function meters(withNumbers) {
+    var m = state.meters, n = function (x) { return withNumbers ? " · " + x : ""; };
+    return '<div class="h4">Standing</div>' + ["frisia", "avalon", "pirates"].map(function (f) {
+      var bar = standingBar(f, m.standing[f]);
+      return withNumbers ? bar.replace(standingBand(m.standing[f]) + "</span>", standingBand(m.standing[f]) + n(m.standing[f]) + "</span>") : bar;
+    }).join("") +
+      '<div class="h4">Dread &amp; Heat</div><div class="vbars">' +
+      vbar("Dread", m.dread, "pirates", withNumbers ? String(m.dread) : "") +
+      vbar("Frisian Heat", m.heat.frisia || 0, "frisia", heatBand(m.heat.frisia || 0) + n(m.heat.frisia || 0)) +
+      vbar("Avalon Heat", m.heat.avalon || 0, "avalon", heatBand(m.heat.avalon || 0) + n(m.heat.avalon || 0)) + "</div>";
+  }
+
+  // ---- Save after every action; Continue returns to the top (§38.5) -----
+
+  function screenKey() {
+    if (prologue) return "prologue";
+    if (!state) return creating ? "creator|" + stepIndex : "title";
+    var c = state.current || {}, l = state.location || {};
+    return [c.screen, c.sceneId, c.phase, l.place, l.tab, state.minigame ? state.minigame.kind + (state.minigame.over ? "!" : "") : ""].join("|");
+  }
 
   function act(fn) {
-    return function () {
+    return function (el) {
+      var before = screenKey();
       try { fn.apply(null, arguments); }
       catch (e) { console.error(e); toast("Something went wrong: " + e.message); }
       if (state) PC.state.saveToBrowser(state);
       else if (creating) saveDraft();
       draw();
+      if (screenKey() !== before || (el && el.dataset && el.dataset.top)) scrollTop();
     };
   }
 
-  // ---- Screens ---------------------------------------------------------
+  // ---- The frame -----------------------------------------------------------
+
+  function frame(inner) {
+    return '<div class="desk' + (reducedMotion() ? " reduce-motion" : "") + '"><div class="rope"><div class="page">' + CORNERS + inner + "</div></div></div>";
+  }
 
   function draw() {
+    if (prologue) return drawPrologue();
     if (!state && creating) return drawCreator();
     if (!state) return drawTitle();
-    root.innerHTML =
-      '<div class="game">' + topBar() +
-      '<div class="body"><aside class="sheet">' + captainSheet() + "</aside>" +
-      '<main class="stage">' + (state.current.screen === "hub" ? hubPanel() : state.current.screen === "node" ? nodePanel() : state.current.screen === "minigame" ? minigamePanel() : scenePanel()) + logPanel() + "</main></div></div>" +
-      popupHtml();
+    liveTotals = [];
+    var screen = state.current.screen;
+    var content = screen === "hub" ? hubPanel() : screen === "node" ? nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
+    root.innerHTML = frame(topBar() + phoneStrip() +
+      '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
+      popupHtml() + menuHtml();
     wire();
   }
 
+  // ---- Title screen (§41.2) ----
+
   function drawTitle() {
-    var hasSave = !!PC.state.loadFromBrowser();
-    root.innerHTML =
-      '<div class="title-screen">' +
-      "<h1>Pirate Chronicle</h1>" +
-      '<p class="sub">Prototype · Milestone 4 · the minigames</p>' +
-      '<div class="title-buttons">' +
-      (hasSave ? '<button data-act="continue" class="primary">Continue</button>' : "") +
-      '<button data-act="new"' + (hasSave ? "" : ' class="primary"') + ">New game</button>" +
-      '<button data-act="import">Load a save file</button>' +
-      "</div>" +
-      '<p class="note">Make your captain and sail into Ocracoke: run the sandbar, meet the Beach Captain, take Bobby Rats\'s job and grant a dying pirate\'s wish. Then hire hands and officers, hear the rumors, repair the sloop and sign the Articles. Dive the wrecks, drink a pirate under the table and play Liar\'s Dice. The prize hunt comes next.</p>' +
-      '<p class="note"><button class="link" data-act="quickstart">Quick start with the test captain</button></p>' +
-      "</div>";
+    liveTotals = [];
+    var save = PC.state.loadFromBrowser();
+    var cont = "";
+    if (save) {
+      var c = save.captain, pic = PC.creator.captainPortrait(c);
+      cont = '<button class="contcard" data-act="continue">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : sil(60, 90)) +
+        "<div><b>Continue</b><span>" + esc((c.first + " " + c.last).trim()) + " · <i>" + esc(save.ship.name) + "</i></span>" +
+        "<span>" + esc(PC.state.seasonName(save)) + " " + save.time.year + "</span></div></button>";
+    }
+    root.innerHTML = frame('<div class="title-screen"><h1>Pirate Chronicle</h1><span class="wt">(working title)</span>' + DIVIDER +
+      '<div class="title-buttons">' + cont +
+      '<button data-act="new" class="' + (save ? "secondary" : "primary") + '">New game</button>' +
+      '<button data-act="import" class="secondary">Load a save file</button>' +
+      '<button data-act="openmenu" data-menu="settings" class="secondary">Settings</button>' +
+      (settings.dev ? '<button data-act="quickask" class="secondary">Developer: quick start with the test captain</button>' : "") +
+      '</div><p class="version">' + esc(BUILD) + "</p></div>") + menuHtml();
     wire();
+  }
+
+  // ---- The top bar (§38.5, §41.12) ----
+
+  function apPips(preview) {
+    var out = "";
+    for (var i = 0; i < state.ap.max; i++) out += '<i class="pip' + (i < state.ap.left ? " on" : "") + '" data-pip="' + i + '"></i>';
+    return out + '<span class="count">' + state.ap.left + " of " + plural(state.ap.max, "action") + "</span>";
+  }
+
+  // The letter the captain sails under, with the Saved stamp beside it.
+  function seal() {
+    var wax = '<svg class="wax" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="14" fill="rgba(122,36,22,.12)" stroke="#7a2416" stroke-width="1.2" stroke-dasharray="2 2"/><circle cx="17" cy="17" r="9" fill="none" stroke="#7a2416" stroke-width=".8"/><path d="M12 17h10M17 12v10" stroke="#7a2416" stroke-width=".8"/></svg>';
+    return '<span class="seal" title="No letter of marque: you sail under no flag but your own.">' + wax + '<span class="letter">No letter</span><span class="stamp">Saved</span></span>';
   }
 
   function topBar() {
-    return '<header class="topbar">' +
-      '<span class="brand">Pirate Chronicle</span>' +
+    var b = function (k, t, m) { return '<button class="menubtn' + (menu === m ? " on" : "") + '" data-act="openmenu" data-menu="' + m + '">' + ic(k) + t + "</button>"; };
+    return '<header class="topbar"><div><span class="brand">Pirate Chronicle</span><span class="wt">(working title)</span></div>' +
       '<span class="when">' + esc(PC.state.seasonName(state)) + " " + state.time.year + "</span>" +
-      '<span class="ap" title="Actions left this season">' + apPips() + "</span>" +
-      '<span class="spacer"></span>' +
-      '<button data-act="export" title="Download your save as a file">Save file</button>' +
-      '<button data-act="import" title="Load a save file">Load file</button>' +
-      '<button data-act="dev">Developer</button>' +
-      '<button data-act="quit">Title</button>' +
-      "</header>";
+      '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
+      '<span class="grow"></span>' + seal() +
+      '<div class="line2">' + b("menu", "Menu", "menu") + b("journal", "Journal", "journal") + b("rumor", "Rumors", "rumors") + b("captain", "Captain", "captain") + b("notes", "Notes", "notes") + "</div></header>";
   }
 
-  function apPips() {
-    var out = "";
-    for (var i = 0; i < state.ap.max; i++) out += '<i class="' + (i < state.ap.left ? "on" : "off") + '"></i>';
-    return out + ' <small>' + state.ap.left + "/" + state.ap.max + "</small>";
+  // ---- The captain strip (§38.5, §41.12) ----
+
+  function lrow(label, value) { return "<tr><th>" + esc(label) + "</th><td>" + value + "</td></tr>"; }
+
+  function aboard() { return (state.officers || []).filter(function (o) { return !o.gone; }); }
+
+  function officerRole(o) {
+    return [o.mentor ? "Mentor" : null, o.quartermaster ? "Quartermaster" : null].filter(Boolean).join(" · ");
   }
 
-  function row(label, value) { return "<tr><th>" + esc(label) + "</th><td>" + value + "</td></tr>"; }
+  function relWord(n) { return '<span class="rel rel-' + esc(n) + '">' + esc(n) + "</span>"; }
 
-  function captainSheet() {
-    var c = state.captain;
-    var stats = PC.checks.STATS.map(function (s) {
-      return '<span class="stat"><b>' + c.stats[s] + "</b>" + esc(s) + "</span>";
-    }).join("");
-    var training = Object.keys(c.training || {}).map(function (t) {
-      return esc(t) + " +" + c.training[t];
-    }).join(", ") || "None";
-    var m = state.meters;
+  function strip() {
+    var c = state.captain, sh = state.ship;
     var pic = PC.creator.captainPortrait(c);
-    var mentor = (state.officers || []).filter(function (o) { return o.mentor && !o.gone; })[0];
-    return (pic ? '<img class="sheet-portrait" src="' + assetUrl(pic) + '" alt="Portrait of ' + esc(c.first) + '">' : "") +
-      '<h2>' + esc((c.first + " " + c.last).trim()) + "</h2>" +
-      '<p class="muted">Age ' + c.age + " · Ash-Born of " + esc(c.homeCity) + (c.profession ? " · once " + esc(aOrAn(c.profession.toLowerCase())) : "") + "</p>" +
-      '<div class="stats">' + stats + "</div>" +
-      '<p class="small"><b>Training:</b> ' + training + "</p>" +
-      '<p class="small"><b>Tags:</b> ' + esc((c.tags || []).join(", ") || "None") + "</p>" +
-      '<p class="small"><b>Items:</b> ' + esc((c.items || []).join(", ") || "None") + "</p>" +
-      '<table class="ledger">' +
-      row("Crew gold", state.money.crew) +
-      row("Your purse", state.money.purse) +
-      row("Provisions", state.provisions + " lots") +
-      (state.cargo ? row("Hold", PC.crew.slotsUsed(state) + " / " + state.ship.cargo + " slots" + (PC.crew.treasureUnits(state) ? " · " + PC.crew.treasureUnits(state) + " treasure" : "")) : "") +
-      "</table>" +
-      (PC.data.shipArt(state.ship.type) ? '<img class="sheet-ship" src="' + assetUrl(PC.data.shipArt(state.ship.type)) + '" alt="Your ' + esc(state.ship.type.toLowerCase()) + '">' : "") +
-      '<table class="ledger">' +
-      row(state.ship.type, "<i>" + esc(state.ship.name) + "</i>") +
-      row("Hull", state.ship.hull + " / " + state.ship.hullMax) +
-      row("Guns", state.ship.guns + " / " + state.ship.gunsMax) +
-      row("Crew", state.crew.count + " hands") +
-      row("Morale", state.crew.morale + (PC.crew ? " · " + PC.crew.band(state.crew.morale) : "")) +
-      (state.cargo ? row("Crew Rating", PC.crew.crewRating(state)) : "") +
-      row("Dread", m.dread) +
-      row("Standing", "Frisia " + m.standing.frisia + " · Avalon " + m.standing.avalon + " · Pirates " + m.standing.pirates) +
-      row("Heat", "Frisia " + m.heat.frisia + " · Avalon " + m.heat.avalon) +
-      "</table>" +
-      (mentor ? mentorCard(mentor) : "");
+    var offs = aboard();
+    return (pic ? '<img class="portrait" src="' + assetUrl(pic) + '" alt="Portrait of ' + esc(c.first) + '">' : "") +
+      '<div class="xpline" aria-hidden="true"></div>' +
+      '<p class="capname">' + esc((c.first + " " + c.last).trim()) + '</p><p class="muted" style="margin:3px 0 0;font-size:17.5px;font-style:italic">Age ' + c.age + "</p>" +
+      '<table class="ledger">' + lrow("Your purse", gold(state.money.purse)) + lrow("Crew gold", gold(state.money.crew)) +
+      lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
+      lrow("Hull", sh.hull + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
+      lrow("Crew", plural(state.crew.count, "hand")) +
+      lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") + "</table>" +
+      '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
+      meters(false) +
+      (offs.length ? '<div class="h4">Officers</div>' + offs.map(function (o) {
+        return '<button class="off" data-act="openmenu" data-menu="officer:' + esc(o.id) + '">' + officerFace(o, 44, 66) +
+          "<div><b>" + esc((o.first + " " + (o.last || "")).trim()) + "</b><span>" + esc(o.type + (officerRole(o) ? " · " + officerRole(o) : "")) + "</span>" +
+          relWord(PC.npcs.rungName(o.rung)) + "</div></button>";
+      }).join("") : "");
   }
 
-  var RUNGS = { "-3": "Enemy", "-2": "Rival", "-1": "Wary", "0": "Neutral", "1": "Friendly", "2": "Friend", "3": "Confidant" };
-
-  function mentorCard(o) {
-    var pic = PC.creator.officerPortrait(o);
-    return '<div class="officer-card">' +
-      (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
-      "<div><b>" + esc((o.first + " " + o.last).trim()) + "</b><br>" +
-      '<span class="small">' + esc(o.type) + (o.mentor ? " · your mentor" : o.named ? " · Named officer" : "") + (o.quartermaster ? " · Quartermaster" : "") + "</span><br>" +
-      '<span class="small muted">' + esc([o.voice, o.secondary, o.third, o.mentor ? "Mentor" : o.unique && o.unique !== o.voice ? o.unique : null].filter(Boolean).join(", ")) + " · " + esc(RUNGS[String(o.rung)] || "") + "</span></div></div>";
+  function phoneStrip() {
+    var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
+    return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
+      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse " + gold(state.money.purse) + " · Crew " + gold(state.money.crew) +
+      "<br>Hull " + sh.hull + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + " · Morale " + state.crew.morale + '</span><span class="go">›</span></button>' +
+      (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
+        return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
+      }).join("") + '<span class="note">Officers · tap for cards</span></div>' : "");
   }
 
-  function checkLine(chk) {
-    if (!chk) return "";
-    var parts = chk.parts.map(function (p) {
-      return "<li><span>" + esc(p.label) + "</span><b>" + signed(p.value) + "</b></li>";
-    }).join("");
-    var capNote = chk.modsCapped ? '<li class="muted">Traits and tags are capped at ±3.</li>' : "";
-    var clampNote = chk.rawEdge !== chk.edge ? '<li class="muted">Edge is clamped to −4…+6.</li>' : "";
-    return '<details class="check"><summary>' +
-      "<span class=\"ctype\">" + esc(chk.type) + "</span> · <span class=\"tier tier-" + chk.tier.replace(/\s/g, "") + "\">" + esc(chk.tier) + "</span>" +
-      ' <span class="odds">' + pct(chk.odds.partialOrBetter) + " success · " + pct(chk.odds.clean) + " clean</span>" +
-      "</summary><ul>" + parts + '<li class="total"><span>Edge</span><b>' + signed(chk.edge) + "</b></li>" + capNote + clampNote + "</ul></details>";
+  function tabBar() {
+    var atNode = state.current.screen === "node";
+    var b = function (k, t, a, extra) { return '<button data-act="' + a + '"' + (extra || "") + ">" + ic(k) + t + "</button>"; };
+    return '<nav class="tabbar">' + b("journal", "Journal", "openmenu", ' data-menu="journal"') + b("rumor", "Rumors", "openmenu", ' data-menu="rumors"') +
+      b("captain", "Captain", "openmenu", ' data-menu="captain"') + b("ship", "Ship", "goplace", ' data-place="ship"' + (atNode ? "" : " disabled")) + b("menu", "Menu", "openmenu", ' data-menu="menu"') + "</nav>";
   }
 
-  function costLine(cost) {
-    if (!cost || !cost.gold) return "";
-    return '<span class="cost">Costs ' + cost.gold + " gold from " + (cost.pot === "purse" ? "your purse" : "crew gold") + "</span>";
+  // ---- Choices (§38.6, §41.1) -------------------------------------------------
+  // One row for every kind of option: scene choices, node services and the
+  // minigames. o: { act, attrs, label, check, meta, lock, ap, opener, done, html }
+
+  function oddsBox(chk) {
+    return '<div class="odds" hidden><div class="r"><span class="sc">' + esc(chk.type) + "</span><span>" + pct(chk.odds.partialOrBetter) + " success · " + pct(chk.odds.clean) + " clean</span></div>" +
+      chk.parts.map(function (p) { return '<div class="r muted"><span>' + esc(p.label) + "</span><span>" + signed(p.value) + "</span></div>"; }).join("") +
+      (chk.modsCapped ? '<div class="r muted"><span>Traits and tags are capped at ±3.</span><span></span></div>' : "") +
+      (chk.rawEdge !== chk.edge ? '<div class="r muted"><span>Edge is clamped to −4…+6.</span><span></span></div>' : "") +
+      '<div class="r tot"><span>Edge</span><span>' + signed(chk.edge) + "</span></div></div>";
+  }
+
+  function manicule(op) {
+    if (!op) return "";
+    var title = op.kind === "flaw" ? "Your " + op.name + " streak" : "Your " + op.name;
+    return '<span class="manicule ' + (op.kind === "flaw" ? "flaw" : "trait") + '" title="' + esc(title) + '" aria-label="' + esc(title) + '">☞</span> ';
+  }
+
+  function opt(o) {
+    var locked = !!o.lock;
+    var check = o.check && !locked ? o.check : null;
+    return '<li class="choice' + (locked ? " locked" : "") + (o.done ? " done" : "") + '"><div class="row">' +
+      '<button class="pick" data-act="' + o.act + '" ' + (o.attrs || "") + (o.ap ? ' data-cost-ap="' + o.ap + '"' : "") + (locked ? " disabled" : "") + ">" +
+      "<span>" + manicule(o.opener) + (o.html || inline(o.label)) + "</span></button>" +
+      (check ? '<button class="oddsbtn ' + (TIER_CLASS[check.tier] || "t-mid") + '" data-act="toggleodds" title="Show the odds"><span>' + tierWord(check.tier) + CARET + "</span></button>" : "") +
+      "</div>" + (o.meta ? '<div class="meta">' + o.meta + "</div>" : "") + (locked ? '<div class="meta lock">' + esc(o.lock) + "</div>" : "") +
+      (check ? oddsBox(check) : "") + "</li>";
+  }
+  function opts(list) { return '<ol class="choices">' + list.filter(Boolean).join("") + "</ol>"; }
+  function apText(n) { return n ? "(" + plural(n, "action") + ")" : "No action"; }
+
+  // ---- Art slots (§38.3) ----
+
+  function banner(label) {
+    return '<div class="banner"><p>Woodcut banner · ' + esc(label) + "<small>3 : 1 · art spec 1800 × 600</small></p></div>";
+  }
+  function plate(label) {
+    return '<div class="plate"><div class="art"><p>Color plate · ' + esc(label) + '<br><small>replaces the banner for this scene · 3 : 2 · art spec 1500 × 1000</small></p></div></div>';
+  }
+  // A Named NPC's portrait frame, unnamed until met (§41.1).
+  function castFrame(id) {
+    if (!id || !(id in (PC.data.npcPortraits || {}))) return "";
+    var n = PC.npcs.get(state, id);
+    if (!n) return "";
+    var known = PC.npcs.known(state, id);
+    var name = known ? n.full || (n.first + " " + n.last) : (n.label ? titleCase(n.label.replace(/^the /, "")) : "A stranger");
+    var art = PC.data.npcPortraits[id];
+    return '<div class="castframe">' + (art ? '<img class="frame" src="' + assetUrl(art) + '" alt="">' : '<div class="frame">Portrait<br>' + esc(name) + "<br><small>2 : 3 · 640 × 960</small></div>") +
+      '<div class="cap">' + esc(known ? name : "") + "</div></div>";
+  }
+
+  // ---- Scenes ---------------------------------------------------------------
+
+  function placeInfo(key) {
+    var nd = state.location ? N().nodeData(N().here(state)) : null;
+    var pl = nd && nd.present ? nd.present.places[key] : null;
+    return { node: nd ? nd.name : "", heading: pl ? pl.heading : titleCase(key || ""), banner: pl ? pl.banner : key };
+  }
+
+  // The heading names the place until the person is met (§38.5, §41.1).
+  function sceneHead(v) {
+    var meta = PC.scenes.sceneMeta(v.id) || {};
+    var pl = placeInfo(meta.place);
+    var who = meta.person && PC.npcs.known(state, meta.person) ? PC.npcs.get(state, meta.person) : null;
+    var heading = meta.heading || (who ? (who.full || who.first + " " + who.last) : meta.place ? pl.heading : v.title);
+    var s = PC.scenes.sceneById(v.id);
+    var line = pl.node ? pl.node + " · " + pl.heading : v.where;
+    return { line: line, heading: heading, banner: meta.plate && v.phase === "choosing" ? null : (meta.place ? pl.banner : v.where), plate: meta.plate || null,
+      quest: meta.quest || null, ap: s.ap || 0, person: meta.person || null };
   }
 
   function scenePanel() {
     var v = PC.scenes.viewScene(state);
-    var html = '<section class="scene">' +
-      '<div class="where">' + esc(v.where) + "</div>" +
-      (v.title ? "<h2>" + esc(v.title) + "</h2>" : "") +
-      '<div class="setup">' + prose(v.setup) + "</div>";
+    var h = sceneHead(v);
+    var html = '<div class="where">' + esc(h.line) + "</div>" + (h.plate ? plate(h.plate) : banner(h.banner)) +
+      (h.quest ? '<div class="ribbon">' + esc(h.quest) + (h.ap ? '<span class="apnote">(' + plural(h.ap, "action") + ")</span>" : "") + "</div>" : "") +
+      '<h2 class="title">' + esc(h.heading) + "</h2>";
+    var body = "";
     if (v.phase === "choosing") {
-      html += '<ol class="choices">' + v.choices.map(function (c) {
-        var locked = c.status === "locked";
-        return '<li class="' + (locked ? "locked" : "") + '">' +
-          '<button data-act="choose" data-i="' + c.index + '"' + (locked ? " disabled" : "") + ">" + esc(c.label) + "</button>" +
-          (locked ? '<span class="lock">🔒 ' + esc(c.reason) + "</span>" : "") +
-          costLine(c.cost) + (locked ? "" : checkLine(c.check)) +
-          "</li>";
-      }).join("") + "</ol>";
+      var lead = state.current.lead;
+      if (lead) body += resultBits(lead, true);
+      var fresh = state.current.again == null && !lead;
+      body += '<div class="prose' + (fresh ? " dropcap" : "") + '">' + prose(v.setup) + "</div>" + DIVIDER;
+      body += opts(v.choices.map(function (c) {
+        return opt({ act: "choose", attrs: 'data-i="' + c.index + '"', label: c.label, check: c.check, lock: c.status === "locked" ? c.reason : null,
+          meta: c.cost && c.cost.gold ? "Costs " + gold(c.cost.gold) + " gold from " + (c.cost.pot === "purse" ? "your purse" : "crew gold") : null, opener: c.opener });
+      }));
     } else {
-      html += resultPanel(v.result);
+      body += resultPanel(v.result);
     }
-    return html + "</section>";
+    return '<div class="scene-cols"><div class="scene-main">' + html + body + "</div>" + castFrame(h.person) + "</div>";
   }
-
-  var OUTCOME_LABEL = { clean: "Clean success", partial: "Partial success", setback: "Setback", result: "" };
 
   function diceLine(roll) {
     if (!roll || !state.settings.showDice) return "";
     return '<div class="dice">Dice ' + roll.dice[0] + " + " + roll.dice[1] + ", edge " + signed(roll.edge) + " = " + roll.total + "</div>";
   }
 
-  function resultPanel(r) {
-    var html = '<div class="result">' +
-      '<p class="you-chose">' + esc(r.choiceLabel) + "</p>";
-    if (r.firstRoll) {
-      html += '<p class="muted small">First roll: ' + OUTCOME_LABEL[r.firstRoll.outcome] + ". Rerolled with " + esc(r.firstRoll.by) + ".</p>";
-    }
-    if (OUTCOME_LABEL[r.outcome]) html += '<div class="badge badge-' + r.outcome + '">' + OUTCOME_LABEL[r.outcome] + "</div>";
-    html += diceLine(r.roll) + prose(r.text);
-    var eff = r.effects.filter(Boolean);
-    if (eff.length) html += '<ul class="effects">' + eff.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>";
-    html += '<div class="actions">';
-    if (r.reroll) html += '<button data-act="reroll">Reroll (' + esc(r.reroll.name) + ")</button>";
-    if (r.needsPot) {
-      html += '<button data-act="commit" data-pot="purse" class="primary">Into your purse</button>' +
-              '<button data-act="commit" data-pot="crew" class="primary">Share it with the crew</button>';
-    } else {
-      html += '<button data-act="commit" class="primary">Continue</button>';
-    }
-    return html + "</div></div>";
+  // Officer approval: small faces with an up or down mark (§38.6), read
+  // from the choice's approval tags against each officer's likes.
+  function approvalChip(tags) {
+    if (!tags || !tags.length) return null;
+    var faces = aboard().map(function (o) {
+      var lk = PC.officers.likesOf(o), up = 0;
+      tags.forEach(function (t) { if (lk.likes.indexOf(t) >= 0) up++; if (lk.dislikes.indexOf(t) >= 0) up--; });
+      if (!up) return "";
+      return '<span class="appr" title="' + esc(o.first + (up > 0 ? " approves" : " disapproves")) + '">' + officerFace(o, 22, 32) +
+        '<span style="color:' + (up > 0 ? INK.good : INK.bad) + '">' + ic(up > 0 ? "up" : "down", "mark", 2) + "</span></span>";
+    }).filter(Boolean);
+    return faces.length ? { icon: "officer", ink: "good", html: faces.join(" ") + " Officers" } : null;
   }
 
+  function resultBits(r, compact) {
+    var html = '<p class="you-chose">' + inline(r.choiceLabel || r.label) + "</p>";
+    if (r.firstRoll) html += '<p class="note">First roll: ' + OUTCOME[r.firstRoll.outcome][0] + ". Rerolled with " + esc(r.firstRoll.by) + ".</p>";
+    html += badge(r.outcome) + diceLine(r.roll);
+    if (r.text) html += '<div class="prose">' + prose(r.text) + "</div>";
+    var list = (r.chips || []).slice();
+    var ap = approvalChip(r.approval);
+    if (ap) list.push(ap);
+    if (list.length) html += (compact ? "" : '<div class="h4" style="max-width:680px">What came of it</div>') + chips(list);
+    return html + (compact ? DIVIDER : "");
+  }
+
+  function resultPanel(r) {
+    var html = resultBits(r, false) + '<div class="actions">';
+    if (r.reroll) html += '<button class="secondary" data-act="reroll">Reroll (' + esc(r.reroll.name) + ")</button>";
+    if (r.needsPot) {
+      html += '</div><p style="font-size:20px;margin:16px 0 10px">Where does the ' + gold(r.potGold) + ' gold go?</p><div class="actions">' +
+        '<button data-act="commit" data-pot="purse" data-top="1" class="primary">Into your purse · ' + gold(r.potGold) + "</button>" +
+        '<button data-act="commit" data-pot="crew" data-top="1" class="secondary">Share it with the crew · ' + gold(r.potGold) + "</button>";
+    } else {
+      html += '<button data-act="commit" data-top="1" class="primary">Continue</button>';
+    }
+    return html + "</div>";
+  }
+
+  // The engine's old test harbor (reachable from Developer only, §41.4).
   function hubPanel() {
     var h = PC.scenes.viewHub(state);
-    return '<section class="scene hub">' +
-      "<h2>" + esc(h.title) + "</h2>" + prose(h.text) +
-      '<ol class="choices">' + h.entries.map(function (en) {
-        return "<li" + (en.ok ? "" : ' class="locked"') + '><button data-act="enter" data-scene="' + esc(en.scene) + '"' + (en.ok ? "" : " disabled") + ">" +
-          esc(en.label) + (en.ap ? " <small>(" + en.ap + " action" + (en.ap > 1 ? "s" : "") + ")</small>" : "") + "</button>" +
-          (en.ok ? "" : '<span class="lock">' + esc(en.why) + "</span>") + "</li>";
-      }).join("") + "</ol>" +
-      '<div class="actions"><button data-act="endseason">End the season</button></div>' +
-      "</section>";
+    return '<h2 class="title">' + esc(h.title) + '</h2><div class="prose">' + prose(h.text) + "</div>" +
+      opts(h.entries.map(function (en) {
+        return opt({ act: "enter", attrs: 'data-scene="' + esc(en.scene) + '"', label: en.label, ap: en.ap, meta: en.ap ? apText(en.ap) : null, lock: en.ok ? null : en.why });
+      })) + '<div class="actions"><button class="secondary" data-act="endseason">End the season</button></div>';
   }
 
-  function logPanel() {
-    var lines = state.log.slice(-30).reverse();
-    return '<details class="log"><summary>Ship\'s log</summary>' +
-      (lines.length ? "<ul>" + lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul>" : '<p class="muted">Nothing yet.</p>') +
-      "</details>";
-  }
-
-  // ---- The node (§17): locations, services and the Ship layer ------------
+  // ---- The node (§17, §41.4-§41.11) ----------------------------------------
   // The rules are in js/node.js, js/crew.js and js/articles.js; this only
-  // draws them. Numbers typed into the boxes are read when a button is
+  // draws them. Numbers come from steppers (§41.1), read when a button is
   // pressed (data-for names the box).
 
   function N() { return PC.node; }
-  function gold(n) { return (Math.round(n * 100) / 100).toLocaleString("en-US"); }
-  function apLabel(n) { return n ? n + " action" + (n > 1 ? "s" : "") : "no action"; }
 
-  // How many of something crew gold can pay for (the boxes cap here, so the
-  // player never has to do the sum; ruled November 14).
+  // How many of something crew gold can pay for (the steppers cap here, so
+  // the player never has to do the sum; ruled November 14).
   function afford(each) { return each > 0 ? Math.floor(state.money.crew / each + 1e-9) : Infinity; }
 
-  function qtyBox(id, value, max) {
-    return '<input class="qty" type="number" inputmode="numeric" min="1"' + (max != null ? ' max="' + max + '"' : "") +
-      ' id="' + id + '" value="' + esc(value) + '">';
+  // A stepper (§41.1). Its running total lives in a total slot whose text
+  // is rebuilt from the boxes as the numbers move, without a redraw.
+  var liveTotals = [];
+  function qstep(id, value, max, min) {
+    min = min == null ? 1 : min;
+    value = Math.max(min, Math.min(max, value));
+    return '<span class="stepper"><button type="button" data-step="' + id + '" data-d="-1" aria-label="Fewer">−</button>' +
+      '<input id="' + id + '" type="number" inputmode="numeric" min="' + min + '" max="' + max + '" value="' + value + '">' +
+      '<button type="button" data-step="' + id + '" data-d="1" aria-label="More">+</button></span>';
   }
-
-  function sayBox() {
-    var s = state.location.say;
-    if (!s) return "";
-    return '<div class="say">' + (s.who ? '<span class="who">' + esc(s.who) + "</span> " : "") + esc(PC.text.render(s.line, state)) +
-      (s.heard && s.heard.length ? '<ul class="heard">' + s.heard.map(function (h) { return "<li>" + prose(h).replace(/^<p>|<\/p>$/g, "") + "</li>"; }).join("") + "</ul>" : "") +
-      (s.note ? '<span class="note">' + esc(s.note) + "</span>" : "") + "</div>";
+  function totalSlot(fn, cls) {
+    var id = "tot" + liveTotals.length;
+    liveTotals.push({ id: id, fn: fn });
+    return '<span class="' + (cls == null ? "total" : cls) + '" id="' + id + '"></span>';
   }
-
-  function say(who, line, note, heard) { state.location.say = { who: who, line: line || "", note: note || null, heard: heard || null }; }
+  function val(id) { var el = document.getElementById(id); return el ? Math.max(0, Math.floor(Number(el.value)) || 0) : 0; }
+  function refreshTotals() {
+    liveTotals.forEach(function (t) { var el = document.getElementById(t.id); if (el) el.innerHTML = t.fn(); });
+  }
 
   function npcName(id) {
     var n = PC.npcs.get(state, id);
     return n ? ((n.title ? n.title + " " : "") + n.full) : id;
   }
 
-  function npcTag(id) {
+  // A person's name card (§41.5): name, role, relationship word, known traits.
+  function nameCard(id, roleWord) {
     var n = PC.npcs.get(state, id);
     if (!n) return "";
     var known = (state.npcs[n.id] || {}).knownTraits || [];
-    return '<span class="npc-tag">' + esc(npcName(id)) + (n.label ? ', <i>' + esc(n.label) + "</i>" : "") +
-      ' <span class="rung rung-' + esc(n.rungName) + '">' + esc(n.rungName) + "</span>" +
-      (known.length ? ' <span class="small muted">(' + esc(known.join(", ")) + ")</span>" : "") + "</span>";
+    return '<div class="namecard"><b>' + esc(npcName(id)) + "</b>" + (roleWord ? '<span class="role">' + esc(roleWord) + "</span>" : "") +
+      relWord(n.rungName) + (known.length ? '<span class="traits">' + esc(known.join(", ")) + "</span>" : "") + "</div>";
   }
 
-  function comingSoon(label, milestone, extraLock) {
-    return '<li class="locked"><button disabled>' + esc(label) + "</button>" +
-      '<span class="lock">' + esc(extraLock || "Arrives in Milestone " + milestone) + "</span></li>";
+  // What was last said, under the person it was said to (§41.1).
+  function sayFor(who) {
+    var s = state.location.say;
+    if (!s || (s.to || null) !== (who || null)) return "";
+    var html = '<div class="say">';
+    if (s.who) html += '<div class="who">' + esc(s.who) + "</div>";
+    if (s.ask) html += '<p style="font-style:normal;margin:0 0 6px">You: “' + esc(s.ask) + '”</p>';
+    if (s.line) html += inline(PC.text.render(s.line, state));
+    if (s.heard && s.heard.length) html += '<ul class="heard">' + s.heard.map(function (h) { return "<li>" + inline(h) + "</li>"; }).join("") + "</ul>";
+    if (s.heardNote) html += '<span class="snote">' + esc(s.heardNote) + "</span>";
+    if (s.note) html += '<span class="snote">' + esc(s.note) + "</span>";
+    return html + "</div>" + (s.chips && s.chips.length ? chips(s.chips) : "");
+  }
+
+  // to: the person the exchange belongs under (an NPC id), or null for the
+  // place itself. who: the speaker's label.
+  function say(to, who, line, note, heard, extra) {
+    state.location.say = { to: to || null, who: who || null, line: line || "", note: note || null, heard: heard || null };
+    if (extra) Object.keys(extra).forEach(function (k) { state.location.say[k] = extra[k]; });
+  }
+
+  function nodeHead(key) {
+    var pl = placeInfo(key);
+    return '<div class="where">' + esc(pl.node + (key === "town" ? "" : " · " + pl.heading)) + "</div>" + banner(pl.banner) +
+      '<h2 class="title">' + esc(pl.heading) + "</h2>";
+  }
+
+  var CONTROL = { "No control": ["No Control", "none"], "Pirate control": ["Pirate Control", "pirates"], "Frisian control": ["Frisian Control", "frisia"], "Avalon control": ["Avalon Control", "avalon"] };
+  function flagSvg(ink) {
+    return '<svg class="flag" viewBox="0 0 22 15" aria-hidden="true"><rect width="22" height="15" fill="' + (ink === "none" ? "#efe3c6" : INK[ink]) + '"/>' +
+      (ink === "none" ? '<path d="M0 0L22 15M22 0L0 15" stroke="#5e4528" stroke-width=".8"/>' : "") + "</svg>";
   }
 
   function nodePanel() {
     var nd = N().nodeData(N().here(state));
     var place = state.location.place;
-    var html = '<section class="scene node">';
-    if (!place) {
-      html += '<div class="where">' + esc(nd.control) + " · " + esc(nd.tier) + "</div><h2>" + esc(nd.name) + "</h2>" + prose(nd.blurb);
-      html += '<ol class="choices places">' + N().places(state).map(function (p) {
-        return "<li" + (p.locked ? ' class="locked"' : "") + '><button data-act="goplace" data-place="' + p.id + '"' + (p.locked ? " disabled" : "") + ">" + esc(p.name) + "</button>" +
-          (p.locked ? '<span class="lock">' + esc(p.why) + "</span>" : "") + "</li>";
-      }).join("") +
-        comingSoon("Hunt for Prizes", 5, state.articles ? null : "Sign the Articles first (Ship). The hunt arrives in Milestone 5") + "</ol>";
-      if (!state.ap.left) html += '<p class="notice">No actions left this season. The end-of-prototype screen comes in Milestone 6; the Developer panel can top up actions.</p>';
-    } else {
-      var loc = nd.locations[place];
-      html += '<div class="where">' + esc(nd.name) + '</div><h2>' + esc(loc.name) + "</h2>" +
-        '<p class="muted">' + esc(loc.blurb) + "</p>" + sayBox();
-      // A scene is waiting (Welcome to the Underworld after the first Tavern
-      // action): let the player read what was just said, then go on.
-      if ((state.location.queue || []).some(function (q) { return !state.seen[q]; })) {
-        return html + '<div class="actions"><button class="primary" data-act="nextqueued">Continue</button></div></section>';
-      }
-      html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu })[place]();
-      html += '<div class="actions"><button data-act="leaveplace">← Back to ' + esc(nd.name) + "</button></div>";
+    if (!place) return townPanel(nd);
+    var html = nodeHead(place);
+    var loc = nd.locations[place];
+    // A scene is waiting (Welcome to the Underworld after the first Tavern
+    // action): let the player read what was just said, then go on.
+    if ((state.location.queue || []).some(function (q) { return !state.seen[q]; })) {
+      return html + sayFor(state.location.say ? state.location.say.to : null) + '<div class="actions"><button class="primary" data-top="1" data-act="nextqueued">Continue</button></div>';
     }
-    return html + "</section>";
+    html += '<div class="prose dropcap">' + prose(loc.blurb) + "</div>";
+    var back = function (top) { return '<div class="actions"' + (top ? ' style="margin:0 0 6px"' : "") + '><button class="secondary" data-act="leaveplace">‹ Back to ' + esc(nd.name) + "</button></div>"; };
+    html = back(true) + html;
+    html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu })[place]();
+    return html + DIVIDER + back(false);
   }
 
-  // ---- Tavern ----
+  // The town screen (§41.4): the control line, then Town, Your ship, To sea.
+  function townPanel(nd) {
+    var c = CONTROL[nd.control] || [nd.control, "none"];
+    var pres = nd.present || { places: {} };
+    var html = '<div class="ctrl" style="color:' + INK[c[1]] + '">' + flagSvg(c[1]) + esc(c[0]) + (nd.freePort ? " · Free Port" : "") + " · " + esc(pres.prosperityWord || nd.tier) + "</div>" +
+      banner(pres.places.town ? pres.places.town.banner : nd.name) + '<h2 class="title">' + esc(nd.name) + '</h2><div class="prose dropcap">' + prose(nd.blurb) + "</div>";
+    var ps = N().places(state).filter(function (p) { return !p.hidden; });
+    var row = function (p) {
+      var pl = pres.places[p.id] || {};
+      var hint = pl.hint ? pl.hint + (p.id === "merchant" && N().fenceOpen(state) && pl.hintFence ? ", " + pl.hintFence : "") : null;
+      return opt({ act: "goplace", attrs: 'data-place="' + p.id + '"', label: pl.heading || p.name, meta: hint ? esc(hint) : null, lock: p.locked ? p.why : null });
+    };
+    html += '<div class="h4" style="max-width:680px">Town</div>' + opts(ps.filter(function (p) { return p.id !== "ship"; }).map(row));
+    html += '<div class="h4" style="max-width:680px">Your ship</div>' + opts(ps.filter(function (p) { return p.id === "ship"; }).map(row));
+    html += '<div class="h4" style="max-width:680px">To sea</div>' + opts([
+      opt({ act: "nop", label: "Hunt for Prizes", lock: !state.articles ? "Sign the Articles before you sail (The Ship)" : notInPrototype() }),
+      opt({ act: "nop", label: "Set Sail", meta: "The world map", lock: notInPrototype() }),
+    ]);
+    if (!state.ap.left) html += '<p class="notice" style="margin-top:16px">No actions left this season.</p>';
+    return html;
+  }
+  function notInPrototype() { return settings.dev ? "Not in the prototype (the hunt arrives in Milestone 5)" : "Not in the prototype"; }
+
+  // ---- Tavern (§41.5) ----
 
   function tavernMenu() {
     var id = N().here(state);
     var keeper = N().slotNpc(id, "keeper");
+    var L = N().nodeData(id).lines.keeper;
     var first = !state.flags[N().FLAGS.tavernDone];
-    var k = PC.npcs.get(state, keeper);
     var asked = PC.rumors.keeperAsked(state);
     var talk = PC.checks.assess(state, PC.rumors.talkCheck(state), { conditions: ["Harbor"] });
-    var html = '<h3>' + npcTag(keeper) + "</h3>" + '<ol class="choices">' +
-      "<li" + (asked ? ' class="locked"' : "") + '><button data-act="rumors"' + (asked ? " disabled" : "") + ">Ask " + esc(k.first) + " for rumors</button>" +
-      (asked ? '<span class="lock">Heard this season\'s rumors</span>' : '<span class="cost">No action. A clean Tavern Talk gets one more.</span>' + checkLine(talk)) + "</li>";
-    if (N().oneArmedHere(state)) {
-      html += '<li><button data-act="oneArmed">Talk to the one-armed pirate</button><span class="cost">He sits with his mates, drinking.</span></li>';
-    }
-    // Shore leave (§24.12)
-    [1, 2].forEach(function (ap) {
+    var html = '<div class="block">' + nameCard(keeper, "Tavern Keeper") + sayFor(keeper);
+    var list = [opt({ act: "rumors", label: "“" + L.askRumors + "”", check: asked ? null : talk, done: asked,
+      meta: asked ? "You've heard this season's rumors." : "No action. A clean Tavern Talk gets one more." })];
+    // The keeper's other questions (§38.11) arrive with the author's text.
+    (N().keeperQuestions ? N().keeperQuestions(state) : []).forEach(function (q) {
+      list.push(opt({ act: "keeperq", attrs: 'data-q="' + esc(q.id) + '"', label: "“" + q.label + "”", meta: "No action", done: q.asked }));
+    });
+    html += opts(list);
+    // Lodging (§24.12): Shore Leave and Long Shore Leave.
+    html += '<p class="note" style="margin:14px 0 6px">“' + esc(L.lodgingAsk) + '”</p>' + opts([1, 2].map(function (ap) {
       var c = N().lodgingCheck(state, ap);
       var gain = (ap === 2 ? 15 : 10) + (N().nodeData(id).freePort ? 5 : 0);
-      html += "<li" + (c.ok ? "" : ' class="locked"') + '><button data-act="lodging" data-ap="' + ap + '"' + (c.ok ? "" : " disabled") + ">" +
-        "Shore leave for " + apLabel(ap) + "</button>" +
-        '<span class="cost">' + gold(N().lodgingCost(state, ap)) + " crew gold · crew morale +" + gain + "</span>" +
-        (c.ok ? "" : '<span class="lock">' + esc(c.why) + "</span>") + "</li>";
-    });
-    // Gather Intelligence (§30.4)
-    var gi = N().tavernServiceCheck(state, 1);
-    html += "<li" + (gi.ok ? "" : ' class="locked"') + '><button data-act="gather"' + (gi.ok ? "" : " disabled") + ">Gather Intelligence <small>(1 action)</small></button>" +
-      '<span class="cost">Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.</span>' +
-      (gi.ok ? checkLine(PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] })) : '<span class="lock">' + esc(gi.why) + "</span>") + "</li>";
-    // The minigames (§18.3, §18.4): an action each.
-    var dk = PC.drinking.canDrink(state);
-    html += "<li" + (dk.ok ? "" : ' class="locked"') + '><button data-act="drink"' + (dk.ok ? "" : " disabled") + ">Drink with a pirate (Under the Table) <small>(1 action)</small></button>" +
-      '<span class="cost">Once a season. The loser pays the ' + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.</span>" +
-      (dk.ok ? "" : '<span class="lock">' + esc(dk.why) + "</span>") + "</li>";
-    var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
-    html += "<li" + (lp.ok ? "" : ' class="locked"') + '><button data-act="dice"' + (lp.ok ? "" : " disabled") + ">Liar's Dice <small>(1 action)</small></button>" +
-      '<span class="cost">Up to ' + PC.data.minigames.dice.GAMES_PER_SESSION + " games a sitting, " + st[0] + "-" + st[1] + " gold a game from your purse.</span>" +
-      (lp.ok ? "" : '<span class="lock">' + esc(lp.why) + "</span>") + "</li></ol>";
-    if (state.location.gatherPick) {
-      html += '<div class="svc"><h4>What do you want to hear about?</h4><div class="opts">' + PC.rumors.gatherTypes(state).map(function (t) {
-        return '<button data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
-      }).join(" ") + "</div></div>";
+      return opt({ act: "lodging", attrs: 'data-ap="' + ap + '"', label: (ap === 2 ? "Long Shore Leave " : "Shore Leave ") + apText(ap), ap: ap,
+        meta: gold(N().lodgingCost(state, ap)) + " crew gold · morale +" + gain, lock: c.ok ? null : c.why });
+    })) + "</div>";
+    if (first) {
+      html += '<p class="note" style="max-width:680px">This is your first visit to the Tavern. Ask ' + esc(PC.npcs.get(state, keeper).first) + " for rumors" +
+        (N().oneArmedHere(state) ? ", talk to the one-armed pirate" : "") + ", or leave; the rest opens once your first visit is done.</p>";
     }
-    html += officersBlock(first);
-    return html;
+    html += DIVIDER + '<div class="block"><div class="h4">Around the Tavern</div>' + sayFor("around");
+    var list2 = [];
+    if (N().oneArmedHere(state)) list2.push(opt({ act: "oneArmed", label: "Talk to the one-armed pirate", meta: "He sits with his mates, drinking." }));
+    var dk = PC.drinking.canDrink(state);
+    list2.push(opt({ act: "drink", label: "Under the Table " + apText(1), ap: 1, meta: "Drink with a pirate. Once a season; the loser pays the " + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.", lock: dk.ok ? null : dk.why }));
+    var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
+    list2.push(opt({ act: "dice", label: "Liar's Dice " + apText(1), ap: 1, meta: "Up to " + PC.data.minigames.dice.GAMES_PER_SESSION + " games a sitting, " + st[0] + "-" + st[1] + " gold a game from your purse.", lock: lp.ok ? null : lp.why }));
+    var gi = N().tavernServiceCheck(state, 1);
+    list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.",
+      check: gi.ok ? PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] }) : null, lock: gi.ok ? null : gi.why }));
+    html += opts(list2);
+    if (state.location.gatherPick) {
+      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
+        return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
+      }).join("") + "</div></div>";
+    }
+    return html + "</div>" + DIVIDER + officersBlock();
   }
 
   // Officer recruitment (§25.7): two seats a season.
-  function officersBlock(first) {
-    var html = '<div class="svc"><h4>Officers looking for a berth</h4>';
+  function officersBlock() {
+    var html = '<div class="block"><div class="h4">Officers for hire</div>' + sayFor("officers");
     var chk = N().tavernServiceCheck(state, 0);
-    if (!chk.ok) return html + '<p class="small muted">' + esc(chk.why) + ".</p></div>";
-    var ap = PC.officers.apNeeded(state);
-    html += '<p class="small">1,000 crew gold each' + (ap ? "; hiring takes an action (one action covers every hire this visit)" : "; this visit's action is already spent") + ".</p>";
+    if (!chk.ok) return html + '<p class="note">' + esc(chk.why) + ".</p></div>";
+    html += '<p class="note">Hiring takes 1 action, however many you hire this visit.' + (PC.officers.apNeeded(state) ? "" : " This visit's action is already spent.") + "</p>";
     PC.officers.candidates(state).forEach(function (c) {
       var held = PC.officers.holding(state, c.type);
       var hc = PC.officers.hireCheck(state, c);
-      html += '<div class="candidate"><p><b>' + esc(c.full || (c.first + " " + c.last)) + "</b>, " + c.age + " · " + esc(c.type) + (c.named ? " · Named officer" : "") + "</p>" +
-        prose(PC.officers.hiringText(state, c)) +
-        (held ? '<p class="small notice">Hiring ' + esc(c.first) + " replaces " + esc(held.first) + (held.mentor ? ", your mentor," : "") + " (your " + esc(held.type) + "), who is dismissed with " + PC.officers.dismissPay(state) + " crew gold.</p>" : "") +
-        '<div class="actions"><button data-act="hire" data-officer="' + esc(c.id) + '"' + (hc.ok ? "" : " disabled") + ">Hire " + esc(c.first) + "</button>" +
-        (hc.ok ? "" : '<span class="lock">' + esc(hc.why) + "</span>") + "</div></div>";
+      var art = c.named && PC.data.npcPortraits && (c.id in PC.data.npcPortraits) ? castFrame(c.id) : null;
+      html += '<div class="person" style="margin:14px 0">' + (art ? art.replace('class="castframe"', 'class="castframe" style="flex:0 0 72px"').replace(/width:150px/, "") : sil(72, 108)) +
+        '<div class="pmain"><div class="namecard"><b>' + esc(c.full || (c.first + " " + c.last)) + '</b><span class="role">' + esc(c.type) + ", " + c.age + "</span></div>" +
+        '<div class="prose" style="font-size:18.5px">' + prose(PC.officers.hiringText(state, c)) + "</div>" +
+        (held ? '<p class="note">Hiring ' + esc(c.first) + " replaces " + esc(held.first) + (held.mentor ? ", your mentor," : "") + " (your " + esc(held.type) + "), who is dismissed with " + PC.officers.dismissPay(state) + " crew gold.</p>" : "") +
+        '<div class="actions" style="margin-top:6px"><button class="primary" data-act="hireofficer" data-officer="' + esc(c.id) + '"' + (PC.officers.apNeeded(state) ? ' data-cost-ap="1"' : "") + (hc.ok ? "" : " disabled") + ">Hire " + esc(c.first) + " · " + gold(PC.officers.FEE) + " crew gold</button>" +
+        (hc.ok ? "" : '<span class="lock">' + esc(hc.why) + "</span>") + "</div></div></div>";
     });
     return html + "</div>";
   }
 
-  // ---- Docks ----
+  // ---- Docks (§41.8) ----
+
+  var TIER_TIP = {
+    Green: "New to the sea. Counts 0 toward the crew's Skill.",
+    Able: "A trained sailor. Counts 1 toward the crew's Skill.",
+    Seasoned: "Has weathered fights and storms. Counts 2 toward the crew's Skill.",
+    Veteran: "A hardened hand. Counts 3 toward the crew's Skill.",
+  };
+
+  function hullBar(sh, w) {
+    return '<span class="hbar" style="display:inline-block;width:' + (w || 120) + 'px;vertical-align:middle;margin:0 6px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></span>';
+  }
+
+  function shipLine() {
+    var sh = state.ship, art = PC.data.shipArt(sh.type);
+    return '<div class="person" style="align-items:center;margin:8px 0 12px">' + (art ? '<img src="' + assetUrl(art) + '" alt="" style="width:72px;height:80px;object-fit:cover;border:1px solid #6b5030">' : "") +
+      '<div class="pmain"><b class="gp" style="font-size:22px;font-weight:normal"><i>' + esc(sh.name) + "</i></b>, your " + esc(sh.type.toLowerCase()) +
+      '<br><span class="small">Hull ' + sh.hull + " of " + sh.hullMax + hullBar(sh) + " · " + sh.guns + " of " + sh.gunsMax + " guns · rigging " + (sh.rigging === "frayed" ? "Frayed" : "Sound") + "</span></div></div>";
+  }
+
+  function levelPips(u, cap) {
+    var out = "";
+    for (var i = 1; i <= 5; i++) {
+      out += '<i style="display:inline-block;width:13px;height:13px;border-radius:50%;margin-right:4px;border:1.5px solid #4a3418;' + (i <= u.level ? "background:#5e4528;" : "") + (i === cap ? "box-shadow:0 0 0 2px #c99f45;" : "") + '"' + (i === cap ? ' title="This yard tops out here"' : "") + "></i>";
+    }
+    return out;
+  }
 
   function docksMenu() {
     var id = N().here(state), sh = state.ship;
     var wright = N().slotNpc(id, "shipwright");
     var g = N().shipwrightGreeting(state);
-    var html = "<h3>" + npcTag(wright) + "</h3>";
-    if (!state.location.say) html += '<div class="say">' + esc(g.line) + "</div>";
+    var html = '<div class="block">' + nameCard(wright, "Shipwright");
+    html += state.location.say && state.location.say.to === wright ? sayFor(wright) : '<div class="say">' + inline(g.line) + "</div>";
     if (!g.refuse) {
+      html += shipLine();
       var missing = sh.hullMax - sh.hull;
-      html += '<div class="svc"><h4>Repairs</h4><p class="small">Hull ' + sh.hull + " / " + sh.hullMax +
-        (sh.rigging === "frayed" ? " · <b>frayed rigging</b> (Speed " + sh.speed + "; any repair fixes it)" : "") +
-        " · " + gold(N().repairPerHp(state)) + " gold a point. A repair of " + Math.ceil(0.25 * sh.hullMax) + " points or more takes an action.</p>";
+      var per = N().repairPerHp(state);
+      html += '<div class="svc"><h4>Repairs</h4>';
       if (missing > 0) {
-        var fix = Math.max(1, Math.min(missing, afford(N().repairPerHp(state))));
-        html += '<div class="buyrow">' + qtyBox("q-repair", fix, fix) +
-          '<button data-act="repair" data-for="q-repair">Repair</button>' +
-          '<button data-act="repair" data-all="1">Repair all: ' + gold(N().repairCost(state, missing)) + " gold" + (N().repairTakesAP(state, missing) ? ", 1 action" : "") + "</button></div>";
-      } else html += '<p class="small muted">Nothing to fix.</p>';
+        var fix = Math.max(1, Math.min(missing, afford(per)));
+        html += '<div class="buyrow">' + qstep("q-repair", fix, fix) + '<button class="secondary" data-act="repair" data-for="q-repair">Repair</button> ' +
+          totalSlot(function () { var n = val("q-repair"); return n + " points · " + gold(N().repairCost(state, n)) + " gold" + (N().repairTakesAP(state, n) ? " · 1 action" : ""); }) + "</div>" +
+          '<div class="actions" style="margin-top:8px"><button class="secondary" data-act="repair" data-all="1"' + (N().repairTakesAP(state, missing) ? ' data-cost-ap="1"' : "") + ">Repair all · " + gold(N().repairCost(state, missing)) + " gold" + (N().repairTakesAP(state, missing) ? " · 1 action" : "") + "</button></div>" +
+          '<p class="note">' + gold(per) + " gold a point. A repair of " + Math.ceil(0.25 * sh.hullMax) + " points or more takes an action." + (sh.rigging === "frayed" ? " Any repair fixes the frayed rigging." : "") + "</p>";
+      } else html += '<p class="note">Nothing to fix.</p>';
       html += "</div>";
-      html += '<div class="svc"><h4>Upgrades</h4><table class="grid"><tr><th>Track</th><th>Level</th><th>Next</th><th></th></tr>' +
-        ["hull", "rigging", "guns"].map(function (t) {
-          var u = N().upgradeInfo(state, t);
-          return "<tr><td>" + esc(u.name) + "</td><td>" + u.level + "</td><td>" + (u.locked ? '<span class="muted small">' + esc(u.locked) + "</span>" : gold(u.cost) + ' gold<br><span class="small muted">' + esc(u.effect) + "</span>") + "</td>" +
-            "<td>" + (u.locked ? "" : '<button data-act="upgrade" data-track="' + t + '">Buy level ' + u.next + "</button>") + "</td></tr>";
-        }).join("") + "</table></div>";
+      html += '<div class="svc"><h4>Upgrades</h4><div class="opts">' + ["hull", "rigging", "guns"].map(function (t) {
+        var u = N().upgradeInfo(state, t);
+        var cap = N().nodeData(id).yardMax;
+        return '<div class="opt" style="cursor:default"><b class="sc">' + esc(u.name) + "</b><span>" + levelPips(u, cap) + "</span>" +
+          (u.locked ? '<span class="small">' + esc(u.locked) + "</span>" : '<span class="small">Level ' + u.next + ": " + esc(u.effect) + '</span><button class="secondary" style="margin-top:6px" data-act="upgrade" data-track="' + t + '">Buy · ' + gold(u.cost) + " gold</button>") + "</div>";
+      }).join("") + "</div></div>";
       var room = sh.gunsMax - sh.guns;
       var gunsMax = Math.min(room, afford(N().gunPrice(state)));
-      html += '<div class="svc"><h4>Guns</h4><p class="small">' + sh.guns + " of " + sh.gunsMax + " mounted · " + gold(N().gunPrice(state)) + " gold a gun. Buy as many as you like, up to what you can pay for.</p>" +
-        (room <= 0 ? '<p class="small muted">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qtyBox("q-guns", 1, gunsMax) + '<button data-act="guns" data-for="q-guns">Buy guns</button></div>' : '<p class="small muted">You can\'t pay for a gun right now.</p>') +
-        "</div>";
+      html += '<div class="svc"><h4>Guns</h4><p class="small">' + sh.guns + " of " + sh.gunsMax + " guns · " + gold(N().gunPrice(state)) + " gold a gun.</p>" +
+        (room <= 0 ? '<p class="note">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qstep("q-guns", 1, gunsMax) + '<button class="secondary" data-act="guns" data-for="q-guns">Buy guns</button> ' +
+          totalSlot(function () { var n = val("q-guns"); return plural(n, "gun") + " · " + gold(n * N().gunPrice(state)) + " gold"; }) + "</div>" : '<p class="note">You can\'t pay for a gun right now.</p>') + "</div>";
     }
-    // Crew recruitment (§24.7)
+    html += "</div>" + DIVIDER;
+    // Hands on the Docks (§24.7, §41.8)
     var avail = N().poolAvailable(state);
     var berths = PC.crew.berths(state);
-    html += '<div class="svc"><h4>Hire hands</h4><p class="small">The ruined on the docks. ' + state.crew.count + " of " + sh.crewMax + " berths filled.</p>" +
-      '<table class="grid"><tr><th>Tier</th><th>Waiting</th><th>Each</th><th></th></tr>' +
-      PC.data.economy.TIER_ORDER.filter(function (t) { return avail[t] || (N().season(state).pool[t]); }).map(function (t) {
+    html += '<div class="block"><div class="h4">Hands on the Docks</div>' + sayFor("hands") + (N().docksRollBlock ? N().docksRollBlock(state) : "");
+    var tiers = PC.data.economy.TIER_ORDER.filter(function (t) { return avail[t] || (N().season(state).pool[t]); });
+    if (!tiers.length) html += '<p class="note">Nobody is looking for a berth.</p>';
+    else {
+      html += '<table class="grid"><tr><th>Hands</th><th>Waiting</th><th>Each</th><th>Sign</th></tr>' + tiers.map(function (t) {
         var max = Math.min(avail[t], berths, afford(N().signingCost(state, t)));
-        return "<tr><td>" + t + "</td><td>" + avail[t] + "</td><td>" + gold(N().signingCost(state, t)) + "</td><td>" +
-          (max > 0 ? '<div class="buyrow">' + qtyBox("q-hire-" + t, max, max) + '<button data-act="hire" data-tier="' + t + '" data-for="q-hire-' + t + '">Sign</button></div>' : '<span class="small muted">' + (!avail[t] ? "None left" : !berths ? "No berths" : "Not enough crew gold") + "</span>") +
-          "</td></tr>";
-      }).join("") + "</table></div>";
-    // Paying off hands
+        return '<tr><td><span title="' + esc(TIER_TIP[t] || "") + '" style="border-bottom:1px dotted">' + t + "</span></td><td>" + avail[t] + "</td><td>" + gold(N().signingCost(state, t)) + "</td><td>" +
+          (max > 0 ? qstep("q-hire-" + t, 0, max, 0) : '<span class="note">' + (!avail[t] ? "None left" : !berths ? "No berths" : "Not enough crew gold") + "</span>") + "</td></tr>";
+      }).join("") + "</table>";
+      html += '<div class="actions">' + '<button class="primary" data-act="signhands" data-tiers="' + tiers.join(",") + '">' +
+        totalSlot(function () {
+          var n = 0, cost = 0;
+          tiers.forEach(function (t) { var k = val("q-hire-" + t); n += k; cost += k * N().signingCost(state, t); });
+          return "Sign " + plural(n, "hand") + " · " + gold(cost) + " crew gold · " + (state.crew.count + n) + " of " + sh.crewMax + " berths";
+        }, "") + "</button></div>";
+    }
+    // Put hands ashore (§24.7)
     var each = PC.crew.payOffEach(state);
-    html += '<div class="svc"><h4>Pay off hands</h4><p class="small">Each leaves with half a share: ' + each + " crew gold. No hard feelings.</p>" +
-      '<table class="grid">' + PC.data.economy.TIER_ORDER.filter(function (t) { return state.crew.tiers[t]; }).map(function (t) {
-        return "<tr><td>" + t + "</td><td>" + state.crew.tiers[t] + ' aboard</td><td><div class="buyrow">' + qtyBox("q-off-" + t, 1, state.crew.tiers[t]) +
-          '<button data-act="payoff" data-tier="' + t + '" data-for="q-off-' + t + '">Pay off</button></div></td></tr>';
-      }).join("") + "</table></div>";
-    return html;
+    var have = PC.data.economy.TIER_ORDER.filter(function (t) { return state.crew.tiers[t]; });
+    if (have.length) {
+      html += '<details class="svc" style="margin-top:16px"><summary class="sc" style="cursor:pointer;color:#5e4528">Put hands ashore</summary><p class="small">Each leaves with half a share: ' + each + " crew gold. No hard feelings.</p>" +
+        '<table class="grid">' + have.map(function (t) {
+          return "<tr><td>" + t + "</td><td>" + state.crew.tiers[t] + ' aboard</td><td><div class="buyrow">' + qstep("q-off-" + t, 1, state.crew.tiers[t]) +
+            '<button class="secondary" data-act="payoff" data-tier="' + t + '" data-for="q-off-' + t + '">Put ashore</button></div></td></tr>';
+        }).join("") + "</table></details>";
+    }
+    return html + "</div>";
   }
 
-  // ---- Merchant ----
+  // ---- Merchant (§41.9) ----
+
+  function holdBar() {
+    var p = state.provisions, goods = PC.crew.goodsUnits(state), tc = state.cargo.treasure.clean, td = state.cargo.treasure.dirty;
+    var per = PC.data.economy.TREASURE_PER_SLOT, cap = state.ship.cargo;
+    var tSlots = Math.ceil((tc + td) / per), tcS = tc + td ? tSlots * tc / (tc + td) : 0;
+    var seg = function (n, color, label) { return n > 0 ? '<i title="' + esc(label) + '" style="position:static;display:inline-block;height:100%;width:' + (100 * n / cap) + "%;background:" + color + '"></i>' : ""; };
+    var manifest = ["Provisions: " + p + " lots"].concat(Object.keys(state.cargo.goods).map(function (g) {
+      var e = state.cargo.goods[g];
+      return (e.clean ? g + ": " + e.clean : "") + (e.dirty ? (e.clean ? ", " : g + ": ") + e.dirty + " dirty" : "");
+    }).filter(Boolean), tc || td ? ["Treasure: " + (tc + td) + " units" + (td ? " (" + td + " dirty)" : "")] : []);
+    return '<details class="svc"><summary style="cursor:pointer;list-style:none"><div class="hbar" style="height:16px;display:flex;max-width:680px">' +
+      seg(p, "#8a6414", "Provisions") + seg(goods, "#5e4528", "Goods") + seg(tcS, "#c99f45", "Treasure") + seg(tSlots - tcS, "#7a2416", "Dirty treasure") + "</div>" +
+      '<span class="small">Hold ' + PC.crew.slotsUsed(state) + " of " + cap + " · Provisions " + p + " · Goods " + goods + " · Treasure " + (tc + td) + (td ? " (" + td + " dirty)" : "") +
+      ' <span class="note">· tap for the manifest</span></span></summary><ul class="small">' + manifest.map(function (m) { return "<li>" + esc(m) + "</li>"; }).join("") + "</ul></details>";
+  }
+
+  function timeAtSea(lots) {
+    var a = lots * 5 / Math.max(1, state.crew.count);
+    var r = Math.round(a * 2) / 2;
+    var s = Math.floor(r) + (r % 1 ? "½" : "");
+    if (s === "0½") s = "½";
+    return "about " + s + " action" + (r === 1 ? "" : "s") + " at sea for your " + state.crew.count + " hands";
+  }
+
+  function coffers(left, cap, his) {
+    return '<p class="small">' + esc(his) + " coffers: " + gold(left) + " of " + gold(cap) + ' left this season <span class="hbar" style="display:inline-block;width:110px;vertical-align:middle"><i style="width:' + Math.round(100 * left / Math.max(1, cap)) + '%;background:#8a6414"></i></span></p>';
+  }
+
+  function demandTag(g) {
+    var d = N().demandOf(state, N().here(state), g);
+    if (d === "Wants" || d === "Craves") return ' <span class="rel" style="color:#2f5a22">Wanted</span>';
+    if (d === "Glutted") return ' <span class="rel" style="color:#8f2a1c">Glutted</span>';
+    return "";
+  }
+  var STORES = '<span title="Your crew eats or drinks this" style="color:#5e4528">' + ic("prov").replace("<svg", '<svg style="width:16px;height:16px;vertical-align:-2px"') + "</span>";
 
   function merchantMenu() {
     var id = N().here(state);
     var prov = N().slotNpc(id, "provisioner");
     var g = N().greeting(state, id, prov, "provisioner");
-    var html = "<h3>" + npcTag(prov) + "</h3>";
-    if (!state.location.say) html += '<div class="say">' + esc(g.line) + "</div>";
+    var said = state.location.said || {};
+    var html = '<div class="block">' + nameCard(prov, "Provisioner");
+    html += state.location.say && state.location.say.to === prov ? sayFor(prov) : '<div class="say">' + inline(g.line) + "</div>";
     if (!g.refuse) {
       var free = PC.crew.slotsFree(state);
-      var provMax = Math.min(free, afford(N().provisionsPrice(state)));
-      html += '<p class="small">Hold: ' + PC.crew.slotsUsed(state) + " of " + state.ship.cargo + " slots used.</p>";
-      html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(N().provisionsPrice(state)) + " gold a lot. One lot feeds 5 hands for an action at sea. Aboard: " + state.provisions + ".</p>" +
-        (free <= 0 ? '<p class="small muted">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qtyBox("q-prov", Math.min(provMax, 10), provMax) + '<button data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' : '<p class="small muted">You can\'t pay for a lot right now.</p>') + "</div>";
+      html += (N().haggleBlock ? N().haggleBlock(state, prov) : "") + holdBar();
+      var pp = N().provisionsPrice(state);
+      var provMax = Math.min(free, afford(pp));
+      html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
+        (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="secondary" data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' +
+          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return gold(n * pp) + " gold · aboard after: " + (state.provisions + n) + " lots, " + timeAtSea(state.provisions + n); }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
+        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p></div>";
       var stock = N().season(state).stock;
-      html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th></th></tr>' +
+      html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
         Object.keys(stock).map(function (gname) {
-          var max = Math.min(stock[gname], free, afford(N().shopPrice(state, id, gname, prov)));
-          var info = PC.data.goods[gname];
-          return "<tr><td>" + esc(gname) + (info && info.stores ? ' <span class="small muted">(crew stores)</span>' : "") + "</td><td>" + stock[gname] + "</td><td>" + gold(N().shopPrice(state, id, gname, prov)) + "</td><td>" +
-            (max > 0 ? '<div class="buyrow">' + qtyBox("q-good-" + slug(gname), Math.min(max, 2), max) + '<button data-act="buygood" data-good="' + esc(gname) + '" data-for="q-good-' + slug(gname) + '">Buy</button></div>' : '<span class="small muted">' + (stock[gname] ? "No room" : "Sold out") + "</span>") +
+          var price = N().shopPrice(state, id, gname, prov);
+          var max = Math.min(stock[gname], free, afford(price));
+          var info = PC.data.goods[gname], sid = "q-good-" + slug(gname);
+          return "<tr><td>" + esc(gname) + (info && info.stores ? " " + STORES : "") + demandTag(gname) + "</td><td>" + stock[gname] + "</td><td>" + gold(price) + "</td><td>" +
+            (max > 0 ? '<div class="buyrow">' + qstep(sid, Math.min(max, 2), max) + '<button class="secondary" data-act="buygood" data-good="' + esc(gname) + '" data-for="' + sid + '">' +
+              totalSlot(function () { return "Buy · " + gold(val(sid) * price); }, "") + "</button></div>" : '<span class="note">' + (stock[gname] ? "No room" : "Sold out") + "</span>") +
             "</td></tr>";
         }).join("") + "</table></div>";
-      html += sellTable("provisioner", "Sell to " + PC.npcs.get(state, prov).first, N().provisionerCapLeft(state), "clean");
-      if (hasCargo("dirty")) html += '<ol class="choices"><li><button data-act="offerdirty">Offer ' + esc(PC.npcs.get(state, prov).first) + " dirty goods</button></li></ol>";
+      html += sellTable("provisioner", "Sell to " + PC.npcs.get(state, prov).first, N().provisionerCapLeft(state), N().provisionerCap(state), "clean");
+      if (hasCargo("dirty") && !said.offerdirty) html += '<p><button class="link" data-act="offerdirty">Offer dirty goods</button></p>';
     }
+    html += "</div>";
     if (N().fenceOpen(state)) {
       var f = N().nodeData(id).fence;
       var fg = N().greeting(state, id, f.npc, "fence");
-      html += "<h3>" + npcTag(f.npc) + "</h3>" + '<p class="small muted">' + esc(fg.line) + "</p>";
+      html += DIVIDER + '<div class="block"><div class="person">' + castFrame(f.npc).replace('class="castframe"', 'class="castframe" style="flex:0 0 100px"').replace(/width:150px/g, "width:100px") +
+        '<div class="pmain">' + nameCard(f.npc, "Fence") +
+        (state.location.say && state.location.say.to === f.npc ? sayFor(f.npc) : '<div class="say">' + inline(fg.line) + "</div>") + "</div></div>";
       if (!fg.refuse) {
-        html += sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), "dirty") + '<ol class="choices">';
-        if (!state.flags.bobby_french_heard) html += '<li><button data-act="askfrench">Ask about the French</button></li>';
-        if (hasCargo("clean")) html += '<li><button data-act="offerclean">Offer him clean goods</button></li>';
-        html += "</ol>";
+        html += (N().haggleBlock ? N().haggleBlock(state, f.npc) : "") + sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), f.cap, "dirty");
+        var links = [];
+        if (!state.flags.bobby_french_heard) links.push('<button class="link" data-act="askfrench">Ask about the French</button>');
+        if (hasCargo("clean") && !said.offerclean) links.push('<button class="link" data-act="offerclean">Offer him clean goods</button>');
+        if (links.length) html += "<p>" + links.join(" · ") + "</p>";
       }
+      html += "</div>";
     }
     return html;
   }
@@ -473,403 +817,640 @@
 
   function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
 
-  function sellTable(buyer, title, capLeft, kind) {
+  function sellTable(buyer, title, capLeft, cap, kind) {
     var rows = [];
     if (state.cargo.treasure[kind]) rows.push({ what: "treasure", label: (kind === "dirty" ? "Dirty " : "") + "Treasure", have: state.cargo.treasure[kind] });
     Object.keys(state.cargo.goods).forEach(function (g) {
       var n = state.cargo.goods[g][kind];
       if (n) rows.push({ what: g, label: (kind === "dirty" ? "Dirty " : "") + g, have: n });
     });
-    var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") +
-      " Can pay " + gold(capLeft) + " more gold this season.</p>";
-    if (!rows.length) return html + '<p class="small muted">Nothing aboard ' + (buyer === "fence" ? "for him" : "to sell here") + ".</p></div>";
-    return html + '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Pays</th><th></th></tr>' + rows.map(function (r) {
+    var who_ = PC.npcs.get(state, buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : N().slotNpc(N().here(state), "provisioner"));
+    var his = who_ && who_.gender === "f" ? "Her" : "His";
+    var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his);
+    if (!rows.length) return html + '<p class="note">Nothing aboard ' + (buyer === "fence" ? "for him" : "to sell here") + ".</p></div>";
+    return html + '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Pays</th><th>Sell</th></tr>' + rows.map(function (r) {
       var id = "q-sell-" + buyer + "-" + slug(r.what);
-      return "<tr><td>" + esc(r.label) + "</td><td>" + r.have + "</td><td>" + gold(N().unitPrice(state, buyer, r.what)) + "</td><td>" +
-        '<div class="buyrow">' + qtyBox(id, r.have, r.have) + '<button data-act="sell" data-buyer="' + buyer + '" data-what="' + esc(r.what) + '" data-for="' + id + '">Sell</button></div></td></tr>';
+      var price = N().unitPrice(state, buyer, r.what);
+      var max = Math.max(1, Math.min(r.have, price > 0 ? Math.floor(capLeft / price + 1e-9) : r.have));
+      return "<tr><td>" + esc(r.label) + (r.what !== "treasure" ? demandTag(r.what) : "") + "</td><td>" + r.have + "</td><td>" + gold(price) + "</td><td>" +
+        '<div class="buyrow">' + qstep(id, max, max) + '<button class="secondary" data-act="sell" data-buyer="' + buyer + '" data-what="' + esc(r.what) + '" data-for="' + id + '"' + (capLeft < price ? " disabled" : "") + ">" +
+        totalSlot(function () { return "Sell · " + gold(val(id) * price); }, "") + "</button></div></td></tr>";
     }).join("") + "</table></div>";
   }
 
-  // ---- Lilyhook's Graveyard ----
+  // ---- Lilyhook's Graveyard (§41.10) ----
+
+  function zoneTiers(type) {
+    var S = PC.data.minigames.salvage;
+    return S.ZONES[type].map(function (z) {
+      var a = PC.checks.assess(state, { type: "Dive", dr: S.ZONE_DR[z] }, { conditions: ["Underwater"] });
+      return esc(S.ZONE_NAMES[z]) + " " + tierWord(a.tier);
+    }).join(" · ");
+  }
 
   function graveyardMenu() {
-    var o = PC.npcs.get(state, "ollie");
-    var lines = { "-1": "\"I hope you're a strong swimmer.\"", "0": "\"Back for another dive?\"", "1": "\"I dreamed that you're in for a good haul today.\"", "2": "\"I dreamed that you're in for a good haul today.\"", "3": "\"The treasure-seeker returns!\"" };
-    var html = "<h3>" + npcTag("ollie") + "</h3>" + '<div class="say">' + esc(lines[String(Math.max(-1, o.rung))] || lines["0"]) + "</div>";
     var S = PC.data.minigames.salvage;
+    var greet = (S.greetings || {})[String(Math.max(-1, Math.min(3, PC.npcs.rung(state, "ollie"))))] || (S.greetings || {})["0"] || "";
+    var html = '<div class="block"><div class="person">' + castFrame("ollie").replace('class="castframe"', 'class="castframe" style="flex:0 0 100px"').replace(/width:150px/g, "width:100px") +
+      '<div class="pmain">' + nameCard("ollie", "Dive host") + '<div class="say">' + inline(greet) + "</div></div></div>";
     // A Dying Pirate's Wish: the Miranda is the only wreck until the mermaid comes up (§18.2).
     if (PC.salvage.mirandaPending(state)) {
       var rc = PC.salvage.canRetryMiranda(state);
-      return html + '<div class="wreck"><h4>The <i>Miranda</i></h4><p class="small">' + esc(S.miranda.flavor) + "</p>" +
+      return html + '<div class="wreck"><div class="wthumb">Woodcut<br>the <i>Miranda</i></div><div><h4>The <i>Miranda</i></h4><p class="small">' + esc(S.miranda.flavor) + "</p>" +
         '<p class="small">Ollie waits on the beach. Geezer\'s mermaid is still down there.</p>' +
-        '<div class="actions"><button class="primary" data-act="miranda"' + (rc.ok ? "" : " disabled") + ">Dive for the mermaid again (1 action)</button>" +
-        (rc.ok ? "" : '<span class="lock">' + esc(rc.why) + "</span>") + "</div></div>";
+        '<div class="actions"><button class="primary" data-act="miranda" data-cost-ap="1"' + (rc.ok ? "" : " disabled") + ">Dive for the mermaid again (1 action)</button>" +
+        (rc.ok ? "" : '<span class="lock">' + esc(rc.why) + "</span>") + "</div></div></div></div>";
     }
     var cd = PC.salvage.canDive(state);
     var wrecks = PC.salvage.wrecksOnOffer(state, "ocracoke");
-    html += '<p class="muted">' + esc(S.lines.offered) + (wrecks.some(function (w) { return w.type === "frigate"; }) ? " " + esc(S.lines.frigate) : "") + "</p>";
+    html += '<p class="note">' + esc(S.lines.offered) + (wrecks.some(function (w) { return w.type === "frigate"; }) ? " " + esc(S.lines.frigate) : "") + "</p>";
     if (!cd.ok) html += '<p class="notice">' + esc(cd.why) + "</p>";
     wrecks.forEach(function (w) {
-      html += '<div class="wreck"><h4>A ' + esc(w.type) + "</h4>" + '<p class="small">' + esc(w.flavor) + "</p>" +
-        '<p class="small">' + S.ZONES[w.type].map(function (z) {
-          var a = PC.checks.assess(state, { type: "Dive", dr: S.ZONE_DR[z] }, { conditions: ["Underwater"] });
-          return esc(S.ZONE_NAMES[z]) + ": " + esc(a.tier) + " (" + pct(a.odds.partialOrBetter) + ")";
-        }).join(" · ") + "</p>" +
-        '<div class="actions"><button data-act="divewreck" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Dive (1 action)</button>" +
-        '<button data-act="divequick" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Quick Dive (1 action)</button></div></div>";
+      html += '<div class="wreck"><div class="wthumb">Woodcut<br>a ' + esc(w.type) + " wreck</div><div><h4>A " + esc(titleCase(w.type)) + "</h4>" + '<p class="small">' + esc(w.flavor) + "</p>" +
+        '<p class="small">' + zoneTiers(w.type) + "</p>" +
+        '<div class="actions" style="margin-top:6px"><button class="primary" data-act="divewreck" data-cost-ap="1" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Dive (1 action)</button>" +
+        '<button class="secondary" data-act="divequick" data-cost-ap="1" data-wreck="' + esc(w.id) + '"' + (cd.ok ? "" : " disabled") + ">Quick Dive (1 action)</button></div>" +
+        '<p class="note" style="margin:6px 0 0">Dive: choose every grab yourself. Hazards below; relics possible.<br>Quick Dive: one roll, no hazards, no relics. Clean brings up four finds, partial two; a setback brings up nothing.</p></div></div>';
     });
-    return html;
+    return html + "</div>";
   }
 
-  // ---- The minigames (§18) ----
+  // ---- The minigames (§18, §38.8, §41.6, §41.10) ----
   // The rules are in js/salvage.js, js/drinking.js and js/liarsdice.js.
 
   function mgLog(lines) {
-    var last = lines.slice(-12);
-    return '<div class="mglog">' + last.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>";
+    var last = lines.slice(-8);
+    return last.length ? '<div class="mglog">' + last.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>" : "";
   }
 
-  function mgMeter(label, n, max) {
-    var pips = "";
-    for (var i = 0; i < max; i++) pips += '<i class="' + (i < n ? "on" : "off") + '"></i>';
-    return '<div class="meter"><span>' + esc(label) + "</span> " + pips + " <small>" + n + "/" + max + "</small></div>";
+  function gpips(n, max, cls) {
+    var out = "";
+    for (var i = 0; i < max; i++) out += '<i class="' + (i < n ? "on" : "") + '" data-gpip="' + i + '"></i>';
+    return '<span class="gpips ' + (cls || "") + '">' + out + "</span>";
   }
 
   function mgPending(p) {
     if (!p) return "";
-    return '<div class="result"><p class="you-chose">' + esc(p.type) + "</p>" +
-      '<div class="badge badge-' + p.outcome + '">' + OUTCOME_LABEL[p.outcome] + "</div>" + diceLine(p.roll) +
-      '<div class="actions"><button data-act="mgreroll">Reroll (' + esc(p.reroll) + ')</button><button class="primary" data-act="mgaccept">Accept it</button></div></div>';
+    return '<p class="you-chose">' + esc(p.type) + "</p>" + badge(p.outcome) + diceLine(p.roll) +
+      '<div class="actions"><button class="secondary" data-act="mgreroll">Reroll (' + esc(p.reroll) + ')</button><button class="primary" data-act="mgaccept">Accept it</button></div>';
   }
 
-  function mgOption(act, attrs, label, chk, extra) {
-    return '<li><button data-act="' + act + '" ' + attrs + ">" + esc(label) + "</button>" + (extra ? '<span class="cost">' + esc(extra) + "</span>" : "") + (chk ? checkLine(chk) : "") + "</li>";
-  }
+  function mgHead(line, title) { return '<div class="where">' + esc(line) + '</div><h2 class="title">' + esc(title) + "</h2>"; }
 
   function minigamePanel() {
     var v = PC.minigames.view(state);
-    var html = '<section class="scene minigame mg-' + v.kind + '">';
-    html += ({ dive: divePanel, drink: drinkPanel, dice: dicePanel })[v.kind](v);
-    return html + "</section>";
+    return '<div class="mg-' + v.kind + '">' + ({ dive: divePanel, drink: drinkPanel, dice: dicePanel })[v.kind](v) + "</div>";
   }
+
+  // The dive (§41.10): the clickable wreck with Hull, Hold and Cabin.
+  var ZONE_POS = { hull: "left:5%;top:44%;width:28%;height:40%", hold: "left:37%;top:52%;width:28%;height:38%", cabin: "left:68%;top:28%;width:27%;height:40%" };
 
   function divePanel(v) {
-    var html = '<div class="where">Lilyhook\'s Graveyard</div><h2>' + esc(v.title) + "</h2>" +
-      mgMeter("Breath", v.breath, v.breathMax) + mgLog(v.log);
-    if (v.pending) return html + mgPending(v.pending);
+    var html = mgHead("Ocracoke · Lilyhook's Graveyard", v.title) +
+      '<div class="gauges"><div class="gauge"><span class="lbl">Breath</span>' + gpips(v.breath, v.breathMax, "breath") + ' <span class="small">' + v.breath + " of " + v.breathMax + "</span></div></div>";
+    if (v.pending) return html + mgLog(v.log) + mgPending(v.pending);
     if (!v.over) {
-      html += '<ol class="choices">';
-      v.zones.forEach(function (z) {
-        if (z.left <= 0) { html += '<li class="locked"><button disabled>' + esc(z.name) + '</button><span class="lock">Picked clean</span></li>'; return; }
-        html += mgOption("mgdive", 'data-op="grab" data-zone="' + z.id + '"', "Grab from the " + z.name, z.assess,
-          z.left + " left" + (z.scouted ? " · next: " + z.scouted : "") + " · clean 1 breath, partial 2, setback 2 and a hazard");
-        html += mgOption("mgdive", 'data-op="scout" data-zone="' + z.id + '"', "Scout the " + z.name, null, "1 breath: see the next find, and the next grab there is one step easier");
-      });
-      html += '<li><button data-act="mgdive" data-op="surface">Surface</button><span class="cost">Bank what you have</span></li></ol>';
-      if (v.canQuick) html += '<div class="actions"><button data-act="mgquick">Quick Dive instead</button></div>';
-      return html;
+      var sel = diveZone && v.zones.filter(function (z) { return z.id === diveZone; })[0];
+      html += '<div class="hotframe">' + v.zones.map(function (z) {
+        var pos = ZONE_POS[z.id] || "left:10%;top:10%;width:25%;height:30%";
+        return '<button class="hot' + (z.left <= 0 ? " off" : "") + (sel && sel.id === z.id ? " lit" : "") + '" style="' + pos + '" data-act="divezone" data-zone="' + z.id + '"' + (z.left <= 0 ? " disabled" : "") + ">" +
+          esc(z.name) + '<span class="sub">' + (z.left > 0 ? z.left + " left" : "Picked clean") + (z.scouted ? "<br>next: " + esc(z.scouted) : "") + "</span></button>";
+      }).join("") + '<span class="framelabel">Woodcut · a ' + esc(v.wreckType || "wreck") + " cutaway · 16 : 10 · 1600 × 1000</span></div>";
+      if (sel && sel.left > 0) {
+        html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">The ' + esc(sel.name) + "</p>" + opts([
+          opt({ act: "mgdive", attrs: 'data-op="grab" data-zone="' + sel.id + '" data-cost-breath="1"', label: "Grab", check: sel.assess, meta: "Clean costs 1 breath, partial 2, setback 2 and a hazard" }),
+          opt({ act: "mgdive", attrs: 'data-op="scout" data-zone="' + sel.id + '" data-cost-breath="1"', label: "Scout", meta: "1 breath: see the next find, and the next grab here is one step easier" }),
+        ]) + "</div>";
+      } else html += '<p class="note">Pick a part of the wreck to work.</p>';
+      html += '<div class="actions"><button class="primary" data-act="mgdive" data-op="surface">Surface</button>' + (v.canQuick ? '<button class="secondary" data-act="mgquick">Quick Dive instead</button>' : "") + "</div>";
+      return html + mgLog(v.log);
     }
-    html += '<div class="svc"><h4>' + (v.blackout ? "What you kept" : "Your haul") + "</h4>" +
-      (v.kept && v.kept.length ? "<ul>" + v.kept.map(function (k) { return "<li>" + esc(k) + "</li>"; }).join("") + "</ul>" : '<p class="small muted">Nothing.</p>') + "</div>";
+    html += mgLog(v.log) + '<div class="h4" style="max-width:680px">' + (v.blackout ? "What you kept" : "Your haul") + "</div>";
+    var kept = (v.kept || v.haul || []).map(function (k) { return { icon: /treasure|gold|coin/i.test(k) ? "treasure" : "item", text: k, ink: "mid" }; });
+    var lostList = [];
+    if (v.blackout && v.kept) {
+      var left = v.kept.slice();
+      (v.haul || []).forEach(function (k) { var i = left.indexOf(k); if (i >= 0) left.splice(i, 1); else lostList.push(k); });
+    }
+    var lost = lostList.map(function (k) { return { icon: "item", html: "<s>" + esc(k) + "</s>" }; });
+    html += kept.length || lost.length ? chips(kept.concat(lost)) : '<p class="note">Nothing.</p>';
     if (v.needsPot) {
-      return html + '<p class="small">' + v.gold + ' gold came up with it.</p><div class="actions"><button class="primary" data-act="mgbank" data-pot="purse">Into your purse</button>' +
-        '<button class="primary" data-act="mgbank" data-pot="crew">Share it with the crew</button></div>';
+      return html + '<p style="font-size:20px;margin:16px 0 10px">Where does the ' + gold(v.gold) + ' gold go?</p><div class="actions"><button class="primary" data-top="1" data-act="mgbank" data-pot="purse">Into your purse · ' + gold(v.gold) + "</button>" +
+        '<button class="secondary" data-top="1" data-act="mgbank" data-pot="crew">Share it with the crew · ' + gold(v.gold) + "</button></div>";
     }
-    return html + '<div class="actions"><button class="primary" data-act="mgleave">Continue</button></div>';
+    return html + '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
   }
+  var diveZone = null;
 
+  // Under the Table (§41.6): the hotspot table.
   function drinkPanel(v) {
-    var html = '<div class="where">The Tavern · Under the Table</div><h2>' + esc(v.opponent) + "</h2>" +
-      '<p class="small muted">' + esc(v.role) + (v.trait ? " · " + esc(v.trait) : "") + (v.tolerance ? " · Tolerance " + esc(v.tolerance) : "") +
-      " · " + esc(v.state) + " · Round " + v.round + " · the tab " + v.tab + " gold</p>" +
-      mgMeter("Wits", v.wits, v.witsMax) + mgLog(v.log);
-    if (v.pending) return html + mgPending(v.pending);
+    var html = mgHead("Ocracoke · The Tavern · Under the Table", v.opponent) +
+      '<p class="small">Round ' + v.round + " · the tab " + v.tab + " gold</p>" +
+      '<div class="namecard"><b style="font-size:22px">' + esc(v.opponent) + '</b><span class="role">' + esc(v.role) + "</span>" + (v.trait ? '<span class="traits">' + esc(v.trait) + "</span>" : "") + "</div>" +
+      '<div class="gauges"><div class="gauge"><span class="lbl">Your Wits</span>' + gpips(v.wits, v.witsMax) + "</div>" +
+      '<div class="gauge"><span class="lbl">Him</span><span class="big">' + esc(v.state) + "</span>" + (v.tolerance ? '<span class="small"> · Tolerance ' + esc(v.tolerance) + "</span>" : "") + "</div></div>";
+    if (v.pending) return html + mgLog(v.log) + mgPending(v.pending);
     if (v.offerOneMore) {
-      return html + '<p class="notice">Heavy Drinker: another pirate wants a go. Play on with the Wits you have left, for another rumor?</p>' +
-        '<div class="actions"><button data-act="mgonemore" data-yes="1">One more round</button><button class="primary" data-act="mgonemore" data-yes="0">Call it a night</button></div>';
+      return html + mgLog(v.log) + '<p class="notice">Heavy Drinker: another pirate wants a go. Play on with the Wits you have left, for another rumor?</p>' +
+        '<div class="actions"><button class="secondary" data-act="mgonemore" data-yes="1">One more round</button><button class="primary" data-act="mgonemore" data-yes="0">Call it a night</button></div>';
     }
     if (!v.over) {
+      var by = {};
+      v.options.forEach(function (o) { by[o.op] = o; });
+      var NOTE = { drink: "Clean costs no Wits, partial 1, setback 2 and a mishap", strong: "Counts as two drinks for him. Clean 0 Wits, partial 2, setback 3 and a mishap",
+        size: "Once, before the first drink. Clean names his trait and Tolerance", mock: "One taunt a match: he drinks alone", lean: "One taunt a match: he drinks alone",
+        throw: "Starts a brawl", callit: "A loss: you pay the tab" };
+      var spot = function (op, pos, label) {
+        var o = by[op];
+        return '<button class="hot' + (o ? "" : " off") + (drinkSpot === op ? " lit" : "") + '" style="' + pos + '" data-act="drinkspot" data-spot="' + op + '"' + (o ? "" : " disabled") + ">" + label + "</button>";
+      };
+      var taunts = ["mock", "lean", "throw"].filter(function (k) { return by[k]; });
+      html += '<div class="hotframe">' + spot("drink", "left:12%;top:38%;width:22%;height:34%", "The Tankard<span class=\"sub\">drink</span>") +
+        spot("strong", "left:42%;top:30%;width:18%;height:44%", "The Rum Bottle<span class=\"sub\">the strong stuff</span>") +
+        '<button class="hot' + (taunts.length ? "" : " off") + (drinkSpot === "hands" ? " lit" : "") + '" style="left:66%;top:8%;width:28%;height:26%" data-act="drinkspot" data-spot="hands"' + (taunts.length ? "" : " disabled") + '>His Hands<span class="sub">taunt him</span></button>' +
+        '<span class="framelabel">Woodcut · the drinking table · 16 : 10 · 1600 × 1000</span></div>';
       if (v.mustStrong) html += '<p class="notice">The strong stuff, or call it a night.</p>';
-      html += '<ol class="choices">' + v.options.map(function (o) {
-        var note = { drink: "Clean costs no Wits, partial 1, setback 2 and a mishap", strong: "Counts as two drinks for him. Clean 0 Wits, partial 2, setback 3 and a mishap",
-          size: "Once, before the first drink. Clean names his trait and Tolerance", mock: "One taunt a match: he drinks alone", lean: "One taunt a match: he drinks alone",
-          throw: "Starts a brawl", callit: "A loss: you pay the tab" }[o.op];
-        return mgOption("mgdrink", 'data-op="' + o.op + '"', o.label, o.assess || null, note);
-      }).join("") + "</ol>";
-      return html;
+      var pick = drinkSpot === "hands" ? taunts : drinkSpot && by[drinkSpot] ? [drinkSpot] : [];
+      if (pick.length) {
+        html += '<div class="hotmenu">' + opts(pick.map(function (k) {
+          var o = by[k];
+          return opt({ act: "mgdrink", attrs: 'data-op="' + o.op + '"', label: o.label, check: o.assess || null, meta: NOTE[o.op], opener: o.op === "throw" ? { kind: "flaw", name: "Hot-Tempered" } : null });
+        })) + "</div>";
+      }
+      html += '<div class="actions">' + (by.size ? '<button class="secondary" data-act="mgdrink" data-op="size">Size him up</button>' : "") +
+        (by.callit ? '<button class="secondary" data-act="mgdrink" data-op="callit">Call it a night</button>' : "") + "</div>";
+      return html + mgLog(v.log);
     }
     var r = v.result || {};
-    html += '<div class="svc"><h4>' + (r.won ? "You won" : r.how === "draw" ? "A draw" : "You lost") + "</h4><ul>" +
-      (r.tab ? "<li>You paid " + r.tab + " gold for the tab.</li>" : "") +
-      (r.lead ? "<li>A lead for your journal.</li>" : "") + (r.rumor ? "<li>A rumor (in your log).</li>" : "") +
-      (r.item ? "<li>Found: " + esc(r.item) + "</li>" : "") + (r.hangover ? "<li>Hangover until next season.</li>" : "") + "</ul></div>";
-    return html + '<div class="actions"><button class="primary" data-act="mgleave">Continue</button></div>';
+    var list = [];
+    if (r.tab) list.push({ icon: "gold", text: "You paid the " + r.tab + "-gold tab", ink: "mid" });
+    if (r.lead) list.push({ icon: "lead", text: "A new lead · Journal updated", ink: "oxblood" });
+    if (r.rumor) list.push({ icon: "rumor", text: "Added to your Rumors." });
+    if (r.item) list.push({ icon: "item", text: "Found: " + r.item });
+    if (r.hangover) list.push({ icon: "cond", text: "Hangover until next season", ink: "bad" });
+    return html + mgLog(v.log) + '<div class="h4" style="max-width:680px">' + (r.won ? "You won" : r.how === "draw" ? "A draw" : "You lost") + "</div>" + chips(list) +
+      '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
+  }
+  var drinkSpot = null;
+
+  // Liar's Dice (§41.6): drawn dice, cups, a bid stepper and tappable faces.
+  var PIPS = { 1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[26, 26], [50, 50], [74, 74]], 4: [[28, 28], [72, 28], [28, 72], [72, 72]], 5: [[26, 26], [74, 26], [50, 50], [26, 74], [74, 74]], 6: [[28, 24], [72, 24], [28, 50], [72, 50], [28, 76], [72, 76]] };
+  function die(n, cls) {
+    if (!n) return '<svg class="die ' + (cls || "") + '" viewBox="0 0 100 100" aria-label="A hidden die"><path d="M18 88L28 22Q50 10 72 22L82 88Z" fill="#5e4528" stroke="#2a1c10" stroke-width="3"/><ellipse cx="50" cy="88" rx="32" ry="7" fill="#4a3418"/></svg>';
+    return '<svg class="die ' + (cls || "") + '" viewBox="0 0 100 100" aria-label="' + n + '"><rect x="6" y="6" width="88" height="88" rx="16" fill="#f3e9cf" stroke="#2a1c10" stroke-width="4"/>' +
+      PIPS[n].map(function (p) { return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="9" fill="#2a1c10"/>'; }).join("") + "</svg>";
   }
 
-  var FACE = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
-  function dieFace(d) { return d ? '<span class="die">' + FACE[d] + "</span>" : '<span class="die hidden">?</span>'; }
-
   function dicePanel(v) {
-    var html = '<div class="where">The Tavern · Liar\'s Dice</div><h2>' + esc(v.opponent) + "</h2>" +
-      '<p class="small muted">Game ' + v.games + " of " + v.maxGames + " · won " + v.won + ", lost " + v.lost + " (" + (v.net >= 0 ? "+" : "") + v.net + " gold) · your purse " + gold(v.purse) +
-      (v.marks ? " · suspicion " + v.marks : "") + "</p>" + mgLog(v.log);
-    if (v.pending) return html + mgPending(v.pending);
+    var html = mgHead("Ocracoke · The Tavern · Liar's Dice", v.opponent);
+    var board = '<div class="scoreboard"><p class="sc" style="margin:0 0 4px">The scoreboard</p>Game ' + v.games + " of " + v.maxGames + "<br>Won " + v.won + " · lost " + v.lost +
+      "<br>Net " + (v.net >= 0 ? "+" : "−") + Math.abs(v.net) + " gold<br>Your purse " + gold(v.purse) + "</div>";
+    if (v.pending) return html + mgLog(v.log) + mgPending(v.pending);
     var g = v.round;
     if (!g) {
-      if (v.over) return html + '<div class="actions"><button class="primary" data-act="mgleave">Leave the table</button></div>';
-      html += '<ol class="choices">';
-      if (v.canSize) html += mgOption("mgsize", "", "Size him up", v.sizeAssess, "Once a sitting");
-      if (v.canStart) html += '<li><div class="buyrow">' + qtyBox("q-stake", v.stakes[0], Math.min(v.stakes[1], Math.floor(v.purse))) +
-        '<button data-act="mgstake" data-for="q-stake">Play a game</button></div><span class="cost">Stake ' + v.stakes[0] + "-" + v.stakes[1] + " gold from your purse; the winner takes both stakes.</span></li>";
-      html += '<li><button data-act="mgstop">Leave the table</button></li></ol>';
-      return html;
+      html += '<div class="dicetable"><div class="felt"><span class="framelabel" style="position:static">Woodcut · the dice table, top-down · 16 : 10 · 1600 × 1000</span></div>' + board + "</div>" + mgLog(v.log);
+      if (v.over) return html + '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Leave the table</button></div>';
+      var list = [];
+      if (v.canSize) list.push(opt({ act: "mgsize", label: "Size him up", check: v.sizeAssess, meta: "Once a sitting" }));
+      html += opts(list);
+      if (v.canStart) {
+        html += '<div class="svc"><h4>The stake</h4><div class="buyrow">' + qstep("q-stake", v.stakes[0], Math.min(v.stakes[1], Math.floor(v.purse)), v.stakes[0]) +
+          '<button class="primary" data-act="mgstake" data-for="q-stake">Play a game</button></div><p class="note">Stake ' + v.stakes[0] + "-" + v.stakes[1] + " gold from your purse; the winner takes both stakes.</p></div>";
+      }
+      return html + '<div class="actions"><button class="secondary" data-act="mgstop">Leave the table</button></div>';
     }
-    html += '<div class="cups"><p>His cup (' + g.hisN + "): " + g.his.map(dieFace).join(" ") + "</p>" +
-      "<p>Your cup (" + g.myN + "): " + g.mine.map(dieFace).join(" ") + "</p></div>";
-    if (g.history.length) html += '<ul class="small">' + g.history.map(function (h) { return "<li>" + esc(h) + "</li>"; }).join("") + "</ul>";
+    var bidHtml = g.bid ? '<span class="bidbox">' + g.bid.q + " × " + die(g.bid.f, "sm") + "</span>" : '<span class="bidbox" style="font-size:18px">You open the bidding</span>';
+    html += '<div class="dicetable"><div class="felt"><div class="cupsrow">' + g.his.map(function (d) { return die(d); }).join("") + '</div><div style="text-align:center">' + bidHtml +
+      '<div class="small" style="margin-top:4px">' + g.total + " dice on the table</div></div>" +
+      '<div class="cupsrow">' + g.mine.map(function (d) { return die(d); }).join("") + "</div></div>" + board + "</div>";
+    if (g.history.length) html += '<div class="mglog">' + g.history.slice(-6).map(function (h) { return "<p>" + esc(h) + "</p>"; }).join("") + "</div>";
     if (g.over) {
       return html + '<p class="notice">' + (g.caught ? "Caught cheating: the pot is his." : g.won ? "You take the pot: " + g.stake * 2 + " gold." : "He takes the pot.") + "</p>" +
-        '<div class="actions"><button class="primary" data-act="mgclosegame">Continue</button></div>';
+        '<div class="actions"><button class="primary" data-top="1" data-act="mgclosegame">Continue</button></div>';
     }
     if (g.revealed) return html + '<div class="actions"><button class="primary" data-act="mgnextround">Next round</button></div>';
-    var bid = g.bid ? "The bid: " + g.bid.q + " × " + FACE[g.bid.f] : "You open the bidding.";
+    // The smallest legal raise opens the stepper and faces.
     var q = g.bid ? g.bid.q : 1, f = g.bid ? Math.min(6, g.bid.f + 1) : 1;
     if (g.bid && g.bid.f >= 6) { q += 1; f = 1; }
-    html += "<p><b>" + esc(bid) + "</b> (" + g.total + " dice on the table)</p>" +
-      '<div class="buyrow"><label>At least <input id="bid-q" class="qty" type="number" min="1" max="' + g.total + '" value="' + q + '"></label>' +
-      ' <label>showing <select id="bid-f">' + [1, 2, 3, 4, 5, 6].map(function (n) { return '<option value="' + n + '"' + (n === f ? " selected" : "") + ">" + FACE[n] + " (" + n + ")</option>"; }).join("") + "</select></label>" +
-      ' <button data-act="mgbid">Bid</button>' + (g.bid ? ' <button data-act="mgliar">Call Liar!</button>' : "") + "</div>";
+    html += '<div class="svc"><h4>Your bid</h4><div class="buyrow"><span class="small">At least</span>' + qstep("bid-q", q, g.total, 1) +
+      '<span class="small">showing</span><input type="hidden" id="bid-f" value="' + f + '"><span class="faces">' + [1, 2, 3, 4, 5, 6].map(function (n) {
+        return '<button type="button" class="' + (n === f ? "on" : "") + '" data-face="' + n + '" aria-label="' + n + '">' + die(n, "sm") + "</button>";
+      }).join("") + "</span></div>" +
+      '<div class="actions"><button class="primary" data-act="mgbid">Bid</button>' + (g.bid ? '<button class="secondary" data-act="mgliar">Call Liar!</button>' : "") + "</div></div>";
     if (!g.cheated) {
-      html += '<details class="check"><summary>Cheat: peek under his cup (once a game)</summary><div class="opts">' +
-        g.his.map(function (d, i) { return '<button data-act="mgcheat" data-i="' + i + '">Die ' + (i + 1) + "</button>"; }).join(" ") + "</div>" + checkLine(v.cheatAssess) +
-        '<p class="small muted">Two suspicion marks and you are caught: the pot is forfeit, and the pirates think less of you.</p></details>';
+      html += '<details class="svc"><summary class="sc" style="cursor:pointer;color:#5e4528">Cheat: peek under his cup (once a game) <span class="susp">' +
+        [0, 1].map(function (i) { return '<i class="' + (i < (v.marks || 0) ? "on" : "") + '"></i>'; }).join("") + "</span></summary>" +
+        opts([opt({ act: "nop", label: "Peek at a die", check: v.cheatAssess, meta: "Two suspicion marks and you are caught: the pot is forfeit, and the pirates think less of you." })]) +
+        '<div class="actions">' + g.his.map(function (d, i) { return '<button class="secondary" data-act="mgcheat" data-i="' + i + '">Die ' + (i + 1) + "</button>"; }).join("") + "</div></details>";
     }
     return html;
   }
 
-  // ---- The Ship layer (§17.1) ----
+  // ---- The Ship (§41.11) ----
 
-  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["captain", "Captain"], ["journal", "Journal"], ["notes", "Notes"]];
+  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["cabin", "Your Cabin"]];
 
   function shipMenu() {
     var tab = state.location.tab || (state.articles ? "crew" : "articles");
     var html = '<div class="tabs">' + SHIP_TABS.map(function (t) {
-      return '<button data-act="shiptab" data-tab="' + t[0] + '" class="' + (t[0] === tab ? "on" : "") + '">' + t[1] + "</button>";
-    }).join("") + '<button disabled title="Not in the prototype">World Map' + (state.articles ? "" : " 🔒") + "</button></div>";
-    html += ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, captain: captainTab, journal: journalTab, notes: notesTab })[tab]();
-    return html;
+      return '<button data-act="shiptab" data-tab="' + t[0] + '" class="menubtn' + (t[0] === tab ? " on" : "") + '">' + t[1] + "</button>";
+    }).join("") + "</div>" + sayFor("ship");
+    return html + ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, cabin: cabinTab })[tab]();
   }
 
   var articleDraft = null;
+  var PURPOSE = { share: "Your cut of every haul.", officers: "What your officers and fleet captains take.", compensation: "What the maimed and the dismissed are paid.",
+    quarter: "Whether captives may be executed.", discipline: "How hard you may drive the crew.", quarrels: "How feuds between officers are settled.", chest: "Where a prize's ship's chest goes." };
+
+  function greedWord(n) { return n == null ? "" : n < 0 ? '<span style="color:#2f5a22">Generous</span>' : n > 0 ? '<span style="color:#8f2a1c">Hard</span>' : "Fair"; }
+
+  // The Greed gauge: a needle across Generous · Fair · Hard · Cruel.
+  function greedGauge(g) {
+    var R = PC.data.articles.REPUTATION;
+    var lo = -4, bands = R.map(function (r, i) { var from = i ? R[i - 1].max + 1 : lo; return { name: r.name, from: from, to: Math.min(r.max, 9) }; });
+    var bi = 0; bands.forEach(function (b, i) { if (g >= b.from) bi = i; });
+    var b = bands[bi], frac = b.to > b.from ? (Math.max(b.from, Math.min(b.to, g)) - b.from) / (b.to - b.from) : 0.5;
+    var ang = Math.PI * (1 - (bi + 0.15 + 0.7 * frac) / 4);
+    var cx = 120, cy = 110, r = 90;
+    var arc = function (i, color) {
+      var a0 = Math.PI * (1 - i / 4), a1 = Math.PI * (1 - (i + 1) / 4);
+      return '<path d="M' + (cx + r * Math.cos(a0)) + " " + (cy - r * Math.sin(a0)) + " A" + r + " " + r + " 0 0 1 " + (cx + r * Math.cos(a1)) + " " + (cy - r * Math.sin(a1)) + '" stroke="' + color + '" stroke-width="16" fill="none"/>';
+    };
+    var lab = function (i, t) { var a = Math.PI * (1 - (i + 0.5) / 4); return '<text x="' + (cx + (r + 22) * Math.cos(a)) + '" y="' + (cy - (r + 22) * Math.sin(a) + 4) + '" text-anchor="middle" font-family="IM Fell English SC, Georgia, serif" font-size="13" fill="#5e4528">' + t + "</text>"; };
+    return '<svg viewBox="-34 0 308 130" style="width:300px;max-width:100%" role="img" aria-label="Greed: ' + esc(b.name) + '">' +
+      arc(0, "#2f5a22") + arc(1, "#b89a66") + arc(2, "#a8604a") + arc(3, "#8f2a1c") + lab(0, "Generous") + lab(1, "Fair") + lab(2, "Hard") + lab(3, "Cruel") +
+      '<line x1="' + cx + '" y1="' + cy + '" x2="' + (cx + (r - 8) * Math.cos(ang)) + '" y2="' + (cy - (r - 8) * Math.sin(ang)) + '" stroke="#2a1c10" stroke-width="3" stroke-linecap="round"/><circle cx="' + cx + '" cy="' + cy + '" r="6" fill="#7a2416"/></svg>';
+  }
 
   function articlesTab() {
     var A = PC.data.articles;
-    if (!state.articles) {
-      articleDraft = articleDraft || PC.articles.defaults();
-      var g = PC.articles.greed(articleDraft);
-      var rd = PC.articles.readingFor(g);
-      var rep = PC.articles.reputation(g);
-      var html = '<p class="small">You set the terms; the crew holds you to every word. The Standard terms are fair and take one click. Signing costs no action.</p>';
-      html += A.SLOTS.map(function (s) {
-        return '<div class="svc"><h4>' + esc(s.name) + (s.noGreed ? ' <span class="small muted">(no Greed; change any time)</span>' : "") + "</h4>" +
-          '<div class="opts">' + s.options.map(function (o) {
-            var on = articleDraft[s.id] === o.id;
-            return '<button class="opt' + (on ? " on" : "") + '" data-act="artpick" data-slot="' + s.id + '" data-opt="' + o.id + '"><b>' + esc(o.label) + "</b>" +
-              '<span class="small">' + esc(o.text) + (o.greed ? " · Greed " + (o.greed > 0 ? "+" : "") + o.greed : "") + "</span></button>";
-          }).join("") + "</div></div>";
-      }).join("");
-      var check = rd.dr != null ? PC.checks.assess(state, { type: "Pirate Code", dr: rd.dr }) : null;
-      html += '<div class="svc"><p>Net Greed <b>' + (g > 0 ? "+" : "") + g + "</b> · reputation <b>" + esc(rep.name) + "</b>" +
-        (rep.pool !== 1 ? " (crew pools " + (rep.pool > 1 ? "+" : "") + Math.round((rep.pool - 1) * 100) + "%)" : "") + "</p>" +
-        (rd.cheer ? '<p class="small">The crew will cheer: morale +' + rd.cheer + ".</p>" : rd.dr == null ? '<p class="small">The crew will accept these terms.</p>' :
-          '<p class="small">Hard terms: you\'ll read them out with a Pirate Code check.</p>' + checkLine(check)) +
-        '<div class="actions"><button class="primary" data-act="artsign">Sign the Articles</button></div></div>';
-      return html;
-    }
-    var html2 = '<p class="small">Signed ' + esc(PC.state.SEASONS[state.articles.signed.season]) + " " + state.articles.signed.year +
-      " · net Greed " + (state.articles.greed > 0 ? "+" : "") + state.articles.greed + " · " + esc(PC.articles.currentReputation(state).name) +
-      ". You can loosen a term any time (+3 morale); harder terms wait for the next split, which comes only in Winter.</p>";
-    html2 += A.SLOTS.map(function (s) {
-      return '<div class="svc"><h4>' + esc(s.name) + "</h4>" + '<div class="opts">' + s.options.map(function (o) {
-        var on = state.articles.terms[s.id] === o.id;
-        var c = on ? null : PC.articles.amendCheck(state, s.id, o.id);
-        return '<button class="opt' + (on ? " on" : "") + '"' + (on || !c.ok ? " disabled" : "") + ' data-act="artamend" data-slot="' + s.id + '" data-opt="' + o.id + '"><b>' + esc(o.label) + "</b>" +
-          '<span class="small">' + esc(o.text) + (c && c.ok && c.morale ? " · +" + c.morale + " morale" : "") + "</span>" +
-          (c && !c.ok ? '<span class="small lock">' + esc(c.why) + "</span>" : "") + "</button>";
-      }).join("") + "</div></div>";
+    var signed_ = !!state.articles;
+    var terms = signed_ ? state.articles.terms : (articleDraft = articleDraft || PC.articles.defaults());
+    var g = signed_ ? state.articles.greed : PC.articles.greed(terms);
+    var rd = PC.articles.readingFor(g), rep = PC.articles.reputation(g);
+    var html = signed_ ? '<p class="small">Signed ' + esc(PC.state.SEASONS[state.articles.signed.season]) + " " + state.articles.signed.year + ".</p>" :
+      '<p class="small">You set the terms; the crew holds you to every word. The Standard terms are fair. Signing costs no action.</p>';
+    html += A.SLOTS.map(function (s) {
+      return '<div class="svc"><h4 style="margin-bottom:0">' + esc(s.name) + '</h4><p class="note" style="margin:0 0 6px">' + esc(PURPOSE[s.id] || "") +
+        (s.noGreed ? " No Greed · change any time." : "") + '</p><div class="opts">' + s.options.map(function (o) {
+          var on = terms[s.id] === o.id;
+          var c = signed_ && !on ? PC.articles.amendCheck(state, s.id, o.id) : null;
+          var tip = o.greed != null ? "Greed " + (o.greed > 0 ? "+" : "") + o.greed : "";
+          return '<button class="opt' + (on ? " on" : "") + '"' + (signed_ && (on || !c.ok) ? " disabled" : "") + ' title="' + esc(tip) + '" data-act="' + (signed_ ? "artamend" : "artpick") + '" data-slot="' + s.id + '" data-opt="' + o.id + '">' +
+            "<b>" + esc(o.label) + (o.id === "no_quarter" ? ' <span class="rel">tag: No Quarter</span>' : "") + "</b>" +
+            '<span class="small">' + esc(o.text) + (s.noGreed ? "" : " · " + greedWord(o.greed)) + (c && c.ok && c.morale ? " · +" + c.morale + " morale" : "") + "</span>" +
+            (c && !c.ok ? '<span class="small lock">' + esc(c.why) + "</span>" : "") + "</button>";
+        }).join("") + "</div></div>";
     }).join("");
-    return html2;
-  }
-
-  function crewTab() {
-    var c = state.crew, C = PC.crew;
-    var html = '<table class="ledger wide">' +
-      row("Hands", c.count + " of " + state.ship.crewMax + (c.wounded ? " · " + c.wounded + " wounded" : "")) +
-      row("By tier", PC.data.economy.TIER_ORDER.filter(function (t) { return c.tiers[t]; }).map(function (t) { return c.tiers[t] + " " + t; }).join(", ")) +
-      row("Morale", c.morale + " · " + C.band(c.morale)) +
-      row("Skill · Discipline", C.skill(state) + " · " + C.discipline(state) + (c.raw > 0.25 * c.count ? ' <span class="small muted">(raw hands this season: -1)</span>' : "")) +
-      row("Crew Rating", C.crewRating(state)) +
-      row("Guns drilled", C.drilled(state) ? "Yes" : "No") +
-      row("Crew gold · your purse", gold(state.money.crew) + " · " + gold(state.money.purse)) +
-      row("One share", gold(Math.round(C.oneShare(state))) + " crew gold") +
-      "</table>";
-    var rallyUsed = C.usedThisSeason(state, "rally"), drillUsed = C.usedThisSeason(state, "drill");
-    html += '<ol class="choices">' +
-      "<li" + (rallyUsed || !state.ap.left ? ' class="locked"' : "") + '><button data-act="rally"' + (rallyUsed || !state.ap.left ? " disabled" : "") + ">Rally the crew <small>(1 action)</small></button>" +
-        '<span class="cost">Morale +5 on a partial, +10 on a clean result. Once a season.</span>' + (rallyUsed ? '<span class="lock">Done this season</span>' : checkLine(PC.checks.assess(state, C.rallyCheck(state)))) + "</li>" +
-      "<li" + (drillUsed || !state.ap.left ? ' class="locked"' : "") + '><button data-act="drill"' + (drillUsed || C.skill(state) >= 2 || !state.ap.left ? " disabled" : "") + ">Drill the guns <small>(1 action)</small></button>" +
-        '<span class="cost">' + (C.skill(state) >= 2 ? "Your hands are already drilled." : "The crew count as drilled (+1 Gunnery) for the rest of the season.") + "</span>" + (drillUsed ? '<span class="lock">Done this season</span>' : "") + "</li>";
-    var ex = C.canMakeExample(state);
-    html += "<li" + (ex.ok ? "" : ' class="locked"') + '><button data-act="example"' + (ex.ok ? "" : " disabled") + ">Make an example of a troublemaker</button>" +
-      (ex.ok ? checkLine(PC.checks.assess(state, { type: "Discipline", dr: 2 })) : '<span class="lock">' + esc(ex.why) + "</span>") + "</li></ol>";
-    html += '<div class="svc"><h4>Give to the crew</h4><p class="small">Move gold from your purse into crew gold: +1 morale for every 5 gold a head (at most +10 a gift, +15 a season).</p>' +
-      (state.money.purse > 0 ? '<div class="buyrow">' + qtyBox("q-give", Math.min(state.money.purse, c.count * 5 * 2), state.money.purse) + '<button data-act="give" data-for="q-give">Give</button></div>' : '<p class="small muted">Your purse is empty.</p>') + "</div>";
-    html += '<div class="svc"><h4>Rationing</h4><p class="small">' + (c.rationing ? "On: provisions burn 25% slower, and a Ration Stores check each season sets the cost to morale." : "Off.") + "</p>" +
-      '<button data-act="rationing">' + (c.rationing ? "Lift rationing" : "Order rationing") + "</button></div>";
+    var check = !signed_ && rd.dr != null ? PC.checks.assess(state, { type: "Pirate Code", dr: rd.dr }) : null;
+    html += '<div class="svc" style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">' + greedGauge(g) + '<div style="flex:1;min-width:220px"><p class="sc" style="margin:0">Greed: ' + esc(rep.name) + "</p>" +
+      '<ul class="small" style="padding-left:1.1em;margin:4px 0">' +
+      "<li>" + (rd.cheer ? "The crew will cheer: morale +" + rd.cheer + "." : rd.dr == null ? "The crew will accept these terms." : "Hard terms: you'll read them out with a Pirate Code check.") + "</li>" +
+      "<li>In port: " + (rep.pool === 1 ? "word of fair terms; crew pools as usual." : "crew pools " + (rep.pool > 1 ? "+" : "−") + Math.abs(Math.round((rep.pool - 1) * 100)) + "% at every port.") + "</li>" +
+      "<li>You can always loosen a term. Harder terms wait for the Winter split.</li></ul>" + "</div></div>";
+    if (!signed_) {
+      html += (check ? opts([opt({ act: "nop", label: "Reading the Articles to the crew", check: check, meta: "A Pirate Code check at signing" })]) : "") +
+        '<div class="actions"><button class="primary" data-act="artask">Sign the Articles</button><button class="secondary" data-act="artreset">Reset to Standard</button></div>';
+    }
     return html;
   }
 
+  function crewTab() {
+    var c = state.crew, C = PC.crew, sh = state.ship;
+    var colors = { Green: "#b89a66", Able: "#8a6414", Seasoned: "#5e4528", Veteran: "#2a1c10" };
+    var bar = '<div class="hbar" style="height:18px;display:flex;max-width:680px">' + PC.data.economy.TIER_ORDER.map(function (t) {
+      var n = c.tiers[t] || 0;
+      return n ? '<i title="' + n + " " + t + '" style="position:static;display:inline-block;height:100%;width:' + (100 * n / sh.crewMax) + "%;background:" + colors[t] + '"></i>' : "";
+    }).join("") + (c.wounded ? '<i title="' + c.wounded + ' wounded" style="position:static;display:inline-block;height:100%;width:' + (100 * c.wounded / sh.crewMax) + '%;background:repeating-linear-gradient(45deg,#8f2a1c 0 2px,transparent 2px 5px)"></i>' : "") + "</div>";
+    var html = '<div class="svc"><h4>Hands · ' + c.count + " of " + sh.crewMax + (c.wounded ? " · " + c.wounded + " wounded" : "") + "</h4>" + bar +
+      '<p class="small">' + PC.data.economy.TIER_ORDER.filter(function (t) { return c.tiers[t]; }).map(function (t) { return '<span title="' + esc(TIER_TIP[t]) + '" style="border-bottom:1px dotted">' + c.tiers[t] + " " + t + "</span>"; }).join(" · ") + "</p></div>";
+    html += '<div class="svc"><h4>Morale · ' + c.morale + " · " + esc(C.band(c.morale)) + '</h4><div class="hbar" style="height:12px;max-width:680px"><i style="width:' + c.morale + '%;background:#2f5a22"></i></div></div>';
+    html += '<table class="ledger wide">' +
+      '<tr><th><span title="The average worth of your hands (Green 0 to Veteran 3), less 1 in a season when raw hands are over a quarter of the crew." style="border-bottom:1px dotted">Skill</span></th><td>' + C.skill(state) + (c.raw > 0.25 * c.count ? ' <span class="note">(raw hands this season: −1)</span>' : "") + "</td></tr>" +
+      '<tr><th><span title="How well the crew follow orders. Fed by your Quartermaster, Strict Articles and Make an Example." style="border-bottom:1px dotted">Discipline</span></th><td>' + C.discipline(state) + "</td></tr>" +
+      '<tr><th><span title="Skill and Discipline together: what the crew adds in a fight." style="border-bottom:1px dotted">Crew Rating</span></th><td>' + C.crewRating(state) + "</td></tr>" +
+      lrow("Guns drilled", C.drilled(state) ? "Yes" : "No") +
+      '<tr><th><span title="What one hand takes from a haul, at the current Articles." style="border-bottom:1px dotted">One share</span></th><td>' + gold(Math.round(C.oneShare(state))) + " crew gold</td></tr></table>";
+    var rallyUsed = C.usedThisSeason(state, "rally"), drillUsed = C.usedThisSeason(state, "drill");
+    var ex = C.canMakeExample(state);
+    html += opts([
+      opt({ act: "rally", label: "Rally the crew " + apText(1), ap: 1, check: rallyUsed ? null : PC.checks.assess(state, C.rallyCheck(state)), meta: "Morale +5 on a partial, +10 on a clean result. Once a season.",
+        lock: rallyUsed ? "Done this season" : !state.ap.left ? "No actions left this season" : null }),
+      opt({ act: "drill", label: "Drill the guns " + apText(1), ap: 1, meta: C.skill(state) >= 2 ? "Your hands are already drilled." : "The crew count as drilled (+1 Gunnery) for the rest of the season. Once a season.",
+        lock: drillUsed ? "Done this season" : C.skill(state) >= 2 ? "Already drilled" : !state.ap.left ? "No actions left this season" : null }),
+      opt({ act: "example", label: "Make an example of a troublemaker", check: ex.ok ? PC.checks.assess(state, { type: "Discipline", dr: 2 }) : null,
+        meta: "No action · once a season, only when the crew is Sullen or Mutinous. Clean: Pressure −2, Discipline +1 for the season, Dread up. Partial: Pressure −1, morale −5. Setback: morale −5.", lock: ex.ok ? null : ex.why }),
+    ]);
+    var giveMax = state.money.purse;
+    html += '<div class="svc"><h4>Give to the crew</h4><p class="small">Move gold from your purse into crew gold: +1 morale for every 5 gold a head (at most +10 a gift, +15 a season).</p>' +
+      (giveMax > 0 ? '<div class="buyrow">' + qstep("q-give", Math.min(giveMax, c.count * 5 * 2), giveMax) + '<button class="secondary" data-act="give" data-for="q-give">Give</button> ' +
+        totalSlot(function () { var n = val("q-give"); return gold(n) + " gold · morale +" + (n > 0 ? PC.crew.giftMorale(state, n) : 0); }) + "</div>" : '<p class="note">Your purse is empty.</p>') + "</div>";
+    html += '<div class="svc"><h4>Rationing</h4><p class="small">' + (c.rationing ? "On: provisions burn 25% slower, and a Ration Stores check each season sets the cost to morale." : "Off.") + "</p>" +
+      '<button class="secondary" data-act="rationing">' + (c.rationing ? "Lift rationing" : "Order rationing") + "</button></div>";
+    return html;
+  }
+
+  function officerCard(o, full) {
+    var t = PC.data.creator.OFFICER_TYPES.filter(function (x) { return x.id === o.type; })[0];
+    var traits = [o.voice, o.secondary, o.third, o.unique && o.unique !== o.voice ? o.unique : null].filter(Boolean);
+    return '<div class="person" style="margin:12px 0">' + officerFace(o, 72, 108) + '<div class="pmain"><div class="namecard"><b>' + esc((o.first + " " + (o.last || "")).trim()) + "</b>" +
+      '<span class="role">' + esc(o.type + (officerRole(o) ? " · " + officerRole(o) : "")) + "</span>" + relWord(PC.npcs.rungName(o.rung)) + "</div>" +
+      (traits.length ? '<p class="small" style="margin:0"><i>' + esc(traits.join(", ")) + "</i></p>" : "") +
+      (t ? '<p class="small" style="margin:2px 0">' + esc(t.perk) + "</p>" : "") +
+      (o.mentor && t ? '<p class="small" style="margin:2px 0">Old Lessons: ' + esc(t.lessons) + "</p>" : "") +
+      (full ? "" : '<button class="link small" data-act="openmenu" data-menu="officer:' + esc(o.id) + '">Notes ›</button>') + "</div></div>";
+  }
+
   function officersTab() {
-    var list = (state.officers || []).filter(function (o) { return !o.gone; });
-    if (!list.length) return '<p class="muted">No officers aboard.</p>';
-    return list.map(function (o) { return mentorCard(o); }).join("") +
-      '<p class="small muted">Officers are hired at the Tavern: 1,000 crew gold each, one action a visit. One of each type; a new hire of a type you hold replaces the old one.</p>';
+    var list = aboard();
+    if (!list.length) return '<p class="note">No officers aboard.</p>';
+    return list.map(function (o) { return officerCard(o); }).join("") +
+      '<p class="note">Officers are hired at the Tavern: 1,000 crew gold each, one action a visit. One of each type; a new hire of a type you hold replaces the old one.</p>';
   }
 
   function cargoTab() {
-    var html = '<p>Hold: <b>' + PC.crew.slotsUsed(state) + " of " + state.ship.cargo + "</b> slots used. Treasure packs five units to a slot.</p>";
+    var html = holdBar() + '<p class="small">Treasure packs five units to a slot.</p>';
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: (k === "dirty" ? "Dirty" : "Clean") + " treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: (k === "dirty" ? "Dirty " : "") + g, n: n, dirty: k === "dirty" }); });
     });
     html += '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Jettison</th></tr>' + rows.map(function (r, i) {
-      return "<tr><td>" + esc(r.label) + "</td><td>" + r.n + "</td><td>" + (r.n ? '<div class="buyrow">' + qtyBox("q-jet-" + i, 1, r.n) +
-        '<button data-act="jettison" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '" data-for="q-jet-' + i + '">Over the side</button></div>' : "") + "</td></tr>";
+      var info = PC.data.goods[r.what];
+      return "<tr><td>" + esc(r.label) + (info && info.stores ? " " + STORES : "") + "</td><td>" + r.n + "</td><td>" + (r.n ? '<div class="buyrow">' + qstep("q-jet-" + i, 1, r.n) +
+        '<button class="secondary" data-act="jettison" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '" data-for="q-jet-' + i + '" data-big="' + (r.what === "treasure" ? 1 : 0) + '">Over the side</button></div>' : "") + "</td></tr>";
     }).join("") + "</table>";
     var used = PC.crew.usedThisSeason(state, "stores");
     var choices = PC.crew.storeChoices(state);
     var need = PC.crew.storesNeeded(state);
-    html += '<div class="svc"><h4>Open the stores</h4><p class="small">Once a season: ' + need + " unit" + (need === 1 ? "" : "s") + " of drink or tobacco for your " + state.crew.count + " hands.</p>" +
-      (used ? '<p class="small muted">Opened this season.</p>' : !choices.length ? '<p class="small muted">Not enough drink or tobacco aboard.</p>' :
-        choices.map(function (c) { return '<button data-act="stores" data-good="' + esc(c.good) + '">Open the ' + esc(c.good.toLowerCase()) + " (+" + c.morale + " morale)</button> "; }).join("")) + "</div>";
+    html += '<div class="svc"><h4>' + STORES + " Open the stores</h4><p class=\"small\">Once a season, no action: " + plural(need, "unit") + " of drink or tobacco for your " + state.crew.count + " hands.</p>" +
+      (used ? '<p class="note">Opened this season.</p>' : !choices.length ? '<p class="note">Not enough drink or tobacco aboard.</p>' :
+        '<div class="actions">' + choices.map(function (c) { return '<button class="secondary" data-act="stores" data-good="' + esc(c.good) + '">Open the ' + esc(c.good.toLowerCase()) + " (+" + c.morale + " morale)</button>"; }).join("") + "</div>") + "</div>";
     return html;
   }
 
-  function captainTab() {
-    var c = state.captain;
-    var training = Object.keys(c.training || {}).map(function (t) { return esc(t) + " +" + c.training[t]; }).join(", ") || "None";
-    var sh = state.ship;
-    return '<table class="ledger wide">' +
-      row("Captain", esc((c.first + " " + c.last).trim()) + ", age " + c.age) +
-      row("Traits", esc((c.traits || []).join(", ") || "None") + (c.flaws && c.flaws.length ? "; flaw: " + esc(c.flaws.join(", ")) : "")) +
-      row("Training", training) +
-      row("Tags", esc((c.tags || []).join(", ") || "None")) +
-      row("Items", esc((c.items || []).join(", ") || "None")) +
-      row("Ship", esc(sh.type) + " <i>" + esc(sh.name) + "</i>") +
-      row("Hull · Speed", sh.hull + " / " + sh.hullMax + " · " + sh.speed + (sh.rigging === "frayed" ? " (frayed rigging)" : "")) +
-      row("Upgrades", "Hull " + sh.upgrades.hull + " · Rigging " + sh.upgrades.rigging + " · Guns " + sh.upgrades.guns) +
-      row("Guns · crew", sh.guns + " / " + sh.gunsMax + " · " + state.crew.count + " / " + sh.crewMax + " (at least " + sh.crewMin + " to sail)") +
-      "</table>" + '<p class="small muted">Equipping items and clothing comes with the UI chat.</p>';
+  function cabinTab() {
+    return '<div class="hotframe" style="display:flex;align-items:center;justify-content:center"><p class="note" style="text-align:center;background:rgba(239,227,198,.85);padding:6px 14px">Woodcut · your cabin (simple)<br>16 : 10 · 1600 × 1000</p></div>' +
+      '<p class="note">Your cabin and its display spots come with the items work. Not in the prototype.</p>';
   }
 
-  // The journal (placeholder until the UI chat, §30.12): quests and their
-  // leads, then the live rumors by type.
-  function journalTab() {
-    var html = '<p class="small muted">A placeholder journal: the UI chat designs the real one.</p>';
+  // ---- The always-available menus (§38.5, §41.12) ---------------------------
+  // Journal, Rumors, Captain, Notes and Menu open over any screen, mid-scene
+  // included. They change nothing in the game but the notes.
+
+  var menu = null;
+  var journalTab = "quests";
+  var showAllSkills = false;
+
+  function menuHtml() {
+    if (!menu) return dialogHtml();
+    var body = menu === "menu" ? menuMain() : menu === "settings" ? menuSettings() : !state ? "" :
+      menu === "journal" ? menuJournal() : menu === "rumors" ? menuRumors() : menu === "captain" ? menuCaptain() : menu === "notes" ? menuNotes() :
+      menu === "dev" ? menuDev() : menu.indexOf("officer:") === 0 ? menuOfficer(menu.slice(8)) : "";
+    return '<div class="modal" data-act="closemenu"><div class="panel' + (menu === "captain" || menu === "dev" ? " wide" : "") + '" data-stop="1">' +
+      '<button class="secondary close" data-act="closemenu" aria-label="Close">' + ic("x") + "</button>" + body + "</div></div>" + dialogHtml();
+  }
+
+  function menuMain() {
+    return "<h2>Menu</h2>" + '<div class="title-buttons" style="margin:10px 0">' +
+      (state ? '<button class="secondary" data-act="export">Save file</button>' : "") +
+      '<button class="secondary" data-act="import">Load file</button>' +
+      '<button class="secondary" data-act="openmenu" data-menu="settings">Settings</button>' +
+      (state && settings.dev ? '<button class="secondary" data-act="openmenu" data-menu="dev">Developer</button>' : "") +
+      (state ? '<button class="secondary" data-act="quit">Title</button>' : "") + "</div>" +
+      (state ? '<p class="note">The game saves itself after every action.</p>' : "");
+  }
+
+  function menuSettings() {
+    return "<h2>Settings</h2>" +
+      '<label class="tog"><input type="checkbox" data-act="setreduce"' + (settings.reduceMotion ? " checked" : "") + "> Reduced motion</label>" +
+      '<label class="tog"><input type="checkbox" data-act="setdev"' + (settings.dev ? " checked" : "") + "> Developer mode</label>" +
+      '<p class="note">Developer mode shows the testing tools in the Menu. Reduced motion also follows your device setting.</p>' +
+      '<div class="actions"><button class="primary" data-act="' + (state ? "openmenu" : "closemenu") + '" data-menu="menu">Done</button></div>';
+  }
+
+  // The Journal (§41.12): Quests and the Log.
+  function menuJournal() {
+    var html = "<h2>Journal</h2>" + '<div class="tabs">' + [["quests", "Quests"], ["log", "Log"]].map(function (t) {
+      return '<button class="menubtn' + (journalTab === t[0] ? " on" : "") + '" data-act="jtab" data-tab="' + t[0] + '">' + t[1] + "</button>";
+    }).join("") + "</div>";
+    if (journalTab === "log") {
+      var groups = [], cur = null;
+      state.log.forEach(function (l) {
+        var m = /^— (.+) begins\. —$/.exec(l);
+        if (m || !cur) { cur = { title: m ? m[1] : "Before", lines: [] }; groups.push(cur); if (m) return; }
+        cur.lines.push(l);
+      });
+      return html + (groups.length ? groups.reverse().map(function (g) {
+        return '<div class="qcard"><h4>' + esc(g.title) + '</h4><ul class="small" style="padding-left:1.1em">' + g.lines.slice().reverse().map(function (l) { return "<li>" + esc(l.trim()) + "</li>"; }).join("") + "</ul></div>";
+      }).join("") : '<p class="note">Nothing yet.</p>');
+    }
     var q = PC.quests.journal(state);
-    html += q.length ? q.map(function (j) {
-      return '<div class="svc"><h4>' + esc(j.name) + ' <span class="small muted">' + j.leads + " of " + j.needed + " leads</span></h4>" + prose(j.summary) +
-        (j.entries.length ? "<ul>" + j.entries.map(function (e) { return "<li>" + prose(e).replace(/^<p>|<\/p>$/g, "") + "</li>"; }).join("") + "</ul>" : "") +
-        (j.beyond ? "<p><i>" + esc(j.beyond) + "</i></p>" : "") + "</div>";
-    }).join("") : '<p class="muted">No quests yet.</p>';
+    var open = q.filter(function (j) { return j.status !== "done"; }), done = q.filter(function (j) { return j.status === "done"; });
+    var card = function (j) {
+      return '<div class="qcard"><h4>' + esc(j.name) + "</h4>" + (j.objective ? '<p class="obj">' + inline(j.objective) + "</p>" : '<div class="small">' + prose(j.summary) + "</div>") +
+        (j.needed ? '<p class="small">Leads: ' + j.leads + " of " + j.needed + "</p>" : "") +
+        (j.entries.length ? '<ul class="small" style="padding-left:1.1em">' + j.entries.map(function (e) { return "<li>" + inline(e) + "</li>"; }).join("") + "</ul>" : "") +
+        (j.beyond ? '<p class="small"><i>' + esc(j.beyond) + "</i></p>" : "") +
+        (j.deadline ? '<p class="dl' + (j.lastSeason ? " last" : "") + '">' + esc(j.deadline) + "</p>" : "") + "</div>";
+    };
+    return html + (open.length ? open.map(card).join("") : '<p class="note">No quests open.</p>') +
+      (done.length ? '<details style="margin-top:12px"><summary class="sc" style="cursor:pointer">Done</summary>' + done.map(card).join("") + "</details>" : "");
+  }
+
+  // Rumors (§41.12): the leads tracker on top, then by type.
+  function menuRumors() {
+    var html = "<h2>Rumors</h2>";
+    var q = PC.quests.journal(state).filter(function (j) { return j.needed && j.status !== "done"; });
+    if (q.length) html += '<div class="svc"><h4>Leads</h4>' + q.map(function (j) { return '<p class="small" style="margin:2px 0">' + esc(j.name) + ": " + j.leads + " of " + j.needed + "</p>"; }).join("") + "</div>";
     var live = PC.rumors.liveRumors(state);
     var types = {};
     live.forEach(function (r) { (types[r.type] = types[r.type] || []).push(r); });
-    html += '<div class="svc"><h4>Rumors</h4>' + (live.length ? Object.keys(types).map(function (t) {
-      return "<p><b>" + esc(t) + "</b></p><ul>" + types[t].map(function (r) {
-        return "<li>" + prose(r.text).replace(/^<p>|<\/p>$/g, "") + ' <span class="small muted">(' + esc(r.source) + (r.expires != null ? "; good until the end of " + esc(PC.state.SEASONS[r.expires % 4]) + " " + Math.floor(r.expires / 4) : "") + ")</span></li>";
-      }).join("") + "</ul>";
-    }).join("") : '<p class="muted">Nothing heard yet.</p>') + "</div>";
-    return html;
+    return html + (live.length ? Object.keys(types).map(function (t) {
+      return '<div class="qcard"><h4>' + esc(t) + '</h4><ul style="padding-left:1.1em;font-size:18px">' + types[t].map(function (r) {
+        return "<li>" + inline(r.text) + ' <span class="note">(' + esc(r.source) + (r.expires != null ? "; good until the end of " + esc(PC.state.SEASONS[r.expires % 4]) + " " + Math.floor(r.expires / 4) : "") + ")</span></li>";
+      }).join("") + "</ul></div>";
+    }).join("") : '<p class="note">Nothing heard yet.</p>');
   }
 
-  // Notes: the player's own headcanon about the captain and the officers.
-  // No rules read them (ruled November 14).
-  function notesTab() {
+  // A modifier's effect in one line, from its record (content/modifiers.js).
+  function modLine(name) {
+    var m = (PC.data.modifiers || {})[name];
+    if (!m) return "";
+    var bits = (m.edge || []).map(function (e) {
+      var what = e.type || e.stat || (e.group ? e.group + " checks" : e.any ? "every check" : "");
+      var when = e.when ? " (" + (e.when.condition || (e.when.anyOf || []).join(" or ")) + ")" : "";
+      return signed(e.value) + " " + what + when;
+    });
+    if (m.reroll) bits.push("reroll " + m.reroll.types.join(" or ") + " once a season");
+    if (!bits.length && m.note) bits.push(m.note);
+    return bits.join("; ");
+  }
+
+  function skillsBlock() {
+    var c = state.captain, T = PC.data.checkTypes, all = Object.keys(T);
+    var html = "";
+    PC.checks.STATS.forEach(function (s) {
+      var list = all.filter(function (t) { return T[t].stat === s; }).map(function (t) {
+        var a = PC.checks.assess(state, { type: t, dr: 0 });
+        var mod = a.parts.filter(function (p) { return !/^(Cunning|Daring|Command|Seamanship|Charm|Grit)$/.test(p.label) && !/training|Difficulty/i.test(p.label); }).length;
+        return { t: t, total: a.edge, trained: (c.training || {})[t] || 0, mod: mod, player: T[t].player };
+      }).filter(function (x) { return showAllSkills || x.trained || x.mod; });
+      if (!list.length) return;
+      html += '<p class="sc" style="margin:10px 0 2px">' + esc(s) + " " + c.stats[s] + '</p><table class="ledger" style="max-width:420px">' + list.map(function (x) {
+        return '<tr><th><span' + (x.player ? ' title="' + esc(x.player) + '" style="border-bottom:1px dotted"' : "") + ">" + esc(x.t) + "</span>" + (x.trained ? ' <span class="note">trained +' + x.trained + "</span>" : "") + "</th><td>" + signed(x.total) + "</td></tr>";
+      }).join("") + "</table>";
+    });
+    return html + '<p><button class="link" data-act="allskills">' + (showAllSkills ? "Show only my skills" : "Show all " + Object.keys(T).length) + "</button></p>";
+  }
+
+  // The full captain sheet (§41.12).
+  function menuCaptain() {
+    var c = state.captain, pic = PC.creator.captainPortrait(c);
+    var loss = (PC.data.creator.LOSSES || []).filter(function (l) { return l.id === c.loss; })[0];
+    var stats = PC.checks.STATS.map(function (s) { return '<div class="vbar" style="width:auto"><span class="gp" style="font-size:34px">' + c.stats[s] + '</span><span class="sc">' + esc(s) + "</span></div>"; }).join("");
+    var lines = function (list, kind) {
+      return list.map(function (n) {
+        return '<li><b style="font-weight:normal">' + (kind === "flaw" ? '<span class="manicule flaw">☞</span> ' : "") + esc(n) + '</b> <span class="note">' + esc(modLine(n)) + "</span></li>";
+      }).join("");
+    };
+    return "<h2>Captain</h2>" + '<div class="person">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:120px;height:180px">' : "") +
+      '<div class="pmain"><p class="gp" style="font-size:30px;margin:0">' + esc((c.first + " " + c.last).trim()) + "</p>" +
+      '<p style="margin:2px 0">Age ' + c.age + " · Ash-Born of " + esc(c.homeCity) + (c.profession ? " · once " + esc(aOrAn(c.profession.toLowerCase())) : "") + "</p>" +
+      (loss ? '<p class="small" style="margin:2px 0">' + esc(loss.name) + ": " + esc(loss.tag) + "</p>" : "") +
+      '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:8px">' + stats + "</div></div></div>" +
+      '<div class="h4">Skills</div>' + skillsBlock() +
+      '<div class="h4">Traits, flaw, old ailments and tags</div><ul style="padding-left:1.1em;font-size:18px">' +
+      lines(c.traits || []) + lines(c.flaws || [], "flaw") + lines(c.debuffs || []) + lines((c.tags || []).filter(function (t) { return (c.debuffs || []).indexOf(t) < 0; })) + "</ul>" +
+      '<div class="h4">Items and equipment</div><p class="small">' + esc((c.items || []).join(", ") || "Nothing yet.") + ' <span class="note">The equipment screen comes later.</span></p>' +
+      '<div class="h4">Ship and stores</div><table class="ledger wide">' +
+      lrow("Ship", esc(state.ship.type) + " <i>" + esc(state.ship.name) + "</i>") + lrow("Hull · Speed", state.ship.hull + " / " + state.ship.hullMax + " · " + state.ship.speed) +
+      lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Provisions", state.provisions + " lots") +
+      lrow("Hold", PC.crew.slotsUsed(state) + " of " + state.ship.cargo) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
+      meters(true) + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+  }
+
+  function menuNotes() {
     var notes = state.notes || {};
-    var people = [{ id: "captain", name: (state.captain.first + " " + state.captain.last).trim() + " (your captain)" }].concat(
-      (state.officers || []).filter(function (o) { return !o.gone; }).map(function (o) { return { id: "officer:" + o.id, name: (o.first + " " + (o.last || "")).trim() + " (" + o.type + ")" }; }));
-    return '<p class="small muted">Your own notes. Nothing in the game reads them; they travel with your save.</p>' + people.map(function (p) {
-      return '<div class="svc"><h4>' + esc(p.name) + '</h4><textarea class="note-box" rows="3" data-note="' + esc(p.id) + '" placeholder="Who are they to you?">' + esc(notes[p.id] || "") + "</textarea></div>";
+    var people = [{ id: "voyage", name: "The voyage", ph: "What's happened, what's next" }, { id: "captain", name: (state.captain.first + " " + state.captain.last).trim() + " (your captain)", ph: "Who are they to you?" }].concat(
+      aboard().map(function (o) { return { id: "officer:" + o.id, name: (o.first + " " + (o.last || "")).trim() + " (" + o.type + ")", ph: "Who are they to you?" }; }));
+    return "<h2>Notes</h2><p class=\"note\">Your own notes. Nothing in the game reads them; they travel with your save.</p>" + people.map(function (p) {
+      return '<div class="svc"><h4>' + esc(p.name) + '</h4><textarea class="note-box" rows="3" data-note="' + esc(p.id) + '" placeholder="' + esc(p.ph) + '">' + esc(notes[p.id] || "") + "</textarea></div>";
     }).join("");
   }
 
-  // ---- The arrival popup ----
+  function menuOfficer(id) {
+    var o = (state.officers || []).filter(function (x) { return x.id === id; })[0];
+    if (!o) return "<h2>Officer</h2><p class=\"note\">No longer aboard.</p>";
+    var notes = state.notes || {};
+    return "<h2>" + esc(o.type) + "</h2>" + officerCard(o, true) +
+      '<div class="svc"><h4>Your notes</h4><textarea class="note-box" rows="3" data-note="officer:' + esc(o.id) + '" placeholder="Who are they to you?">' + esc(notes["officer:" + o.id] || "") + "</textarea></div>";
+  }
+
+  // ---- Popups ----
 
   function popupHtml() {
     var p = state.location && state.location.popup;
     if (!p) return "";
-    return '<div class="modal"><div class="panel"><h2>' + esc(p.title) + "</h2>" +
-      "<ul>" + p.lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul>" +
-      '<div class="actions"><button class="primary" data-act="closepopup">Continue</button></div></div></div>';
+    var list = (p.chips || p.lines.map(function (l) { return { icon: "rumor", text: l }; }));
+    return '<div class="modal"><div class="panel" style="max-width:560px"><h2>' + esc(p.title) + "</h2>" + (p.text ? '<div class="prose">' + prose(p.text) + "</div>" : "") + chips(list) +
+      '<div class="actions">' + (p.back ? '<button class="secondary" data-act="' + p.back + '">Go back</button>' : "") +
+      '<button class="primary" data-act="' + (p.ok || "closepopup") + '">' + esc(p.okLabel || "Continue") + "</button></div></div></div>";
   }
+
+  // ---- Developer (§41.12): hidden unless Developer mode is on ----
+
+  function menuDev() {
+    var v = PC.validate(state);
+    var list = function (arr) { return arr.length ? '<ul class="small">' + arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>" : '<p class="note">None.</p>'; };
+    var grp = function (t, body) { return '<div class="devgroup"><span class="sc">' + t + "</span>" + body + "</div>"; };
+    var b = function (a, t, extra) { return '<button class="secondary" data-act="' + a + '"' + (extra || "") + ">" + t + "</button>"; };
+    var here = state.location ? N().nodeData(N().here(state)) : null;
+    return "<h2>Developer</h2>" +
+      grp("Display", '<label class="tog"><input type="checkbox" data-act="toggledice"' + (state.settings.showDice ? " checked" : "") + "> Show the dice on results</label>" +
+        '<label class="tog"><input type="checkbox" data-act="togglegender"' + (state.captain.gender === "f" ? " checked" : "") + "> Woman captain (tests the pronoun swap)</label>") +
+      grp("Time", '<div class="actions">' + b("addap", "+1 action") + b("fillap", "Top up actions") + b("devnewseason", "Start the next season") + b("tohub", "Back to the town menu") + "</div>") +
+      (state.location ? grp("Money and cargo", '<div class="actions">' + b("devgold", "+500 crew gold") + b("devpurse", "+500 purse") + b("devtreasure", "+10 clean treasure", ' data-dirty="0"') +
+        b("devtreasure", "+10 dirty treasure", ' data-dirty="1"') + b("devdamage", "Damage the hull (−5)") + b("devarrive", "The arrival popup (back from a hunt, 4 wounded)") + "</div>") : "") +
+      (state.location ? grp("Story", (PC.devtools && PC.devtools.skipQuests ? '<div class="actions">' + b("devskip", "Skip the mandatory quests") + "</div>" : "") +
+        '<p class="small">Loss variant: ' + ["A", "B", "C"].map(function (x) { return '<button class="' + (state.captain.loss === x ? "primary" : "secondary") + '" data-act="devloss" data-loss="' + x + '">' + x + "</button>"; }).join(" ") +
+        " · Frisian posture: " + PC.state.POSTURES.map(function (p) { return '<button class="' + (state.world.posture === p ? "primary" : "secondary") + '" data-act="devposture" data-posture="' + p + '">' + p + "</button>"; }).join(" ") + "</p>" +
+        '<p class="small">Jump to a scene: <select class="devscene">' + Object.keys(PC.data.scenes).filter(function (id) { return id.indexOf("ocr_") === 0; }).map(function (id) {
+          return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
+        }).join("") + "</select> " + b("devjump", "Go") + "</p>") : "") +
+      grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
+      grp("Info", '<p class="small">World seed ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
+        (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) { var g = state.generated[sl.id]; return esc(sl.label + ": " + g.full + " (" + (g.gender === "f" ? "woman" : "man") + ", " + g.age + "; " + g.traits.join(", ") + ")"); }).join(" · ") + "</p>" : "") +
+        "<p><b>Content check: errors</b></p>" + list(v.errors) + "<p><b>Warnings</b></p>" + list(v.warnings));
+  }
+
+  // ---- The prologues (§40) arrive with the creator push ----
+  var prologue = null;
+  function drawPrologue() { prologue = null; draw(); }
+
+  // ---- Node actions ----------------------------------------------------------
 
   function qty(el) {
     var box = el.dataset.for ? document.getElementById(el.dataset.for) : null;
     var n = box ? Math.floor(Number(box.value)) : 1;
-    if (!(n > 0)) throw new Error("Enter a number above zero.");
+    if (!(n > 0)) throw new Error("Choose a number above zero.");
     if (box && box.max && n > Number(box.max)) n = Number(box.max);
     return n;
   }
 
   function enterPlace(place) {
     var fire = N().enter(state, place);
-    if (place === "tavern" && !state.flags[N().FLAGS.tavernDone]) {
-      var k = PC.npcs.get(state, N().slotNpc(N().here(state), "keeper"));
-      say(null, "This is your first visit to the Tavern. Ask " + k.first + " for rumors" + (N().oneArmedHere(state) ? ", talk to the one-armed pirate" : "") + ", or leave; the rest opens once your first visit is done.");
-    }
+    diveZone = null; drinkSpot = null;
+    state.location.said = {};
     if (fire) PC.scenes.enterScene(state, fire);
   }
 
+  function who(slot) { return N().slotNpc(N().here(state), slot); }
+  function firstName(id) { return PC.npcs.get(state, id).first; }
+
   var nodeHandlers = {
     // ---- The minigames (§18) ----
-    "drink": function () { scrollTop(); PC.drinking.start(state); },
-    "dice": function () { scrollTop(); PC.liarsdice.start(state); },
-    "divewreck": function (el) { scrollTop(); PC.salvage.startGraveyardDive(state, el.dataset.wreck, false); },
-    "divequick": function (el) { scrollTop(); PC.salvage.startGraveyardDive(state, el.dataset.wreck, true); },
-    "miranda": function () { scrollTop(); PC.salvage.retryMiranda(state); },
+    "drink": function () { drinkSpot = null; PC.drinking.start(state); },
+    "dice": function () { PC.liarsdice.start(state); },
+    "divewreck": function (el) { diveZone = null; PC.salvage.startGraveyardDive(state, el.dataset.wreck, false); },
+    "divequick": function (el) { diveZone = null; PC.salvage.startGraveyardDive(state, el.dataset.wreck, true); },
+    "miranda": function () { diveZone = null; PC.salvage.retryMiranda(state); },
+    "divezone": function (el) { diveZone = el.dataset.zone; },
+    "drinkspot": function (el) { drinkSpot = drinkSpot === el.dataset.spot ? null : el.dataset.spot; },
     "mgdive": function (el) { PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
     "mgquick": function () { PC.salvage.quickDive(state); },
     "mgbank": function (el) { PC.salvage.bank(state, state.minigame, el.dataset.pot); },
-    "mgdrink": function (el) { PC.drinking.act(state, el.dataset.op); },
+    "mgdrink": function (el) { PC.drinking.act(state, el.dataset.op); drinkSpot = null; },
     "mgonemore": function (el) { PC.drinking.oneMore(state, el.dataset.yes === "1"); },
     "mgreroll": function () { PC.minigames.reroll(state); },
     "mgaccept": function () { PC.minigames.settle(state); },
-    "mgleave": function () { scrollTop(); PC.minigames.leave(state); },
+    "mgleave": function () { diveZone = null; drinkSpot = null; PC.minigames.leave(state); },
     "mgsize": function () { PC.liarsdice.sizeUp(state); },
-    "mgstake": function (el) { PC.liarsdice.newGame(state, Number(document.getElementById(el.dataset.for).value)); },
+    "mgstake": function (el) { PC.liarsdice.newGame(state, qty(el)); },
     "mgbid": function () { PC.liarsdice.bid(state, Number(document.getElementById("bid-q").value), Number(document.getElementById("bid-f").value)); },
     "mgliar": function () { PC.liarsdice.callLiar(state); },
     "mgcheat": function (el) { PC.liarsdice.cheat(state, Number(el.dataset.i)); },
     "mgnextround": function () { PC.liarsdice.nextRound(state); },
     "mgclosegame": function () { PC.liarsdice.closeGame(state); },
     "mgstop": function () { PC.liarsdice.stop(state); },
-    "goplace": function (el) { enterPlace(el.dataset.place); },
+    "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },
     "leaveplace": function () {
-      scrollTop();
       var fire = N().leave(state);
       if (fire) PC.scenes.enterScene(state, fire);
     },
+    "nop": function () {},
+    // The Tavern Talk: the captain's line shows between the keeper's
+    // greeting and the rumors (the M3 review, §37.9).
     "rumors": function () {
-      var id = N().slotNpc(N().here(state), "keeper");
+      var id = who("keeper");
       var g = N().talkToKeeper(state);
       var r = PC.rumors.askKeeper(state);
-      var who = PC.npcs.get(state, id).first + ":";
-      if (r.refuse) { say(who, r.line); return; }
+      var L = N().nodeData(N().here(state)).lines.keeper;
+      if (r.refuse) { say(id, firstName(id), r.line); return; }
       var heard = r.rumors.map(function (x) { return x.text; });
       if (r.extra) heard.push(r.extraLine + " " + r.extra.text);
-      say(who, g.line, "Tavern Talk: " + { clean: "clean, one more rumor", partial: "partial", setback: "setback" }[r.talk.outcome] + "." + (state.settings.showDice ? " (Dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge + ")" : ""), heard);
+      say(id, firstName(id), g.line, null, heard, { ask: L.askRumors, heardNote: heard.length ? "Added to your Rumors." : null,
+        chips: state.settings.showDice ? [{ icon: "ap", text: "Tavern Talk: " + r.talk.outcome + " (dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge + ")" }] : null });
     },
     "nextqueued": function () {
       var next = N().nextQueued(state);
@@ -885,100 +1466,106 @@
       var heard = [];
       if (r.lead) heard.push(r.lead);
       if (r.rumor) heard.push(r.rumor.text);
-      say(null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town, but nobody tells you anything. They do notice you asking." }[r.outcome],
-        "Gather Intelligence: " + r.outcome + "." + (r.pick && r.pick.length ? " Pick what you want to hear about." : ""), heard);
+      say("around", null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town, but nobody tells you anything. They do notice you asking." }[r.outcome],
+        r.pick && r.pick.length ? "Pick what you want to hear about." : null, heard, { heardNote: heard.length ? "Added to your Rumors." : null, chips: [{ icon: OUTCOME[r.outcome] ? "rumor" : "rumor", text: "Gather Intelligence: " + OUTCOME[r.outcome][0].toLowerCase() }] });
     },
     "gatherpick": function (el) {
       var r = PC.rumors.gatherPick(state, el.dataset.type);
       var prev = state.location.say || {};
-      say(prev.who, prev.line, null, (prev.heard || []).concat(r ? [r.text] : []));
+      say("around", prev.who, prev.line, null, (prev.heard || []).concat(r ? [r.text] : []), { heardNote: "Added to your Rumors." });
     },
-    "hire": function (el) {
+    "hireofficer": function (el) {
       var r = PC.officers.hire(state, el.dataset.officer);
       var o = r.officer;
       var note = (r.replaced ? r.replaced.officer.first + " is dismissed with " + r.replaced.pay + " crew gold: " + r.replaced.line + " " : "") +
         (r.mentorLine ? "[Mentor]: " + r.mentorLine : "");
-      say(null, (o.first + " " + (o.last || "")).trim() + " signs on as your " + o.type + ".", PC.text.render(note, state) || null);
+      say("officers", null, (o.first + " " + (o.last || "")).trim() + " signs on as your " + o.type + ".", PC.text.render(note, state) || null);
     },
-    "askfrench": function () { say("Bobby:", PC.rumors.askFrench(state), "A lead for your journal: the Hidden Haven (1 of 2)."); },
-    "offerclean": function () { say("Bobby:", N().nodeData(N().here(state)).lines.fence.offeredClean); },
-    "offerdirty": function () { var prov = N().slotNpc(N().here(state), "provisioner"); say(PC.npcs.get(state, prov).first + ":", N().nodeData(N().here(state)).lines.provisioner.dirty); },
+    "askfrench": function () {
+      var f = N().nodeData(N().here(state)).fence.npc;
+      say(f, firstName(f), PC.rumors.askFrench(state), null, null, { chips: [{ icon: "lead", text: "A new lead · the Hidden Haven · Journal updated", ink: "oxblood" }] });
+    },
+    "offerclean": function () {
+      var f = N().nodeData(N().here(state)).fence.npc;
+      state.location.said = state.location.said || {}; state.location.said.offerclean = true;
+      say(f, firstName(f), N().nodeData(N().here(state)).lines.fence.offeredClean);
+    },
+    "offerdirty": function () {
+      var prov = who("provisioner");
+      state.location.said = state.location.said || {}; state.location.said.offerdirty = true;
+      say(prov, firstName(prov), N().nodeData(N().here(state)).lines.provisioner.dirty);
+    },
     "lodging": function (el) {
+      var id = who("keeper");
       var r = N().lodging(state, Number(el.dataset.ap));
-      say(PC.npcs.get(state, N().slotNpc(N().here(state), "keeper")).first + ":", r.line, "Crew morale +" + r.morale + ".");
+      say(id, firstName(id), r.line, null, null, { chips: [{ icon: "morale", text: "Crew morale +" + r.morale }] });
     },
     "repair": function (el) {
+      var id = who("shipwright");
       var hp = el.dataset.all ? state.ship.hullMax - state.ship.hull : qty(el);
       var r = N().repair(state, hp);
-      say(PC.npcs.get(state, N().slotNpc(N().here(state), "shipwright")).first + ":", r.line, r.fixedRigging ? "The frayed rigging is fixed: Speed " + state.ship.speed + "." : null);
+      say(id, firstName(id), r.line, r.fixedRigging ? "The frayed rigging is fixed: Speed " + state.ship.speed + "." : null);
     },
-    "upgrade": function (el) { var r = N().upgrade(state, el.dataset.track); say(PC.npcs.get(state, N().slotNpc(N().here(state), "shipwright")).first + ":", r.line); },
-    "guns": function (el) { var r = N().buyGuns(state, qty(el)); say(PC.npcs.get(state, N().slotNpc(N().here(state), "shipwright")).first + ":", r.line); },
-    "hire": function (el) { var r = N().recruit(state, el.dataset.tier, qty(el)); say(null, r.line, r.n ? r.n + " hands for " + gold(r.cost) + " crew gold." : null); },
-    "payoff": function (el) { var r = N().payOff(state, el.dataset.tier, qty(el)); say(null, r.line, gold(r.cost) + " crew gold."); },
-    "buyprov": function (el) { var r = N().buyProvisions(state, qty(el)); say(PC.npcs.get(state, N().slotNpc(N().here(state), "provisioner")).first + ":", r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
-    "buygood": function (el) { var r = N().buyGood(state, el.dataset.good, qty(el)); say(PC.npcs.get(state, N().slotNpc(N().here(state), "provisioner")).first + ":", r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
+    "upgrade": function (el) { var id = who("shipwright"); var r = N().upgrade(state, el.dataset.track); say(id, firstName(id), r.line); },
+    "guns": function (el) { var id = who("shipwright"); var r = N().buyGuns(state, qty(el)); say(id, firstName(id), r.line); },
+    // One Sign button for every tier (§41.8).
+    "signhands": function (el) {
+      var n = 0, cost = 0, line = null;
+      el.dataset.tiers.split(",").forEach(function (t) {
+        var k = val("q-hire-" + t);
+        if (k > 0) { var r = N().recruit(state, t, k); n += r.n || 0; cost += r.cost || 0; line = r.line; }
+      });
+      if (!line) throw new Error("Choose how many hands to sign.");
+      say("hands", null, line, n ? plural(n, "hand") + " for " + gold(cost) + " crew gold." : null);
+    },
+    "payoff": function (el) { var r = N().payOff(state, el.dataset.tier, qty(el)); say("hands", null, r.line, gold(r.cost) + " crew gold."); },
+    "buyprov": function (el) { var id = who("provisioner"); var r = N().buyProvisions(state, qty(el)); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
+    "buygood": function (el) { var id = who("provisioner"); var r = N().buyGood(state, el.dataset.good, qty(el)); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
     "sell": function (el) {
       var r = N().sell(state, el.dataset.buyer, el.dataset.what, qty(el));
-      var who = el.dataset.buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : N().slotNpc(N().here(state), "provisioner");
-      say(PC.npcs.get(state, who).first + ":", r.line, r.units ? "Sold " + r.units + " for " + gold(r.gold) + " crew gold." : null,
-        r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null);
+      var id = el.dataset.buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : who("provisioner");
+      say(id, firstName(id), r.line, r.units ? "Sold " + r.units + " for " + gold(r.gold) + " crew gold." : null,
+        r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null, r.rumor ? { heardNote: "Added to your Rumors." } : null);
     },
     "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; },
-    "artpick": function (el) { articleDraft[el.dataset.slot] = el.dataset.opt; },
+    "artpick": function (el) { articleDraft = articleDraft || PC.articles.defaults(); articleDraft[el.dataset.slot] = el.dataset.opt; },
+    "artreset": function () { articleDraft = PC.articles.defaults(); },
+    // The Articles popup comes before signing, with a way back (§38.7).
+    "artask": function () {
+      state.location.popup = { title: "Sign the Articles?", text: "You can loosen a term at any time, and the crew will thank you for it.\n\nHarder terms have to wait for the next split. A split is when the crew takes its shares and may sign new Articles, and splits happen only at the start of Winter.",
+        chips: [], back: "closepopup", ok: "artsign", okLabel: "Sign them" };
+    },
     "artsign": function () {
+      state.location.popup = null;
       var r = PC.articles.sign(state, articleDraft || PC.articles.defaults());
       articleDraft = null;
       var text = { accepted: "The crew file up and put their names to it.", cheered: "The crew cheer as they sign.", clean: "You read the terms out and the crew sign without a murmur.", partial: "The crew sign, but there's grumbling.", setback: "The crew sign with sour faces." }[r.outcome];
-      say(null, text, r.effects.length ? r.effects.join(", ") + "." : null);
+      say("ship", null, text, r.effects.length ? r.effects.join(", ") + "." : null);
       state.location.tab = "articles";
-      state.location.popup = { title: "The Articles are signed", lines: [
-        "You can loosen a term at any time, and the crew will thank you for it.",
-        "Harder terms have to wait for the next split. A split is when the crew takes its shares and may sign new Articles, and splits happen only at the start of Winter.",
-      ] };
     },
-    "artamend": function (el) { var c = PC.articles.amend(state, el.dataset.slot, el.dataset.opt); say(null, "The change is read out to the crew.", c.morale ? "Crew morale +" + c.morale + "." : null); },
-    "rally": function () { var r = PC.crew.rally(state); say(null, { clean: "The men roar back at you.", partial: "A few cheers, and some nods.", setback: "The speech falls flat." }[r.outcome], r.gain ? "Crew morale +" + r.gain + "." : null); },
-    "drill": function () { PC.crew.drill(state); say(null, "The guns run in and out until the crew can do it in their sleep.", "Drilled for the rest of the season."); },
-    "example": function () { var r = PC.crew.makeExample(state, "Discipline"); say(null, "You make an example of a troublemaker: " + r.outcome + "."); },
-    "give": function (el) { var m = PC.crew.give(state, qty(el)); say(null, "The gold goes into the crew's chest.", m ? "Crew morale +" + m + "." : "No change in morale."); },
+    "artamend": function (el) { var c = PC.articles.amend(state, el.dataset.slot, el.dataset.opt); say("ship", null, "The change is read out to the crew.", c.morale ? "Crew morale +" + c.morale + "." : null); },
+    "rally": function () { var r = PC.crew.rally(state); say("ship", null, { clean: "The men roar back at you.", partial: "A few cheers, and some nods.", setback: "The speech falls flat." }[r.outcome], r.gain ? "Crew morale +" + r.gain + "." : null); },
+    "drill": function () { PC.crew.drill(state); say("ship", null, "The guns run in and out until the crew can do it in their sleep.", "Drilled for the rest of the season."); },
+    "example": function () { var r = PC.crew.makeExample(state, "Discipline"); say("ship", null, "You make an example of a troublemaker: " + OUTCOME[r.outcome][0].toLowerCase() + "."); },
+    "give": function (el) { var m = PC.crew.give(state, qty(el)); say("ship", null, "The gold goes into the crew's chest.", m ? "Crew morale +" + m + "." : "No change in morale."); },
     "rationing": function () { PC.crew.toggleRationing(state); },
-    "jettison": function (el) { PC.crew.jettison(state, el.dataset.what, qty(el), el.dataset.dirty === "1"); },
-    "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say(null, "The crew drink to your health.", "Crew morale +" + m + "."); },
+    "jettison": function (el) {
+      var n = qty(el);
+      if ((el.dataset.big === "1" || n > 3) && !jettisonOk) { jettisonOk = { what: el.dataset.what, n: n, dirty: el.dataset.dirty === "1" };
+        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
+        return; }
+      PC.crew.jettison(state, el.dataset.what, n, el.dataset.dirty === "1");
+    },
+    "jetconfirm": function () { var j = jettisonOk; jettisonOk = null; state.location.popup = null; if (j) PC.crew.jettison(state, j.what, j.n, j.dirty); },
+    "jetcancel": function () { jettisonOk = null; state.location.popup = null; },
+    "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship", null, "The crew drink to your health.", "Crew morale +" + m + "."); },
     "closepopup": function () { state.location.popup = null; },
   };
-
-  // ---- Developer panel -------------------------------------------------
-
-  function devPanel() {
-    var v = PC.validate(state);
-    var list = function (arr) { return arr.length ? "<ul>" + arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>" : "<p>None.</p>"; };
-    return '<div class="modal" data-act="closedev"><div class="panel" onclick="event.stopPropagation()">' +
-      "<h2>Developer</h2>" +
-      '<label><input type="checkbox" data-act="toggledice"' + (state.settings.showDice ? " checked" : "") + "> Show the dice on results</label>" +
-      '<label><input type="checkbox" data-act="togglegender"' + (state.captain.gender === "f" ? " checked" : "") + "> Woman captain (tests the pronoun swap)</label>" +
-      '<div class="actions"><button data-act="addap">+1 action</button><button data-act="fillap">Top up actions</button><button data-act="tohub">Back to the town menu</button></div>' +
-      (state.location ? '<h3>Testing Ocracoke</h3><div class="actions">' +
-        '<button data-act="devgold">+500 crew gold</button><button data-act="devpurse">+500 purse</button>' +
-        '<button data-act="devtreasure" data-dirty="0">+10 clean treasure</button><button data-act="devtreasure" data-dirty="1">+10 dirty treasure</button>' +
-        '<button data-act="devdamage">Damage the hull (-5)</button>' +
-        '<button data-act="devarrive">Return from a hunt (4 wounded): the arrival popup</button></div>' +
-        '<h3>Testing Milestone 3</h3><p class="small">Loss variant: ' + ["A", "B", "C"].map(function (v) {
-          return '<button data-act="devloss" data-loss="' + v + '"' + (state.captain.loss === v ? ' class="primary"' : "") + ">" + v + "</button>";
-        }).join(" ") + ' · Frisian posture: ' + PC.state.POSTURES.map(function (p) {
-          return '<button data-act="devposture" data-posture="' + p + '"' + (state.world.posture === p ? ' class="primary"' : "") + ">" + p + "</button>";
-        }).join(" ") + "</p>" +
-        '<p class="small">Jump to a scene: <select class="devscene">' + Object.keys(PC.data.scenes).filter(function (id) { return id.indexOf("ocr_") === 0; }).map(function (id) {
-          return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
-        }).join("") + '</select> <button data-act="devjump">Go</button> <button data-act="devnewseason">Start the next season</button></p>' +
-        '<p class="small muted">Ocracoke\'s people this world: ' + N().nodeData(N().here(state)).slots.map(function (sl) { var g = state.generated[sl.id]; return esc(sl.label + ": " + g.full + " (" + (g.gender === "f" ? "woman" : "man") + ", " + g.age + "; " + g.traits.join(", ") + ")"); }).join(" · ") + "</p>" : "") +
-      '<p class="small muted">World seed: ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
-      "<h3>Content check</h3><p><b>Errors</b></p>" + list(v.errors) + "<p><b>Warnings</b></p>" + list(v.warnings) +
-      '<div class="actions"><button data-act="closedev" class="primary">Close</button></div>' +
-      "</div></div>";
-  }
+  var jettisonOk = null;
 
   // ---- Save files (in-page dialogs: some hosts block downloads and pop-ups) ----
+
+
 
   function saveFileName() {
     var c = state.captain;
@@ -1017,7 +1604,7 @@
     try {
       state = PC.state.deserialize(String(text).trim());
       PC.state.saveToBrowser(state);
-      dialog = null;
+      dialog = null; menu = null; creating = false;
       toast("Save loaded.");
     } catch (e) { toast("Couldn't load that save: " + e.message); }
     draw();
@@ -1036,7 +1623,7 @@
       return '<div class="modal" data-act="closedialog"><div class="panel" onclick="event.stopPropagation()">' +
         "<h2>Save file</h2><p>Keep your game outside this browser. Download it, or copy it and paste it into a text file.</p>" +
         '<textarea class="savetext" readonly>' + esc(PC.state.serialize(state)) + "</textarea>" +
-        '<div class="actions"><button data-act="download" class="primary">Download</button><button data-act="copy">Copy</button><button data-act="closedialog">Close</button></div>' +
+        '<div class="actions"><button data-act="download" class="primary">Download</button><button data-act="copy" class="secondary">Copy</button><button data-act="closedialog" class="secondary">Close</button></div>' +
         "</div></div>";
     }
     if (dialog === "import") {
@@ -1044,13 +1631,19 @@
         "<h2>Load a save</h2><p>Choose a save file, or paste a copied save into the box.</p>" +
         '<p><input type="file" accept=".json,.txt,application/json,text/plain" data-act="pickfile"></p>' +
         '<textarea class="savetext pastebox" placeholder="Paste a save here"></textarea>' +
-        '<div class="actions"><button data-act="loadpasted" class="primary">Load pasted save</button><button data-act="closedialog">Cancel</button></div>' +
+        '<div class="actions"><button data-act="loadpasted" class="primary">Load pasted save</button><button data-act="closedialog" class="secondary">Cancel</button></div>' +
+        "</div></div>";
+    }
+    if (dialog === "confirmquick") {
+      return '<div class="modal" data-act="closedialog"><div class="panel" onclick="event.stopPropagation()">' +
+        "<h2>Quick start?</h2><p>The test captain replaces the game saved in this browser. Use Save file first if you want to keep it.</p>" +
+        '<div class="actions"><button data-act="quickstart" class="primary">Quick start</button><button data-act="closedialog" class="secondary">Cancel</button></div>' +
         "</div></div>";
     }
     if (dialog === "confirmnew") {
       return '<div class="modal" data-act="closedialog"><div class="panel" onclick="event.stopPropagation()">' +
         "<h2>Start a new game?</h2><p>The game saved in this browser will be replaced. Use Save file first if you want to keep it.</p>" +
-        '<div class="actions"><button data-act="newconfirmed" class="primary">Start a new game</button><button data-act="closedialog">Cancel</button></div>' +
+        '<div class="actions"><button data-act="newconfirmed" class="primary">Start a new game</button><button data-act="closedialog" class="secondary">Cancel</button></div>' +
         "</div></div>";
     }
     return "";
@@ -1109,20 +1702,20 @@
     }).join("");
     var errs = C.stepErrors(draft, stepId());
     var last = stepIndex === C.STEPS.length - 1;
-    root.innerHTML =
-      '<div class="game creator">' +
-      '<header class="topbar"><span class="brand">Pirate Chronicle</span><span class="when">A new captain</span>' +
-      '<span class="spacer"></span><button data-act="surprise" title="Fill every step at random">Surprise me</button>' +
-      '<button data-act="resetdraft">Start over</button><button data-act="quit">Title</button></header>' +
+    liveTotals = [];
+    root.innerHTML = frame(
+      '<div class="creator"><header class="topbar"><div><span class="brand">Pirate Chronicle</span><span class="wt">(working title)</span></div><span class="when">A new captain</span>' +
+      '<span class="grow"></span><button class="menubtn" data-act="surprise" title="Fill every step at random">Surprise me</button>' +
+      '<button class="menubtn" data-act="resetdraft">Start over</button><button class="menubtn" data-act="quit">Title</button></header>' +
       '<ol class="steps">' + steps + "</ol>" +
       '<div class="creator-body"><main class="stage">' + '<section class="cstep cstep-' + stepId() + '">' +
-      "<h2>" + esc(C.STEPS[stepIndex].title) + "</h2>" + creatorStep() + "</section>" +
+      '<h2 class="title">' + esc(C.STEPS[stepIndex].title) + "</h2>" + creatorStep() + "</section>" +
       '<div class="actions step-nav">' +
-      (stepIndex > 0 ? '<button data-act="back">Back</button>' : "") +
+      (stepIndex > 0 ? '<button class="secondary" data-act="back">Back</button>' : "") +
       (last ? "" : '<button data-act="next" class="primary">Next</button>') +
       "</div>" +
       (errs.length && !last ? '<ul class="todo">' + errs.map(function (m) { return "<li>" + esc(m) + "</li>"; }).join("") + "</ul>" : "") +
-      "</main>" + '<aside class="preview">' + previewCard() + "</aside></div></div>";
+      "</main>" + '<aside class="preview">' + previewCard() + "</aside></div></div>") + menuHtml();
     wire();
   }
 
@@ -1187,7 +1780,7 @@
     var b = PC.creator.band(draft.age);
     var bandNote = b ? "Ages " + b.min + "-" + b.max + ": " + b.tags + " starting tag" + (b.tags > 1 ? "s" : "") +
       (b.debuffs ? " and " + b.debuffs + " debuff" + (b.debuffs > 1 ? "s" : "") : ", no debuffs") + ". Your portrait shows your captain at this age." : "Pick an age from 15 to 40.";
-    return '<p class="muted">You survived Axel Dettman\'s raids. Your city burned, and you came out of the ashes with a battered sloop and a grudge.</p>' +
+    return '<p class="muted">You survived Captain Deadman\'s raids. Your city burned, and you came out of the ashes with a battered sloop and a grudge.</p>' +
       '<div class="row2">' + textField("First name", "first", { max: 24 }) + textField("Last name", "last", { max: 24 }) + "</div>" +
       '<p><button data-act="randname">Random name</button> <span class="small muted">From the Avalon pool' + (draft.portraitSet ? "" : "; a man's name until you pick a portrait") + ".</span></p>" +
       textField("Age", "age", { type: "number", min: 15, maxNum: 40, redraw: true }) +
@@ -1495,7 +2088,7 @@
   // ---- Wiring ----------------------------------------------------------
 
   var handlers = {
-    "continue": function () { state = PC.state.loadFromBrowser(); },
+    "continue": function () { state = PC.state.loadFromBrowser(); menu = null; },
     "new": function () {
       if (PC.state.loadFromBrowser()) { dialog = "confirmnew"; return; }
       handlers.newconfirmed();
@@ -1504,11 +2097,17 @@
       dialog = null;
       startCreator();
     },
+    // Quick start lives in Developer and warns before it replaces a save (§41.2).
+    "quickask": function () {
+      if (PC.state.loadFromBrowser()) { dialog = "confirmquick"; return; }
+      handlers.quickstart();
+    },
     "quickstart": function () {
+      dialog = null; menu = null;
       state = PC.state.newGame(PC.data.testCaptain);
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
-    "quit": function () { state = null; creating = false; },
+    "quit": function () { state = null; creating = false; menu = null; },
     "export": function () { dialog = "export"; },
     "import": function () { dialog = "import"; },
     "closedialog": function () { dialog = null; },
@@ -1516,11 +2115,27 @@
     "copy": copySave,
     "pickfile": pickSaveFile,
     "loadpasted": function () { var t = document.querySelector(".pastebox").value; if (t.trim()) loadSaveText(t); else toast("Paste a save first."); },
+    "openmenu": function (el) { menu = el.dataset.menu; if (menu === "journal") journalTab = journalTab || "quests"; },
+    "closemenu": function () { menu = null; },
+    "jtab": function (el) { journalTab = el.dataset.tab; },
+    "allskills": function () { showAllSkills = !showAllSkills; },
+    "setreduce": function () { settings.reduceMotion = !settings.reduceMotion; saveSettings(); },
+    "setdev": function () { settings.dev = !settings.dev; saveSettings(); },
     "choose": function (el) {
       PC.scenes.choose(state, Number(el.dataset.i));
-      // A beat's "carry on" with nothing to show goes straight through.
       var r = PC.scenes.viewScene(state).result;
-      if (r && r.outcome === "result" && !r.text && !r.effects.filter(Boolean).length) PC.scenes.commit(state);
+      // A beat's "carry on" with nothing to show goes straight through.
+      if (r && r.outcome === "result" && !r.text && !r.chips.length) { PC.scenes.commit(state); return; }
+      // A check result that leads to a choice shows the choices on the same
+      // screen (the M3 review: Davey's tab, Twopenny's pay-or-shove).
+      if (r && r.outcome !== "result" && !r.reroll && !r.needsPot) {
+        var ex = PC.scenes.peekExit(state);
+        if (ex && ex.to && ex.to !== "hub") {
+          var lead = { label: r.choiceLabel, outcome: r.outcome, roll: r.roll, text: ex.carry || ex.same ? null : r.text, chips: r.chips, approval: r.approval };
+          PC.scenes.commit(state);
+          if (state.current.screen === "scene") state.current.lead = lead;
+        }
+      }
     },
     "reroll": function () { PC.scenes.reroll(state); },
     "commit": function (el) { PC.scenes.commit(state, el.dataset.pot || null); },
@@ -1529,21 +2144,20 @@
       if (PC.scenes.canEnter(state, id).ok) PC.scenes.enterScene(state, id);
     },
     "endseason": function () { PC.scenes.endSeason(state); },
-    "dev": function () { showDev = true; },
-    "closedev": function () { showDev = false; },
     "toggledice": function () { state.settings.showDice = !state.settings.showDice; },
     "togglegender": function () { state.captain.gender = state.captain.gender === "f" ? "m" : "f"; },
     "addap": function () { state.ap.left = Math.min(state.ap.max, state.ap.left + 1); },
     "tohub": function () {
       if (state.location) { state.current = { screen: "node" }; state.location.place = null; }
       else state.current = { screen: "hub", hubId: PC.data.testStart.hub };
-      showDev = false;
+      menu = null;
     },
     "fillap": function () { state.ap.left = state.ap.max; },
     "devgold": function () { state.money.crew += 500; },
     "devpurse": function () { state.money.purse += 500; },
     "devtreasure": function (el) { state.cargo.treasure[el.dataset.dirty === "1" ? "dirty" : "clean"] += 10; },
     "devdamage": function () { state.ship.hull = Math.max(1, state.ship.hull - 5); },
+    "devskip": function () { var r = PC.devtools.skipQuests(state); menu = null; toast(r); },
     // Switch the loss variant (§12.5): the tag, the flag and the quest follow.
     "devloss": function (el) {
       var c = state.captain, v = el.dataset.loss;
@@ -1559,31 +2173,44 @@
       var id = document.querySelector(".devscene").value;
       if (state.location) state.location.place = /_(uw|oap)/.test(id) ? "tavern" : /_rr_/.test(id) ? "docks" : null;
       PC.scenes.enterScene(state, id);
-      showDev = false;
+      menu = null;
     },
-    "devnewseason": function () { PC.scenes.endSeason(state); showDev = false; },
+    "devnewseason": function () { PC.scenes.endSeason(state); menu = null; },
     "devarrive": function () {
       var n = Math.min(4, state.crew.tiers.Green || 0);
       if (n) { PC.crew.removeHands(state, "Green", n); state.crew.wounded += n; }
       PC.node.arrive(state, PC.node.here(state), { fromHunt: true });
-      showDev = false;
+      menu = null;
     },
   };
 
-  // Creator actions live in the creator section below.
+  // Creator and node actions live in their sections above.
   Object.keys(creatorHandlers).forEach(function (k) { handlers[k] = creatorHandlers[k]; });
   Object.keys(nodeHandlers).forEach(function (k) { handlers[k] = nodeHandlers[k]; });
 
-  var showDev = false;
   var dialog = null;
 
+  // The pips dim to preview an option's cost on hover or focus (§41.1).
+  function previewAP(n) {
+    var pips = root.querySelectorAll(".topbar .pip.on");
+    pips.forEach(function (p, i) { p.classList.toggle("preview", n > 0 && i >= pips.length - n); p.classList.toggle("on", !(n > 0 && i >= pips.length - n)); });
+  }
+  function clearPreview() { root.querySelectorAll(".topbar .pip.preview").forEach(function (p) { p.classList.remove("preview"); p.classList.add("on"); }); }
+
   function wire() {
-    if (showDev && state) root.insertAdjacentHTML("beforeend", devPanel());
-    if (dialog) root.insertAdjacentHTML("beforeend", dialogHtml());
     wireFields();
     if (state) wireNotes();
     root.querySelectorAll("[data-act]").forEach(function (el) {
       var name = el.dataset.act;
+      // Odds open and close in place, with no redraw (§38.6).
+      if (name === "toggleodds") {
+        el.addEventListener("click", function () {
+          var box = el.closest(".choice").querySelector(".odds");
+          if (box) box.hidden = !box.hidden;
+          el.querySelector(".caret").style.transform = box && !box.hidden ? "rotate(180deg)" : "";
+        });
+        return;
+      }
       var h = handlers[name];
       if (!h) return;
       var evt = el.tagName === "INPUT" ? "change" : "click";
@@ -1595,6 +2222,53 @@
         act(h)(el);
       });
     });
+    // Steppers (§41.1): move the number and the running totals, no redraw.
+    root.querySelectorAll("[data-step]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var box = document.getElementById(b.dataset.step);
+        var n = (Math.floor(Number(box.value)) || 0) + Number(b.dataset.d);
+        box.value = Math.max(Number(box.min), Math.min(Number(box.max), n));
+        refreshTotals();
+      });
+    });
+    root.querySelectorAll(".stepper input").forEach(function (box) {
+      box.addEventListener("input", refreshTotals);
+      box.addEventListener("change", function () {
+        var n = Math.floor(Number(box.value)) || 0;
+        box.value = Math.max(Number(box.min), Math.min(Number(box.max), n));
+        refreshTotals();
+      });
+    });
+    // Liar's Dice faces (§41.6).
+    root.querySelectorAll("[data-face]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        document.getElementById("bid-f").value = b.dataset.face;
+        root.querySelectorAll("[data-face]").forEach(function (x) { x.classList.toggle("on", x === b); });
+      });
+    });
+    // Action costs preview on the pips (§41.1).
+    if (state) {
+      root.querySelectorAll("[data-cost-ap]").forEach(function (el) {
+        var n = Number(el.dataset.costAp);
+        el.addEventListener("mouseenter", function () { previewAP(n); });
+        el.addEventListener("focus", function () { previewAP(n); });
+        el.addEventListener("mouseleave", clearPreview);
+        el.addEventListener("blur", clearPreview);
+      });
+      // The dive's breath gauge previews a grab or a scout (§41.10).
+      root.querySelectorAll("[data-cost-breath]").forEach(function (el) {
+        var on = function () {
+          var pips = root.querySelectorAll(".breath i.on");
+          if (pips.length) pips[pips.length - 1].classList.add("prev");
+        };
+        var off = function () { root.querySelectorAll(".breath i.prev").forEach(function (p) { p.classList.remove("prev"); }); };
+        el.addEventListener("mouseenter", on); el.addEventListener("focus", on);
+        el.addEventListener("mouseleave", off); el.addEventListener("blur", off);
+      });
+    }
+    // Clicks inside a menu panel don't close it.
+    root.querySelectorAll("[data-stop]").forEach(function (p) { p.addEventListener("click", function (ev) { ev.stopPropagation(); }); });
+    refreshTotals();
   }
 
   function start(rootEl) {

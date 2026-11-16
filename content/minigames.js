@@ -29,20 +29,21 @@
     RELIC_CHANCE: 0.4,
     GEAR: { "Diver's Mask": 1, "Diving Barrel": 2 }, // the best one counts (§32.12)
 
-    // §32.15 Tier weights by zone (%).
+    // §32.15 Tier weights by zone (%), raised in UI pass 1 (§38.8: a dive
+    // that finds something should be worthwhile; tuned with the simulator).
     TIERS: {
-      hull: { junk: 25, supplies: 35, goods: 10, treasure: 30, item: 0 },
-      hold: { junk: 15, supplies: 25, goods: 20, treasure: 40, item: 0 },
-      cabin_brig: { junk: 10, supplies: 0, goods: 15, treasure: 65, item: 10 },
-      cabin_frigate: { junk: 5, supplies: 0, goods: 15, treasure: 65, item: 15 },
+      hull: { junk: 20, supplies: 25, goods: 10, treasure: 45, item: 0 },
+      hold: { junk: 10, supplies: 15, goods: 20, treasure: 55, item: 0 },
+      cabin_brig: { junk: 5, supplies: 0, goods: 15, treasure: 70, item: 10 },
+      cabin_frigate: { junk: 5, supplies: 0, goods: 10, treasure: 70, item: 15 },
     },
     // §32.15 Yields. goods: [good, min, max, weight]. "Rum (sealed casks)"
     // is read as Plantation rum and porcelain as Ming porcelain (DEFAULTS).
     YIELDS: {
-      hull: { supplies: [1, 1], goods: [["Plantation rum", 1, 2, 1]], treasure: [1, 1], gold: [20, 40] },
-      hold: { supplies: [1, 2], goods: [["Plantation rum", 1, 3, 50], ["Ming porcelain", 1, 2, 50]], treasure: [1, 2], gold: [30, 60] },
-      cabin_brig: { goods: [["Ming porcelain", 1, 2, 80], ["Ambergris", 1, 1, 20]], treasure: [2, 3], gold: [50, 100], rare: 1 / 5 },
-      cabin_frigate: { goods: [["Ming porcelain", 1, 2, 60], ["Silver bars", 1, 2, 30], ["Pearls", 1, 1, 10]], treasure: [3, 4], gold: [75, 150], rare: 1 / 3 },
+      hull: { supplies: [1, 2], goods: [["Plantation rum", 1, 3, 1]], treasure: [2, 3], gold: [30, 60] },
+      hold: { supplies: [2, 3], goods: [["Plantation rum", 2, 4, 50], ["Ming porcelain", 1, 3, 50]], treasure: [2, 4], gold: [40, 80] },
+      cabin_brig: { goods: [["Ming porcelain", 2, 3, 80], ["Ambergris", 1, 2, 20]], treasure: [3, 5], gold: [75, 150], rare: 1 / 5 },
+      cabin_frigate: { goods: [["Ming porcelain", 2, 3, 60], ["Silver bars", 1, 2, 30], ["Pearls", 1, 2, 10]], treasure: [4, 6], gold: [100, 200], rare: 1 / 3 },
     },
     // Salvage-safe items (§32.15). DEFAULT: the catalog doesn't tier the
     // Ivory Compass or the Obsidian Amulet, so they stand in as the Rares.
@@ -66,6 +67,10 @@
       quest: { zone: "hull", item: "carved ivory mermaid" },
       flavor: "A brig sits upright on the bottom, in relatively good condition compared to the other wrecks, save for the gaping holes in her hull.",
     },
+
+    // Ollie's greeting at the Graveyard, by how he feels about the captain
+    // (S17 appendix §6; moved out of the screen code in UI pass 1, §41.10).
+    greetings: { "-1": "\"I hope you're a strong swimmer.\"", "0": "\"Back for another dive?\"", "1": "\"I dreamed that you're in for a good haul today.\"", "2": "\"I dreamed that you're in for a good haul today.\"", "3": "\"The treasure-seeker returns!\"" },
 
     lines: {
       goingUnder: "You take a deep breath and plunge into the depths below.",
