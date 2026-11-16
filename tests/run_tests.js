@@ -1305,7 +1305,7 @@ test("generous Articles cheer the crew; hard ones need a Pirate Code reading", f
   var t2 = PC.articles.defaults(); t2.share = "half_haul";
   var r = PC.articles.sign(s2, t2);
   eq(r.greed, 4); eq(r.check.dr, 3); ok(r.roll);
-  eq(PC.articles.currentReputation(s2).name, "Hard");
+  eq(PC.articles.currentReputation(s2).name, "Harsh");
 });
 
 test("between signings: loosen any time (+3 morale), Quarter freely, never tighten", function () {
@@ -1917,6 +1917,34 @@ test("Developer: Skip the mandatory quests lands the rewards and stops them firi
   eq(PC.node.enter(s, "tavern"), null); eq(PC.node.leave(s), null);
   eq(PC.node.enter(s, "docks"), null);
   eq(PC.devtools.skipQuests(s), "Nothing left to skip.");
+});
+
+console.log("UI pass 1 review: the author's phone notes");
+
+test("signing too many hands leaves the lowest tier on the docks", function () {
+  var s = inTown("trim"); PC.node.enter(s, "docks"); s.current = { screen: "node" };
+  s.money.crew = 99999;
+  var berths = PC.crew.berths(s);
+  var p = PC.node.trimPlan(s, { Green: berths, Seasoned: 3 });
+  eq(p.Seasoned, 3); eq(p.Green, berths - 3); eq(p.left.Green, 3);
+  s.money.crew = Math.round(PC.node.signingCost(s, "Seasoned") * 2);
+  var q = PC.node.trimPlan(s, { Green: 2, Seasoned: 2 });
+  eq(q.Seasoned, 2); eq(q.Green, 0);
+});
+
+test("a keeper question asked on an earlier visit is gone; this visit it fades", function () {
+  var s = inTown("keeperq"); PC.node.enter(s, "tavern"); s.current = { screen: "node" };
+  var q = PC.node.keeperQuestions(s)[0];
+  if (!q) return;
+  PC.node.askKeeperQuestion(s, q.id);
+  ok(PC.node.keeperQuestions(s).some(function (x) { return x.id === q.id && x.asked; }), "fades this visit");
+  PC.node.leave(s); PC.node.enter(s, "tavern");
+  ok(!PC.node.keeperQuestions(s).some(function (x) { return x.id === q.id; }), "gone next visit");
+});
+
+test("Lilyhook's Graveyard offers a sloop, a brig and a frigate", function () {
+  var s = ocr("wrecks");
+  eq(PC.salvage.wrecksOnOffer(s, "ocracoke").map(function (w) { return w.type; }), ["sloop", "brig", "frigate"]);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

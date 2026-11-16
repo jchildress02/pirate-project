@@ -25,8 +25,12 @@
   function wrecksOnOffer(state, site) {
     var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), site, "wrecks"].join("|"));
     var out = [];
-    for (var i = 0; i < D().WRECKS_OFFERED; i++) {
-      var type = M().weighted(r, D().WRECK_WEIGHTS);
+    // A site with a fixed mix offers one of each (Ocracoke: a sloop, a brig
+    // and a frigate, the author's phone notes); otherwise the weights.
+    var mix = (D().WRECK_MIX || {})[site];
+    var n = mix ? mix.length : D().WRECKS_OFFERED;
+    for (var i = 0; i < n; i++) {
+      var type = mix ? mix[i] : M().weighted(r, D().WRECK_WEIGHTS);
       out.push({ id: site + "-" + PC.state.stamp(state) + "-" + i, type: type, flavor: M().pick(r, D().flavor[type]) });
     }
     return out;
@@ -184,7 +188,7 @@
     var it = z.items[z.next];
     z.next += 1;
     game.haul.push(it);
-    if (it.tier === "quest") { game.questFound = true; M().say(state, game, D().lines.mermaid); }
+    if (it.tier === "quest") game.questFound = true; // its beat comes before the grab line (settle)
     else if (it.tier !== "junk") M().say(state, game, "You come up with " + describe(it) + ".");
     // Junk prints on surfacing: "You surface with [line]." (S17 appendix §8).
   }
@@ -192,6 +196,10 @@
   function settle(state, game, p) {
     if (p.op === "grab") {
       var z = p.data.zone;
+      // The mermaid's beat comes first, then "you manage to work it loose"
+      // (the author's phone notes).
+      var zz = game.zones[z], next = zz.items[zz.next];
+      if (p.outcome !== "setback" && next && next.tier === "quest") M().say(state, game, D().lines.mermaid);
       M().say(state, game, D().lines.grab[p.outcome]);
       if (p.outcome === "clean") { take(state, game, z); game.breath = Math.max(0, game.breath - 1); }
       else if (p.outcome === "partial") { take(state, game, z); game.breath = Math.max(0, game.breath - 2); }

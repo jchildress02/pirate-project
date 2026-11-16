@@ -315,7 +315,10 @@
   function keeperQuestions(state) {
     var L = nodeData(here(state)).lines.keeper;
     var asked = (state.flags.keeperAsked = state.flags.keeperAsked || {});
-    return (L.questions || []).filter(function (q) { return !q.after || asked[q.after]; })
+    // Asked this visit: it fades. Asked on an earlier visit: it is gone (the
+    // author's phone notes). asked[id] holds the visit it was asked on.
+    var visit = state.location ? state.location.visit : null;
+    return (L.questions || []).filter(function (q) { return (!q.after || asked[q.after]) && (!asked[q.id] || asked[q.id] === visit); })
       .map(function (q) { return { id: q.id, label: q.label, asked: !!asked[q.id] }; });
   }
 
@@ -326,7 +329,7 @@
     if (greeting(state, id, who, "keeper").refuse) return { refuse: true, line: nodeData(id).lines.keeper.refuse };
     state.npcs[who] = state.npcs[who] || {};
     state.npcs[who].met = true;
-    (state.flags.keeperAsked = state.flags.keeperAsked || {})[qid] = true;
+    (state.flags.keeperAsked = state.flags.keeperAsked || {})[qid] = state.location ? state.location.visit || true : true;
     if (q.meets) (state.npcs[q.meets] = state.npcs[q.meets] || {}).met = true;
     return { label: q.label, line: q.line.replace(/\{keeper\}/g, PC.npcs.get(state, who).first) };
   }
@@ -658,12 +661,9 @@
   // Sign several tiers at once (the one Sign button, §41.8). A clean Docks
   // roll lifts a third of this visit's signings a tier (lowest first).
   function recruitBatch(state, plan) {
+    plan = trimPlan(state, plan);
     var tiers = E().TIER_ORDER.filter(function (t) { return plan[t] > 0; });
     if (!tiers.length) throw new Error("Choose how many hands to sign.");
-    var want = 0, total = 0;
-    tiers.forEach(function (t) { want += Math.floor(plan[t]); total += Math.round(signingCost(state, t) * Math.floor(plan[t])); });
-    if (want > PC.crew.berths(state)) throw new Error("Only " + PC.crew.berths(state) + " berths free.");
-    if (total > state.money.crew) throw new Error("Needs " + total + " crew gold.");
     var n = 0, cost = 0, line = null, signed = [];
     tiers.forEach(function (t) {
       var r = recruit(state, t, plan[t]);
@@ -684,7 +684,24 @@
       d.upgraded += up;
       if (up) PC.state.addLog(state, up + " of them turn out better than they looked.");
     }
-    return { n: n, cost: cost, line: line, upgraded: up };
+    return { n: n, cost: cost, line: line, upgraded: up, left: plan.left };
+  }
+
+  // Too many hands for the berths or the crew gold: the lowest tiers asked
+  // for are the ones left on the docks (the author's phone notes). Returns a
+  // new plan, with .left saying how many of each tier were dropped.
+  function trimPlan(state, plan) {
+    var out = {}, left = {}, order = E().TIER_ORDER;
+    order.forEach(function (t) { out[t] = Math.max(0, Math.floor(plan[t] || 0)); });
+    var count = function () { return order.reduce(function (a, t) { return a + out[t]; }, 0); };
+    var cost = function () { return order.reduce(function (a, t) { return a + (out[t] ? Math.round(signingCost(state, t) * out[t]) : 0); }, 0); };
+    var berths = PC.crew.berths(state);
+    for (var i = 0; i < order.length; i++) {
+      var t = order[i];
+      while (out[t] > 0 && (count() > berths || cost() > state.money.crew)) { out[t]--; left[t] = (left[t] || 0) + 1; }
+    }
+    out.left = left;
+    return out;
   }
 
   function signingCost(state, tier) {
@@ -836,6 +853,7 @@
     docksCheck: docksCheck,
     docksRoll: docksRoll,
     recruitBatch: recruitBatch,
+    trimPlan: trimPlan,
     initNode: initNode,
     season: season,
     tierOf: tierOf,
