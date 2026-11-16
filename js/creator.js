@@ -20,12 +20,14 @@
   function D() { return PC.data.creator; }
   function S() { return D().START; }
 
+  // The step order settled in the Creator chat (§12.1): the opening
+  // prologue comes before step 1 and the closing prologue after Review.
   var STEPS = [
-    { id: "identity", title: "Name and age" },
-    { id: "portrait", title: "Portrait" },
+    { id: "portrait", title: "Your captain" },
+    { id: "name", title: "Name" },
     { id: "origin", title: "Origin" },
     { id: "stats", title: "Stats" },
-    { id: "training", title: "Training" },
+    { id: "training", title: "Skills" },
     { id: "character", title: "Traits and flaw" },
     { id: "tags", title: "Tags" },
     { id: "mentor", title: "Your mentor" },
@@ -106,11 +108,8 @@
   function cityById(id) { return D().HOME_CITIES.filter(function (c) { return c.id === id; })[0] || null; }
   function lossById(id) { return D().LOSSES.filter(function (l) { return l.id === id; })[0] || null; }
 
-  // Loss variants on offer: filtered by profession, Variant D hidden (§12.5).
-  function lossChoices(draft) {
-    var p = professionById(draft.profession);
-    return D().LOSSES.filter(function (l) { return !l.hidden && (!p || p.losses.indexOf(l.id) >= 0); });
-  }
+  // Loss variants on offer (§12.5): A, B and C for every profession.
+  function lossChoices(draft) { return D().LOSSES.slice(); }
 
   // ---- Stats and training (§12.6) ---------------------------------------
 
@@ -165,6 +164,7 @@
   // Why an option can't be taken with the current picks, or null.
   function blockedBy(draft, id) {
     var mine = entry(id);
+    if (mine && mine.greyed) return D().GREYED; // shown, not pickable in the prototype (§14.2)
     var others = picked(draft).filter(function (x) { return x !== id; });
     for (var i = 0; i < others.length; i++) {
       var o = entry(others[i]);
@@ -203,14 +203,14 @@
   function stepErrors(draft, stepId) {
     var e = [];
     var st = S();
-    if (stepId === "identity") {
-      if (!clean(draft.first)) e.push("Give your captain a first name.");
-      if (clean(draft.first).length > st.nameMax || clean(draft.last).length > st.nameMax) e.push("Names can be at most " + st.nameMax + " letters.");
+    if (stepId === "portrait") {
       var a = Number(draft.age);
       if (!(a >= 15 && a <= 40) || Math.floor(a) !== a) e.push("Age must be a whole number from 15 to 40.");
-    }
-    if (stepId === "portrait") {
       if (!setById(draft.portraitSet)) e.push("Pick a portrait.");
+    }
+    if (stepId === "name") {
+      if (!clean(draft.first)) e.push("Give your captain a first name.");
+      if (clean(draft.first).length > st.nameMax || clean(draft.last).length > st.nameMax) e.push("Names can be at most " + st.nameMax + " letters.");
     }
     if (stepId === "origin") {
       if (!cityById(draft.homeCity)) e.push("Pick a home city.");
@@ -247,7 +247,7 @@
     if (stepId === "tags") {
       var n = tagsAllowed(draft), d = debuffsRequired(draft);
       if (draft.tags.length !== n) e.push("Pick " + n + " starting tag" + (n > 1 ? "s" : "") + " (you have " + draft.tags.length + ").");
-      if (draft.debuffs.length !== d) e.push(d ? "Pick " + d + " debuff" + (d > 1 ? "s" : "") + " (you have " + draft.debuffs.length + ")." : "Captains under 26 take no debuffs.");
+      if (draft.debuffs.length !== d) e.push(d ? "Pick " + d + " old ailment" + (d > 1 ? "s" : "") + " (you have " + draft.debuffs.length + ")." : "Captains under 26 take no old ailments.");
       draft.tags.concat(draft.debuffs).forEach(function (id) {
         var b = blockedBy(draft, id);
         if (b) e.push(id + ": " + b + ".");
@@ -265,7 +265,9 @@
     }
     if (stepId === "ship") {
       if (!clean(draft.shipName)) e.push("Name your ship.");
-      if (clean(draft.shipName).length > st.shipNameMax) e.push("A ship's name can be at most " + st.shipNameMax + " letters.");
+      if (shipName(draft.shipName).length > st.shipNameMax) e.push("A ship's name can be at most " + st.shipNameMax + " letters.");
+      // Letters, spaces, apostrophes and hyphens (§12.9).
+      if (clean(draft.shipName) && !/^[A-Za-z\u00C0-\u017F' \u2019-]+$/.test(clean(draft.shipName))) e.push("Use only letters, spaces, apostrophes and hyphens.");
     }
     return e;
   }
@@ -288,11 +290,10 @@
     draft.debuffs = draft.debuffs.slice(0, debuffsRequired(draft));
   }
 
-  // Changing profession can leave a stale free point or loss.
+  // Changing profession can leave a stale free point.
   function fitToProfession(draft) {
     var p = professionById(draft.profession);
     if (!p || p.free.indexOf(draft.freePoint) < 0) draft.freePoint = null;
-    if (!lossChoices(draft).some(function (l) { return l.id === draft.loss; })) draft.loss = null;
     // The free point may push a type over the cap: give the bought point back.
     Object.keys(draft.training).forEach(function (t) {
       while (trainingTotal(draft, t) > S().trainingCap && draft.training[t] > 0) draft.training[t] -= 1;

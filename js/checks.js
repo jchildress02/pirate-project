@@ -137,10 +137,17 @@
   }
 
   // Full breakdown of a check for one captain. Pure: no dice rolled.
+  // Conditions the captain's state sets on its own (§11.7): [Grudge] is the
+  // French or a Wronged-Me Target; "Two Friends Aboard" is two or more
+  // officers at Friend or better on the flagship (the Loyal trait, §11.8.3).
   function withSeason(state, ctx) {
     ctx = ctx || {};
-    if (ctx.season || !state.time || !PC.state) return ctx;
-    return { conditions: ctx.conditions || [], season: PC.state.seasonName(state) };
+    var conds = (ctx.conditions || []).slice();
+    if ((conds.indexOf("French") >= 0 || conds.indexOf("Wronged-Me Target") >= 0) && conds.indexOf("Grudge") < 0) conds.push("Grudge");
+    var friends = (state.officers || []).filter(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && (o.rung || 0) >= 2; }).length;
+    if (friends >= 2) conds.push("Two Friends Aboard");
+    var season = ctx.season || (state.time && PC.state ? PC.state.seasonName(state) : undefined);
+    return { conditions: conds, season: season };
   }
 
   function assess(state, check, ctx) {
@@ -210,7 +217,9 @@
       if (!r) return;
       if (r.types && r.types.indexOf(check.type) < 0) return;
       if (r.on && r.on.indexOf(outcome) < 0) return;
-      if (!whenMatches(r.when, ctx)) return;
+      // whenByType: a condition on one of the types only (Explorer's
+      // Navigate counts only when charting, §14.2).
+      if (!whenMatches((r.whenByType && r.whenByType[check.type]) || r.when, ctx)) return;
       var per = r.perSeason || 1;
       if ((used[src.id] || 0) >= per) return;
       found = { id: src.id, name: src.mod.name || src.id };

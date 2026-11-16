@@ -31,86 +31,93 @@
   ];
 
   // ---- Origin: Ash-Born (§12.5) ----------------------------------------
+  // Card text as written in the Creator chat; no card says "rung" (§38.6).
+  var ORIGINS = [
+    { id: "Ash-Born", text: "You survived Captain Deadman's raids. Which city burned around you?" },
+    { id: "Noble", locked: "After the Slice" },
+    { id: "Foreigner", locked: "After the Slice" },
+  ];
+
   var HOME_CITIES = [
-    { id: "Baltimore", effect: "+500 starting gold (1,100 in all). Off the map.", gold: 500 },
-    { id: "Savannah", effect: "Starting friend: Savannah's tavern keeper, on the Friend rung.", friend: { id: "savannah_tavern_keeper", role: "tavern keeper", node: "Savannah" } },
-    { id: "Charleston", effect: "Starting friend: a Charleston merchant (the provisioner), on the Friend rung.", friend: { id: "charleston_merchant", role: "merchant", node: "Charleston" } },
+    { id: "Baltimore", burned: "Burned September 1752.", effect: "You got out with more than most: +500 gold to start.", gold: 500 },
+    { id: "Savannah", burned: "Burned June 1753.", effect: "Savannah's tavern keeper is an old friend: more rumors and better service there.", friend: { id: "savannah_tavern_keeper", role: "tavern keeper", node: "Savannah" } },
+    { id: "Charleston", burned: "Burned June 1753.", effect: "A Charleston merchant is an old friend: better prices when you trade there.", friend: { id: "charleston_merchant", role: "merchant", node: "Charleston" } },
   ];
 
-  // Plain descriptions of the trade, independent of the sack (ruled November 14).
+  // Each card shows only the name and its two free-point skills (§12.5).
   var PROFESSIONS = [
-    { id: "Official", flavor: "Customs clerk or minor port official", free: ["Petition", "Forge"], losses: ["A", "B", "C", "D"] },
-    { id: "Merchant", flavor: "Shopkeeper or supercargo", free: ["Haggle", "Appraise"], losses: ["A", "B", "C"] },
-    { id: "Farmer", flavor: "Planter's son or tenant farmer", free: ["Endure", "Wilderness Survival"], losses: ["A", "B", "C"] },
-    { id: "Artisan", flavor: "Shipwright's apprentice or town smith", free: ["Repair at Sea", "Refit & Careen"], losses: ["A", "B", "C"] },
-    { id: "Sailor", flavor: "Impressed deckhand or coastal trader", free: ["Navigate", "Ride Out Storm"], losses: ["A", "B", "C", "D"] },
-    { id: "Soldier", flavor: "Militia guardsman", free: ["Hold Your Ground", "Marksmanship"], losses: ["A", "B", "C", "D"] },
-    { id: "Smuggler", flavor: "Petty runner who slips past the patrols", free: ["Smuggle", "Ship Concealment"], losses: ["A", "B", "C"] },
-    { id: "Thief", flavor: "Back-alley pickpocket", free: ["Light Fingers", "Chase & Climb"], losses: ["A", "B", "C"] },
+    { id: "Official", free: ["Petition", "Forge"] },
+    { id: "Merchant", free: ["Haggle", "Appraise"] },
+    { id: "Farmer", free: ["Endure", "Go Without"] },
+    { id: "Artisan", free: ["Repair & Refit", "Appraise"] },
+    { id: "Sailor", free: ["Navigate", "Ride Out Storm"] },
+    { id: "Soldier", free: ["Hold Your Ground", "Marksmanship"] },
+    { id: "Smuggler", free: ["Smuggle", "Ship Concealment"] },
+    { id: "Thief", free: ["Light Fingers", "Chase & Climb"] },
+    { id: "Aristocrat", free: ["Court", "Swordsmanship"] },
   ];
 
-  // What was lost. Variant D is hidden in the prototype creator (§12.5).
+  // What the fire took (§12.5). Variant D (Lost Honor) is scrapped.
   var LOSSES = [
-    { id: "A", name: "Lost Family", tag: "Grief-Stricken", text: "Your brother, a skilled craftsman, was pressganged aboard one of Dettman's stragglers, the French brigantine Trident." },
-    { id: "B", name: "Lost Wealth", tag: "Dispossessed", text: "A chest of your family's heirloom jewels and coin was plundered from your home." },
-    { id: "C", name: "Lost Health", tag: "Deep Scar", text: "You were shot at close range and left for dead in the street." },
-    { id: "D", name: "Lost Honor", tag: "Deserter's Mark", hidden: true, text: "A corrupt official made you the scapegoat for the city's fall." },
+    { id: "A", name: "Lost Family", tag: "Grief-Stricken", penalty: "−1 Rally Crew, Tavern Talk", text: "Your brother, a skilled craftsman, was pressganged aboard one of Captain Deadman's stragglers." },
+    { id: "B", name: "Lost Wealth", tag: "Dispossessed", penalty: "−1 Haggle, Bribe", text: "Deadman's men plundered a chest of your family's heirloom jewels and coin." },
+    { id: "C", name: "Lost Health", tag: "Deep Scar", penalty: "−1 Hold Your Ground and Strike First under fire", text: "You were shot at close range and left for dead in the street." },
   ];
 
-  // ---- Debuffs (§12.4) --------------------------------------------------
+  // ---- Old ailments (debuffs, §12.4) ------------------------------------
   var DEBUFFS = [
-    { id: "Bad Knee", text: "-1 Chase & Climb and Board. Curable." },
-    { id: "Old Wound", text: "-1 Endure and Wilderness Survival. Curable (heals into Scarred)." },
-    { id: "Failing Eyes", text: "-1 Keep Watch and Marksmanship. Permanent." },
-    { id: "Weak Chest", text: "-1 Endure, Haul & Labor, Dive, and any check in the Cold. Curable by the Savannah physician or the Talanee shaman." },
-    { id: "Bad Back", text: "-1 Haul & Labor and Refit & Careen. Curable." },
-    { id: "Rheumy Hands", text: "-1 Light Fingers, Forge, Decipher & Research, Repair at Sea, Treat Wounds. Permanent." },
-    { id: "Hard of Hearing", text: "-1 Notice Danger, Gather Intelligence, and Leadership under fire or in a storm. Permanent." },
-    { id: "Marsh Fever", text: "Fever Flares hit you more often and last two seasons. Permanent." },
+    { id: "Bad Knee", text: "−1 Chase & Climb, Board", life: "Curable" },
+    { id: "Old Wound", text: "−1 Endure, Swordsmanship", life: "Curable" },
+    { id: "Failing Eyes", text: "−1 Keep Watch, Appraise", life: "For life" },
+    { id: "Weak Chest", text: "−1 Endure, Dive, and any check in the cold", life: "Curable" },
+    { id: "Bad Back", text: "−1 Brawling, Hold Your Ground", life: "Curable" },
+    { id: "Rheumy Hands", text: "−1 Light Fingers, Repair & Refit", life: "For life" },
+    { id: "Hard of Hearing", text: "−1 Notice Danger, and Leadership under fire or in a storm", life: "For life" },
+    { id: "Marsh Fever", text: "Fever flares hit you more often and last two seasons", life: "For life" },
   ];
 
-  // ---- Creation-menu tags (§14.2) --------------------------------------
-  // excludes: names of tags, debuffs, traits or flaws that can't be taken with it.
+  // ---- Creation-menu tags (§14.2): 29 ----------------------------------
+  // excludes: names of tags, debuffs, traits or flaws that can't be taken
+  // with it. greyed: shown but not pickable in the prototype.
+  var GREYED = "Its story isn't written yet.";
   var TAG_GROUPS = [
     { group: "Knowledge and craft", tags: [
       { id: "Dead Reckoner", text: "Reroll Navigate in fog or open water. Dead-reckoning approaches and hidden routes." },
       { id: "Storm-Born", text: "Reroll Ride Out Storm. Hurricane-only options." },
-      { id: "Cartographer", text: "Reroll Navigate when charting unknown waters. Sell charts; find hidden coves." },
-      { id: "Explorer", text: "Reroll Wilderness Survival. Unmarked landings." },
+      { id: "Explorer", text: "Reroll Wilderness Survival, and Navigate when charting unknown waters. Unmarked landings and hidden coves." },
       { id: "Surgeon's Hands", text: "Reroll Treat Wounds. You can treat yourself." },
-      { id: "Healer", text: "Medical costs -15%. \"Tend the sick\" scenes." },
-      { id: "Gunner's Eye", text: "+1 to the ship's Gunnery. Called shots in the Exchange." },
+      { id: "Healer", text: "Medical costs −15%. “Tend the sick” scenes." },
+      { id: "Gunner's Eye", text: "+1 Gunnery on the opening broadside of every battle. Called shots at her rigging or rudder." },
       { id: "Sharpshooter", text: "Reroll Marksmanship. Long shots and the boarding shot." },
       { id: "Eagle Eyed", text: "Reroll Keep Watch. An extra hook on the destination screen.", excludes: ["Failing Eyes"] },
       { id: "Calligrapher", text: "Reroll Forge. Forged letters and commissions." },
-      { id: "Cutpurse", text: "Reroll Light Fingers. Pickpocket and burglary approaches." },
-      { id: "Hauler", text: "Reroll Haul & Labor. Extra haul in the salvage dive.", excludes: ["Bad Back"] },
+      { id: "Cutpurse", text: "Reroll Light Fingers and Chase & Climb. Pickpocketing, burglary, and slipping away on foot." },
+      { id: "Hauler", text: "Keep the whole haul when you black out on a dive. Reroll Endure when hauling.", excludes: ["Bad Back"] },
       { id: "Investigator", text: "Reroll Gather Intelligence. Hidden clue branches." },
       { id: "Treasure Hunter", text: "Reroll Decipher & Research and Dive on treasure hunts." },
-      { id: "Speedy", text: "Reroll Chase & Climb. Slip away on foot." },
-      { id: "Loremaster", text: "Special dialogue options and checks that succeed outright." },
+      { id: "Loremaster", text: "Special dialogue options and checks that succeed outright.", greyed: true },
       { id: "Dead Man's Luck", text: "Reroll Endure while Wounded, the mortal-wound check included." },
     ] },
     { group: "Social and political", tags: [
       { id: "Silver Tongue", text: "Reroll Persuade and Negotiate. Talk your way out." },
       { id: "Smuggler's Friend", text: "Reroll Smuggle. Hidden drops and contacts." },
       { id: "Flatterer", text: "Reroll Court. Flatter vain NPCs." },
-      { id: "Gossipy", text: "Reroll Tavern Talk; -1 on checks kept Secret. An extra rumor per port." },
-      { id: "Revolutionary", text: "-1 Petition and Negotiate with Avalon officials. Unique scenes in Charleston, Ocracoke, Edenton." },
-      { id: "Animal Friend", text: "Pet prices -15%. Unique scenes in Ocracoke, Nassau, St. Augustine." },
+      { id: "Gossipy", text: "Reroll Tavern Talk; −1 on checks kept secret. An extra rumor per port." },
+      { id: "Revolutionary", text: "−1 Petition and Negotiate with Avalon officials. Unique scenes in Charleston, Ocracoke, Edenton.", greyed: true },
+      { id: "Animal Friend", text: "Pet prices −15%. Unique scenes in Ocracoke, Nassau, St. Augustine.", greyed: true },
     ] },
     { group: "Violence", tags: [
-      { id: "Brute", text: "+1 Intimidate; -1 Persuade." },
+      { id: "Brute", text: "+1 Intimidate; −1 Persuade." },
     ] },
     { group: "Spiritual and uncanny", tags: [
       { id: "Touched", text: "Reroll Ghost Sense; Dread floor +5. Hidden uncanny scenes." },
-      { id: "Haunted", text: "-1 Persuade. Hidden uncanny scenes on the Lilyhook thread." },
-      { id: "Heathen", text: "-1 Persuade and Petition with the pious. Scenes with outcasts and natives.", excludes: ["Pious"] },
+      { id: "Haunted", text: "−1 Persuade. Hidden uncanny scenes on the Lilyhook thread.", greyed: true },
+      { id: "Heathen", text: "−1 Persuade and Petition with the pious. Scenes with outcasts and natives.", excludes: ["Pious"], greyed: true },
     ] },
     { group: "Crew and provisions", tags: [
-      { id: "Drunkard", text: "One reroll a season across Cast-Iron Stomach, Cards & Dice, Tavern Talk; -1 Court with romances who aren't tolerant.", excludes: ["Heavy Drinker"] },
-      { id: "Gourmand", text: "Reroll Rally Crew in Winter; provisions burn +10% and -1 Go Without." },
-      { id: "Fisherman", text: "Provisions burn -10%. Fish the banks when stores run low." },
+      { id: "Drunkard", text: "One reroll a season across Cast-Iron Stomach, Cards & Dice, Tavern Talk; −1 Court with romances who aren't tolerant.", excludes: ["Heavy Drinker"] },
+      { id: "Gourmand", text: "Reroll Rally Crew in Winter; −1 Go Without." },
+      { id: "Fisherman", text: "Provisions burn −10%. Fish the banks when stores run low." },
       { id: "Fiddler", text: "Crew morale floor +10; reroll Rally Crew in Winter." },
     ] },
   ];
@@ -121,53 +128,53 @@
       { id: "Shrewd", text: "+1 Read People, Appraise, Negotiate" },
       { id: "Patient", text: "+1 Plan & Ambush, Decipher & Research" },
       { id: "Bookish", text: "+1 Decipher & Research, Forge, Navigate" },
-      { id: "Inventive", text: "+1 Repair at Sea" },
+      { id: "Inventive", text: "+1 Repair & Refit" },
       { id: "Wary", text: "+1 Notice Danger, Read People" },
     ] },
     { group: "Nerve", traits: [
-      { id: "Bold", text: "+1 Board, Strike First" },
+      { id: "Bold", text: "+1 Board, Strike First; −1 on the mortal-wound check" },
       { id: "Cool-Headed", text: "+1 Hold Your Ground, Ride Out Storm" },
-      { id: "Hardtack Gut", text: "+1 Go Without" },
+      { id: "Hardtack Gut", text: "+1 Go Without, Immune System" },
       { id: "Stubborn", text: "+1 Resist Interrogation, Hold Your Ground" },
-      { id: "Fearless", text: "+1 Ghost Sense" },
+      { id: "Fearless", text: "+1 Ghost Sense, Gambit" },
     ] },
     { group: "Social", traits: [
       { id: "Easy Laugh", text: "+1 Tavern Talk; +1 Persuade with strangers" },
       { id: "Honest Face", text: "+1 Persuade, Bluff & Disguise" },
-      { id: "Hard Bargainer", text: "+1 Haggle, Fence" },
+      { id: "Hard Bargainer", text: "+1 Haggle, Appraise" },
       { id: "Generous", text: "+1 Pirate Code, Recruit" },
       { id: "Storyteller", text: "+1 Rally Crew, Tavern Talk" },
       { id: "Stern", text: "+1 Discipline, Intimidate" },
-      { id: "Compassionate", text: "+1 Rescue & Breakout, Parley" },
+      { id: "Compassionate", text: "+1 Rescue & Breakout, Parley, Treat Wounds" },
     ] },
     { group: "Sea and code", traits: [
       { id: "Weatherwise", text: "+1 Read Weather, Ride Out Storm" },
-      { id: "Steady Hand", text: "+1 to the ship's Gunnery" },
-      { id: "Idealist", text: "+1 Rally Crew with idealist officers aboard" },
-      { id: "Pragmatist", text: "+1 Pirate Code with greedy officers aboard" },
-      { id: "Loyal", text: "+1 Rescue & Breakout with a companion present" },
-      { id: "Vengeful", text: "+1 Combat and Gather Intelligence against those who wronged you" },
+      { id: "Steady Hand", text: "+1 Marksmanship, Treat Wounds" },
+      { id: "Idealist", text: "+1 Rally Crew; +1 Persuade with the upstanding" },
+      { id: "Pragmatist", text: "+1 Pirate Code, Bribe" },
+      { id: "Loyal", text: "+1 Rescue & Breakout; +1 Leadership with two officers at Friend aboard" },
+      { id: "Vengeful", text: "+1 Combat and Gather Intelligence against the French and those who wronged you" },
     ] },
     { group: "Manner and faith", traits: [
-      { id: "Refined", text: "+1 Petition, Negotiate with officials", excludes: ["Wild"] },
+      { id: "Refined", text: "+1 Petition, Court; +1 Negotiate with officials", excludes: ["Wild"] },
       { id: "Wild", text: "+1 Brawling, Tavern Talk", excludes: ["Refined"] },
-      { id: "Pious", text: "+1 Ghost Sense; +1 Persuade with the pious", excludes: ["Heathen"] },
+      { id: "Pious", text: "+1 Ghost Sense, Endure; +1 Persuade with the pious", excludes: ["Heathen"] },
     ] },
   ];
 
   var FLAWS = [
-    { id: "Hot-Tempered", text: "-1 Negotiate, Parley, Petition. Lash out when insulted." },
-    { id: "Greedy", text: "-1 Pirate Code, Rally Crew. Skim the take." },
-    { id: "Proud", text: "-1 Petition, Bribe, Persuade with officials. Refuse help." },
-    { id: "Soft-Hearted", text: "-1 Intimidate, Discipline. Spare prisoners." },
-    { id: "Reckless", text: "-1 Plan & Ambush, Notice Danger, Read Weather. The gamble is always on offer." },
-    { id: "Heavy Drinker", text: "-1 Notice Danger, Read People in harbor. One more round.", excludes: ["Drunkard"] },
-    { id: "Distrustful", text: "-1 Leadership, Rally Crew. Refuse officer help." },
-    { id: "Gambler", text: "-1 Appraise, Ration Stores. Stake coin at the dice." },
-    { id: "Grudge-Holder", text: "-1 Negotiate, Parley with those who wronged you." },
-    { id: "Superstitious", text: "-1 Ghost Sense, Rally Crew in uncanny moments. Heed omens." },
-    { id: "Glory-Hungry", text: "-1 Plan & Ambush, Maneuver. Choose the glorious option." },
-    { id: "Easily Flattered", text: "-1 Read People, Negotiate with strangers. Accept the flattering offer." },
+    { id: "Hot-Tempered", text: "−1 Negotiate, Parley, Petition. Lash out when insulted." },
+    { id: "Greedy", text: "−1 Pirate Code, Rally Crew. Skim the take." },
+    { id: "Proud", text: "−1 Petition, Bribe, Persuade with officials. Refuse help." },
+    { id: "Soft-Hearted", text: "−1 Intimidate, Discipline. Spare prisoners." },
+    { id: "Reckless", text: "−1 Plan & Ambush, Notice Danger. The gamble is always on offer." },
+    { id: "Heavy Drinker", text: "−1 Notice Danger, Read People in harbor. One more round.", excludes: ["Drunkard"] },
+    { id: "Distrustful", text: "−1 Leadership, Recruit. Refuse officer help." },
+    { id: "Gambler", text: "−1 Appraise, Ration Stores. Stake coin at the dice." },
+    { id: "Grudge-Holder", text: "−1 Negotiate; −1 Parley with the French and those who wronged you. Refuse peace." },
+    { id: "Superstitious", text: "−1 Ghost Sense, Read Weather, Rally Crew in uncanny moments. Heed omens." },
+    { id: "Glory-Hungry", text: "−1 Plan & Ambush, Ship Concealment. Choose the glorious option." },
+    { id: "Easily Flattered", text: "−1 Read People, Negotiate with strangers. Accept the flattering offer." },
   ];
 
   // ---- Officers, for the mentor mini-creator (§25.2-§25.4, §25.8) -------
@@ -175,9 +182,9 @@
     { id: "Gunner", perk: "+1 Gunnery", lessons: "the Exchange; Marksmanship" },
     { id: "Raider", perk: "+1 to boarding clashes", lessons: "boarding clashes; Lead the Charge" },
     { id: "Cook", perk: "Ship's surgeon: Treat Wounds after battle; crew recovery 45%", lessons: "Treat Wounds; Immune System" },
-    { id: "Cooper", perk: "Provisions burn -15%", lessons: "Ration Stores; Go Without" },
+    { id: "Cooper", perk: "Provisions burn -15%", lessons: "Ration Stores; Go Without; Haggle" },
     { id: "Navigator", perk: "+1 Position and +1 Outrun", lessons: "Position; Outrun; Navigate" },
-    { id: "Carpenter", perk: "+1 Repair at Sea after battle; better repairs", lessons: "Repair at Sea" },
+    { id: "Carpenter", perk: "+1 Repair & Refit after battle; better repairs", lessons: "Repair & Refit" },
   ];
 
   // Old Lessons: the check types the mentor's reroll covers (§25.8). The
@@ -187,9 +194,9 @@
     Gunner: ["Marksmanship"],
     Raider: [],
     Cook: ["Treat Wounds", "Immune System"],
-    Cooper: ["Ration Stores", "Go Without"],
+    Cooper: ["Ration Stores", "Go Without", "Haggle"],
     Navigator: ["Maneuver", "Outrun", "Navigate"],
-    Carpenter: ["Repair at Sea"],
+    Carpenter: ["Repair & Refit"],
   };
 
   var OFFICER_TRAITS = [
@@ -244,10 +251,13 @@
     trainingPoints: 6, trainingCap: 2,
     traitCount: 2, flawCount: 1,
     nameMax: 24, shipNameMax: 30,
+    startKit: "a flintlock pistol and a cutlass",
   };
 
   PC.data.creator = {
     PORTRAIT_SETS: PORTRAIT_SETS,
+    ORIGINS: ORIGINS,
+    GREYED: GREYED,
     AGE_BANDS: AGE_BANDS,
     HOME_CITIES: HOME_CITIES,
     PROFESSIONS: PROFESSIONS,

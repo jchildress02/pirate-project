@@ -276,11 +276,18 @@
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
       meters(false) +
-      (offs.length ? '<div class="h4">Officers</div>' + offs.map(function (o) {
+      '<div class="h4">Officers</div>' + offs.map(function (o) {
         return '<button class="off" data-act="openmenu" data-menu="officer:' + esc(o.id) + '">' + officerFace(o, 44, 66) +
           "<div><b>" + esc((o.first + " " + (o.last || "")).trim()) + "</b><span>" + esc(o.type + (officerRole(o) ? " · " + officerRole(o) : "")) + "</span>" +
           relWord(PC.npcs.rungName(o.rung)) + "</div></button>";
-      }).join("") : "");
+      }).join("") + actingQMCard();
+  }
+
+  // The Acting Quartermaster (§25.9): a crewman, shown with the silhouette.
+  function actingQMCard() {
+    var q = state.actingQM;
+    if (!q || !q.active) return "";
+    return '<div class="off">' + sil(44, 66) + "<div><b>" + esc(q.full) + "</b><span>Acting Quartermaster</span><span class=\"note\">One of the crew</span></div></div>";
   }
 
   function phoneStrip() {
@@ -557,8 +564,9 @@
     html += '<div class="h4" style="max-width:680px">Town</div>' + opts(ps.filter(function (p) { return p.id !== "ship"; }).map(row));
     html += '<div class="h4" style="max-width:680px">Your ship</div>' + opts(ps.filter(function (p) { return p.id === "ship"; }).map(row));
     html += '<div class="h4" style="max-width:680px">To sea</div>' + opts([
-      opt({ act: "nop", label: "Hunt for Prizes", lock: !state.articles ? "Sign the Articles before you sail (The Ship)" : notInPrototype() }),
-      opt({ act: "nop", label: "Set Sail", meta: "The world map", lock: notInPrototype() }),
+      // Leaving Ocracoke without Articles fires the first signing (§40.5).
+      opt({ act: state.articles ? "nop" : "firstsigning", label: "Hunt for Prizes", meta: state.articles ? null : "Sign the Articles before you sail", lock: state.articles ? notInPrototype() : null }),
+      opt({ act: state.articles ? "nop" : "firstsigning", label: "Set Sail", meta: "The world map" + (state.articles ? "" : " · sign the Articles before you sail"), lock: state.articles ? notInPrototype() : null }),
     ]);
     if (!state.ap.left) html += '<p class="notice" style="margin-top:16px">No actions left this season.</p>';
     return html;
@@ -1054,8 +1062,18 @@
     var tab = state.location.tab || (state.articles ? "crew" : "articles");
     var html = '<div class="tabs">' + SHIP_TABS.map(function (t) {
       return '<button data-act="shiptab" data-tab="' + t[0] + '" class="menubtn' + (t[0] === tab ? " on" : "") + '">' + t[1] + "</button>";
-    }).join("") + "</div>" + sayFor("ship");
+    }).join("") + "</div>" + barkHtml() + sayFor("ship");
     return html + ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, cabin: cabinTab })[tab]();
+  }
+
+  // An officer's bark: a small card in the corner of the screen (§38.6).
+  function barkHtml() {
+    var b = state.location && state.location.bark;
+    if (!b) return "";
+    var o = aboard().filter(function (x) { return x.id === b.id; })[0];
+    if (!o) return "";
+    return '<div class="bark" style="position:relative;right:auto;top:auto;width:auto;max-width:560px;margin:4px 0 12px">' + officerFace(o, 34, 50) +
+      "<div><b style=\"font-weight:normal\">" + esc(o.first) + "</b> " + inline(b.line) + "</div></div>";
   }
 
   var articleDraft = null;
@@ -1089,6 +1107,7 @@
     var g = signed_ ? state.articles.greed : PC.articles.greed(terms);
     var rd = PC.articles.readingFor(g), rep = PC.articles.reputation(g);
     var html = signed_ ? '<p class="small">Signed ' + esc(PC.state.SEASONS[state.articles.signed.season]) + " " + state.articles.signed.year + ".</p>" :
+      '<div class="prose dropcap">' + prose(PC.data.firstSigning) + "</div>" +
       '<p class="small">You set the terms; the crew holds you to every word. The Standard terms are fair. Signing costs no action.</p>';
     html += A.SLOTS.map(function (s) {
       return '<div class="svc"><h4 style="margin-bottom:0">' + esc(s.name) + '</h4><p class="note" style="margin:0 0 6px">' + esc(PURPOSE[s.id] || "") +
@@ -1163,8 +1182,10 @@
 
   function officersTab() {
     var list = aboard();
-    if (!list.length) return '<p class="note">No officers aboard.</p>';
-    return list.map(function (o) { return officerCard(o); }).join("") +
+    var q = state.actingQM && state.actingQM.active ? '<div class="person" style="margin:12px 0">' + sil(72, 108) + '<div class="pmain"><div class="namecard"><b>' + esc(state.actingQM.full) +
+      '</b><span class="role">Acting Quartermaster</span></div><p class="small">With no officers aboard, the crew elected one of their own. No officer slot, no bonuses; a real officer wins the next vote.</p></div></div>' : "";
+    if (!list.length) return q + '<p class="note">No officers aboard.</p>';
+    return q + list.map(function (o) { return officerCard(o); }).join("") +
       '<p class="note">Officers are hired at the Tavern: 1,000 crew gold each, one action a visit. One of each type; a new hire of a type you hold replaces the old one.</p>';
   }
 
@@ -1384,9 +1405,25 @@
         "<p><b>Content check: errors</b></p>" + list(v.errors) + "<p><b>Warnings</b></p>" + list(v.warnings));
   }
 
-  // ---- The prologues (§40) arrive with the creator push ----
+  // ---- The prologues (§40) ----
+  // The opening plays after New game and before the creator; the closing
+  // after Set sail and before the beach. The screens are js/prologue.js.
   var prologue = null;
-  function drawPrologue() { prologue = null; draw(); }
+  function drawPrologue() {
+    var p = prologue;
+    if (p.running) return;
+    p.running = true;
+    PC.prologue.play(root, {
+      kind: p.kind, reduce: reducedMotion(), tokens: p.tokens || {}, home: p.home,
+      assetUrl: function (path) { return (PC.assets && PC.assets[path]) || path; },
+      onDone: function () {
+        prologue = null;
+        if (p.kind === "opening") startCreator();
+        else state = p.game;
+        draw(); scrollTop();
+      },
+    });
+  }
 
   // ---- Node actions ----------------------------------------------------------
 
@@ -1401,7 +1438,7 @@
   function enterPlace(place) {
     var fire = N().enter(state, place);
     diveZone = null; drinkSpot = null;
-    state.location.said = {};
+    state.location.said = {}; state.location.bark = null;
     if (fire) PC.scenes.enterScene(state, fire);
   }
 
@@ -1527,7 +1564,7 @@
       say(id, firstName(id), r.line, r.units ? "Sold " + r.units + " for " + gold(r.gold) + " crew gold." : null,
         r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null, r.rumor ? { heardNote: "Added to your Rumors." } : null);
     },
-    "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; },
+    "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; state.location.bark = null; },
     "artpick": function (el) { articleDraft = articleDraft || PC.articles.defaults(); articleDraft[el.dataset.slot] = el.dataset.opt; },
     "artreset": function () { articleDraft = PC.articles.defaults(); },
     // The Articles popup comes before signing, with a way back (§38.7).
@@ -1540,7 +1577,9 @@
       var r = PC.articles.sign(state, articleDraft || PC.articles.defaults());
       articleDraft = null;
       var text = { accepted: "The crew file up and put their names to it.", cheered: "The crew cheer as they sign.", clean: "You read the terms out and the crew sign without a murmur.", partial: "The crew sign, but there's grumbling.", setback: "The crew sign with sour faces." }[r.outcome];
+      var mt = aboard().filter(function (o) { return o.mentor; })[0];
       say("ship", null, text, r.effects.length ? r.effects.join(", ") + "." : null);
+      if (mt && !state.flags.mentor_first_articles) { state.flags.mentor_first_articles = true; state.location.bark = { id: mt.id, line: PC.data.officerLines.mentorFirstArticles }; }
       state.location.tab = "articles";
     },
     "artamend": function (el) { var c = PC.articles.amend(state, el.dataset.slot, el.dataset.opt); say("ship", null, "The change is read out to the crew.", c.morale ? "Crew morale +" + c.morale + "." : null); },
@@ -1560,6 +1599,11 @@
     "jetcancel": function () { jettisonOk = null; state.location.popup = null; },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship", null, "The crew drink to your health.", "Crew morale +" + m + "."); },
     "closepopup": function () { state.location.popup = null; },
+    "firstsigning": function () {
+      if (state.location.place) N().leave(state);
+      enterPlace("ship");
+      state.location.tab = "articles";
+    },
   };
   var jettisonOk = null;
 
@@ -1677,7 +1721,14 @@
   function startCreator() {
     var saved = loadDraft();
     draft = saved && saved.draft ? saved.draft : PC.creator.blankDraft();
-    stepIndex = saved && typeof saved.step === "number" ? saved.step : 0;
+    stepIndex = saved && typeof saved.step === "number" ? Math.min(saved.step, PC.creator.STEPS.length - 1) : 0;
+    // A draft from before the Creator chat may hold a scrapped loss or a cut skill.
+    if (draft.loss && !PC.creator.lossById(draft.loss)) draft.loss = null;
+    Object.keys(draft.training || {}).forEach(function (t) { if (!PC.data.checkTypes[t]) delete draft.training[t]; });
+    if (draft.freePoint && !PC.data.checkTypes[draft.freePoint]) draft.freePoint = null;
+    PC.creator.fitToProfession(draft);
+    draft.tags = (draft.tags || []).filter(function (t) { return PC.creator.entry(t) && !PC.creator.blockedBy({ tags: [], debuffs: [], traits: [], flaw: null }, t); });
+    draft.shown = draft.shown || { captain: [], mentor: [], ship: [] };
     creating = true;
   }
 
@@ -1700,6 +1751,7 @@
       return '<li class="' + (i === stepIndex ? "on " : "") + (done ? "done" : "") + '">' +
         '<button data-act="gostep" data-i="' + i + '">' + (i + 1) + ". " + esc(s.title) + "</button></li>";
     }).join("");
+    var body = creatorStep(); // may settle a default pick (the portrait in view)
     var errs = C.stepErrors(draft, stepId());
     var last = stepIndex === C.STEPS.length - 1;
     liveTotals = [];
@@ -1708,8 +1760,7 @@
       '<span class="grow"></span><button class="menubtn" data-act="surprise" title="Fill every step at random">Surprise me</button>' +
       '<button class="menubtn" data-act="resetdraft">Start over</button><button class="menubtn" data-act="quit">Title</button></header>' +
       '<ol class="steps">' + steps + "</ol>" +
-      '<div class="creator-body"><main class="stage">' + '<section class="cstep cstep-' + stepId() + '">' +
-      '<h2 class="title">' + esc(C.STEPS[stepIndex].title) + "</h2>" + creatorStep() + "</section>" +
+      '<div class="creator-body"><main class="stage">' + '<section class="cstep cstep-' + stepId() + '">' + body + "</section>" +
       '<div class="actions step-nav">' +
       (stepIndex > 0 ? '<button class="secondary" data-act="back">Back</button>' : "") +
       (last ? "" : '<button data-act="next" class="primary">Next</button>') +
@@ -1730,21 +1781,22 @@
     if (draft.homeCity) bits.push("Ash-Born of " + draft.homeCity);
     if (draft.profession) bits.push("once " + aOrAn(draft.profession.toLowerCase()));
     var loss = C.lossById(draft.loss);
-    var stats = PC.checks.STATS.map(function (s) { return '<span class="stat"><b>' + draft.stats[s] + "</b>" + esc(s) + "</span>"; }).join("");
-    var tags = ["Ash-Born"].concat(loss ? [loss.tag] : [], draft.tags, draft.debuffs);
+    var stats = PC.checks.STATS.map(function (s) { return '<div class="vbar" style="width:auto"><span class="gp" style="font-size:24px">' + draft.stats[s] + '</span><span class="sc">' + esc(s) + "</span></div>"; }).join("");
+    var tags = ["Ash-Born"].concat(loss ? [loss.tag] : [], draft.tags);
     return (pic ? '<img class="preview-portrait" src="' + assetUrl(pic) + '" alt="">' : '<div class="preview-portrait empty">No portrait yet</div>') +
-      "<h3>" + esc(name) + "</h3>" +
-      '<p class="small muted">' + esc(bits.join(" · ")) + "</p>" +
-      '<div class="stats">' + stats + "</div>" +
-      (draft.traits.length || draft.flaw ? '<p class="small"><b>Traits:</b> ' + esc(draft.traits.concat(draft.flaw ? ["flaw: " + draft.flaw] : []).join(", ")) + "</p>" : "") +
-      '<p class="small"><b>Tags:</b> ' + esc(tags.join(", ")) + "</p>" +
-      (draft.shipName ? '<p class="small"><b>Ship:</b> <i>' + esc(draft.shipName) + "</i></p>" : "");
+      '<p class="capname" style="margin-top:4px">' + esc(name) + "</p>" +
+      '<p class="note" style="margin:2px 0 8px">' + esc(bits.join(" · ")) + "</p>" +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px 10px">' + stats + "</div>" +
+      (draft.traits.length || draft.flaw ? '<p class="small"><span class="sc">Traits:</span> ' + esc(draft.traits.join(", ")) + (draft.flaw ? ' · <span class="manicule flaw" style="font-size:16px">☞</span> ' + esc(draft.flaw) : "") + "</p>" : "") +
+      '<p class="small"><span class="sc">Tags:</span> ' + esc(tags.join(", ")) + "</p>" +
+      (draft.debuffs.length ? '<p class="small"><span class="sc">Old ailments:</span> ' + esc(draft.debuffs.join(", ")) + "</p>" : "") +
+      (draft.shipName ? '<p class="small"><span class="sc">Ship:</span> <i>' + esc(PC.creator.shipName(draft.shipName)) + "</i></p>" : "");
   }
 
   function creatorStep() {
     switch (stepId()) {
-      case "identity": return stepIdentity();
       case "portrait": return stepPortrait();
+      case "name": return stepName();
       case "origin": return stepOrigin();
       case "stats": return stepStats();
       case "training": return stepTraining();
@@ -1755,6 +1807,8 @@
       default: return stepReview();
     }
   }
+
+  function head(title, line) { return '<h2 class="title">' + title + "</h2>" + (line ? '<p class="note" style="font-size:19px;max-width:680px">' + line + "</p>" : ""); }
 
   function textField(label, path, opts) {
     opts = opts || {};
@@ -1771,22 +1825,31 @@
     var on = act === "pick" ? getField(field) === value : (getField(field) || []).indexOf(value) >= 0;
     var blocked = !on && (opts.blocked || opts.full);
     return '<button class="card' + (on ? " on" : "") + (blocked ? " blocked" : "") + '" data-act="' + act + '" data-field="' + field + '" data-value="' + esc(value) + '"' +
-      (opts.max ? ' data-max="' + opts.max + '"' : "") + (blocked ? " disabled" : "") + (act === "toggle" || act === "pick" ? ' aria-pressed="' + on + '"' : "") + ">" +
-      "<b>" + esc(title) + "</b>" + (body ? '<span class="small">' + esc(body) + "</span>" : "") +
+      (opts.max ? ' data-max="' + opts.max + '"' : "") + (blocked ? " disabled" : "") + ' aria-pressed="' + on + '">' +
+      "<b>" + esc(title) + "</b>" + (body ? '<span class="small">' + esc(body) + "</span>" : "") + (opts.extra || "") +
       (!on && opts.blocked ? '<span class="small lock">' + esc(opts.blocked) + "</span>" : "") + "</button>";
   }
 
-  function stepIdentity() {
-    var b = PC.creator.band(draft.age);
-    var bandNote = b ? "Ages " + b.min + "-" + b.max + ": " + b.tags + " starting tag" + (b.tags > 1 ? "s" : "") +
-      (b.debuffs ? " and " + b.debuffs + " debuff" + (b.debuffs > 1 ? "s" : "") : ", no debuffs") + ". Your portrait shows your captain at this age." : "Pick an age from 15 to 40.";
-    return '<p class="muted">You survived Captain Deadman\'s raids. Your city burned, and you came out of the ashes with a battered sloop and a grudge.</p>' +
-      '<div class="row2">' + textField("First name", "first", { max: 24 }) + textField("Last name", "last", { max: 24 }) + "</div>" +
-      '<p><button data-act="randname">Random name</button> <span class="small muted">From the Avalon pool' + (draft.portraitSet ? "" : "; a man's name until you pick a portrait") + ".</span></p>" +
-      textField("Age", "age", { type: "number", min: 15, maxNum: 40, redraw: true }) +
-      '<p class="small muted">' + esc(bandNote) + "</p>";
+  function ailmentLine(n) { return n === 0 ? "no old ailments" : n === 1 ? "one old ailment" : "two old ailments"; }
+  function tagLine(n) { return ["", "one starting tag", "two starting tags", "three starting tags"][n]; }
+
+  // Portrait and age (§12.2): the slider, its band line, the cycler.
+  function stepPortrait() {
+    var C = PC.creator;
+    var b = C.band(draft.age);
+    var choices = C.captainPortraitChoices(draft);
+    if (choices.length && !choices.some(function (c) { return c.set === draft.portraitSet; })) draft.portraitSet = choices[0].set; // what you see is what you pick
+    var age = Number(draft.age) || 25;
+    var track = "linear-gradient(90deg, rgba(47,90,34,.25) 0 " + (100 * 10.5 / 25) + "%, rgba(122,86,8,.25) 0 " + (100 * 20.5 / 25) + "%, rgba(143,42,28,.25) 0)";
+    return head("Your captain") +
+      '<label class="field"><span>Age</span><input class="slider" type="range" min="15" max="40" step="1" value="' + age + '" data-act="age" style="background:' + track + '"></label>' +
+      '<p class="sc" style="margin:0">Age ' + age + (b ? " · " + tagLine(b.tags) + ", " + ailmentLine(b.debuffs) : "") + "</p>" +
+      '<p class="note">15–25: one starting tag. 26–35: two tags and one old ailment. 36–40: three tags and two old ailments.</p>' +
+      (choices.length ? cycler(choices, "portraitSet", "Portrait") : "") +
+      '<p class="note" style="text-align:center">Your portrait ages with you, and an eyepatch replaces it if you lose an eye.</p>';
   }
 
+  // No set names on screen (§12.2): the cycler counts, it doesn't name.
   function cycler(choices, field, label) {
     var cur = getField(field);
     var i = Math.max(0, choices.map(function (c) { return c.set; }).indexOf(cur));
@@ -1794,33 +1857,37 @@
     return '<div class="cycler">' +
       '<button class="arrow" data-act="cycle" data-field="' + field + '" data-dir="-1" aria-label="Previous portrait">‹</button>' +
       '<figure><img src="' + assetUrl(c.path) + '" alt="' + esc(label) + " " + (i + 1) + '">' +
-      "<figcaption>" + esc(c.name) + ' <span class="muted">· ' + (i + 1) + " of " + choices.length + "</span></figcaption></figure>" +
+      "<figcaption>" + (i + 1) + " of " + choices.length + "</figcaption></figure>" +
       '<button class="arrow" data-act="cycle" data-field="' + field + '" data-dir="1" aria-label="Next portrait">›</button></div>';
   }
 
-  function stepPortrait() {
-    var choices = PC.creator.captainPortraitChoices(draft);
-    if (!choices.length) return "<p>Set an age first.</p>";
-    if (!draft.portraitSet) draft.portraitSet = choices[0].set; // what you see is what you pick
-    var b = PC.creator.band(draft.age);
-    return '<p class="muted">Portraits for a ' + esc(b.band === "mid" ? "middle-aged" : b.band) + " captain. Your portrait ages with you, and an eyepatch replaces it if you lose an eye. The captain is a woman if you choose a woman's portrait.</p>" +
-      cycler(choices, "portraitSet", "Portrait");
+  function stepName() {
+    return head("Name") + '<div class="row2">' + textField("First name", "first", { max: 24 }) + textField("Last name", "last", { max: 24 }) + "</div>" +
+      '<p><button class="secondary" data-act="randname">Random name</button></p>';
   }
 
+  // Origin (§12.5): the origin cards, home city, old trade, what the fire took.
   function stepOrigin() {
     var C = PC.creator, Dc = PC.data.creator;
-    var p = C.professionById(draft.profession);
-    var html = "<h3>Home city</h3><p class=\"small muted\">Which sack did you survive? Baltimore burned in September 1752; Savannah and Charleston in June 1753.</p>" +
-      '<div class="cards">' + Dc.HOME_CITIES.map(function (c) { return card("pick", "homeCity", c.id, c.id, c.effect); }).join("") + "</div>" +
-      "<h3>Profession</h3><p class=\"small muted\">What you did before the fire. It gives one free training point.</p>" +
-      '<div class="cards">' + Dc.PROFESSIONS.map(function (x) { return card("pick", "profession", x.id, x.id, x.flavor); }).join("") + "</div>";
-    if (p) {
-      html += "<h3>Free training point</h3>" +
-        '<div class="cards two">' + p.free.map(function (t) { return card("pick", "freePoint", t, t, "+1 training (" + PC.data.checkTypes[t].stat + ")"); }).join("") + "</div>";
-    }
-    html += "<h3>What was lost</h3><p class=\"small muted\">It gives you a loss tag and opens the quest to get it back, until the end of Spring 1755.</p>" +
-      '<div class="cards">' + C.lossChoices(draft).map(function (l) { return card("pick", "loss", l.id, l.name + " · " + l.tag, l.text); }).join("") + "</div>";
-    return html;
+    var html = '<div class="cards">' + Dc.ORIGINS.map(function (o) {
+      return o.locked ? '<button class="card blocked" disabled><b>' + esc(o.id) + '</b><span class="small lock">' + esc(o.locked) + "</span></button>"
+        : '<div class="card on"><b>' + esc(o.id) + "</b></div>";
+    }).join("") + "</div>";
+    html += '<h3>Ash-Born</h3><p class="note">' + esc(Dc.ORIGINS[0].text) + "</p>" +
+      '<div class="cards">' + Dc.HOME_CITIES.map(function (c) { return card("pick", "homeCity", c.id, c.id, null, { extra: '<span class="small"><i>' + esc(c.burned) + "</i> " + esc(c.effect) + "</span>" }); }).join("") + "</div>";
+    html += '<h3>Your old trade</h3><p class="note">What you did before the fire. Pick one of its two skills for a free point of training.</p>' +
+      '<div class="cards">' + Dc.PROFESSIONS.map(function (p) {
+        var on = draft.profession === p.id;
+        return '<div class="card' + (on ? " on" : "") + '"><b>' + esc(p.id) + '</b><span class="actions" style="margin-top:6px">' + p.free.map(function (t) {
+          var pick = on && draft.freePoint === t;
+          return '<button class="' + (pick ? "primary" : "secondary") + '" style="font-size:16px;padding:4px 10px;min-height:36px" data-act="trade" data-prof="' + esc(p.id) + '" data-skill="' + esc(t) + '" title="' + esc(PC.data.checkTypes[t].player) + '">' + esc(t) + "</button>";
+        }).join("") + "</span></div>";
+      }).join("") + "</div>";
+    html += '<h3>What the fire took</h3><p class="note">Each loss weighs on you, and each can be won back—if you can find who took it.</p>' +
+      '<div class="cards">' + C.lossChoices(draft).map(function (l) {
+        return card("pick", "loss", l.id, l.name, l.text, { extra: '<span class="small lock" style="color:#7a2416">' + esc(l.tag) + ": " + esc(l.penalty) + "</span>" });
+      }).join("") + "</div>";
+    return head("Origin") + html;
   }
 
   var STAT_TEXT = {
@@ -1834,12 +1901,13 @@
       '<button data-act="' + act + '" data-key="' + esc(key) + '" data-d="1"' + (canUp ? "" : " disabled") + ' aria-label="Raise">+</button>' + (extra || "") + "</span>";
   }
 
+  // The stats screen's text stays as built (§12.6).
   function stepStats() {
     var C = PC.creator;
     var left = C.statPointsLeft(draft);
-    return '<p class="muted">Every stat starts at 1. Spend <b>' + left + "</b> more point" + (left === 1 ? "" : "s") + ", at most 2 in a stat. A stat adds to every check in its family.</p>" +
+    return head("Stats", "Every stat starts at 1. Spend <b>" + left + "</b> more point" + (left === 1 ? "" : "s") + ", at most 2 in a stat. A stat adds to every check in its family.") +
       '<table class="alloc">' + PC.checks.STATS.map(function (s) {
-        return "<tr><th>" + esc(s) + '<br><span class="small muted">' + esc(STAT_TEXT[s]) + "</span></th><td>" +
+        return "<tr><th>" + esc(s) + '<br><span class="note">' + esc(STAT_TEXT[s]) + "</span></th><td>" +
           stepper("stat", s, draft.stats[s], C.canLowerStat(draft, s), C.canRaiseStat(draft, s)) + "</td></tr>";
       }).join("") + "</table>";
   }
@@ -1851,38 +1919,50 @@
     return fam;
   }
 
+  var touch = (function () { try { return globalThis.matchMedia && globalThis.matchMedia("(hover: none)").matches; } catch (e) { return false; } })();
+
+  // Skills (§12.6): the counter pinned on top, groups by stat, the bonus
+  // on each row, the free point as a gilt pip, the Player line on hover/tap.
   function stepTraining() {
     var C = PC.creator;
     var left = C.trainingLeft(draft);
     var fam = familyTypes();
-    return '<p class="muted">Spend <b>' + left + "</b> more training point" + (left === 1 ? "" : "s") + ", at most 2 in a check type" +
-      (draft.freePoint ? " (your free point in " + esc(draft.freePoint) + " counts toward the 2)" : "") +
-      ". The number on the right is your edge before difficulty: stat plus training.</p>" +
-      PC.checks.STATS.map(function (s) {
-        var trained = fam[s].filter(function (t) { return C.trainingTotal(draft, t) > 0; }).length;
-        return '<details class="family"' + (trained || s === PC.checks.STATS[0] ? " open" : "") + "><summary><b>" + esc(s) + "</b> " + draft.stats[s] +
-          (trained ? ' <span class="small muted">· ' + trained + " trained</span>" : "") + "</summary>" +
-          '<table class="alloc small-rows">' + fam[s].map(function (t) {
-            var free = draft.freePoint === t ? ' <span class="badge-free">+1 free</span>' : "";
-            return "<tr><th>" + esc(t) + free + "</th><td>" +
-              stepper("train", t, C.trainingTotal(draft, t), C.canLowerType(draft, t), C.canRaiseType(draft, t)) +
-              '</td><td class="edge">' + signed(draft.stats[s] + C.trainingTotal(draft, t)) + "</td></tr>";
-          }).join("") + "</table></details>";
-      }).join("");
+    var html = head("Training") +
+      '<div class="notice" style="position:sticky;top:0;z-index:3;background:#efe3c6">' + (left ? "<b>" + left + "</b> point" + (left === 1 ? "" : "s") + " left to spend." : "All points spent.") + "</div>" +
+      '<p class="note" style="font-size:19px;max-width:680px">Some things you learned the hard way. Spend <b>6 points</b> on the skills you know best—no more than 2 in any one.' +
+      (draft.freePoint ? " Your old trade's free point is already in <b>" + esc(draft.freePoint) + "</b>." : "") + "</p>" +
+      '<p class="note" style="max-width:680px">Your bonus is the stat plus your training, and it\'s added to every roll of that skill. With +3 or better, most everyday tasks are easy.</p>' +
+      '<p class="note">' + (touch ? "Tap a skill for details." : "Hover over a skill for details.") + "</p>";
+    return html + PC.checks.STATS.map(function (s) {
+      return '<div class="h4" style="max-width:620px">' + esc(s) + " " + draft.stats[s] + " · " + esc(STAT_TEXT[s].toLowerCase()) + "</div>" +
+        '<table class="alloc small-rows">' + fam[s].map(function (t) {
+          var free = draft.freePoint === t ? ' <span title="Your old trade\'s free point" style="display:inline-block;width:11px;height:11px;border-radius:50%;background:#c99f45;border:1px solid #8a6414;vertical-align:middle"></span>' : "";
+          return '<tr><th><span class="skilltip" tabindex="0" title="' + esc(PC.data.checkTypes[t].player) + '" style="border-bottom:1px dotted">' + esc(t) + "</span>" + free +
+            '<span class="note tipline" hidden>' + esc(PC.data.checkTypes[t].player) + "</span></th><td>" +
+            stepper("train", t, C.trainingTotal(draft, t), C.canLowerType(draft, t), C.canRaiseType(draft, t)) +
+            '</td><td class="edge">' + signed(draft.stats[s] + C.trainingTotal(draft, t)) + "</td></tr>";
+        }).join("") + "</table>";
+    }).join("");
+  }
+
+  // The officer-lean line (§12.7): which officers warm to this pick.
+  function leanLine(id) {
+    var tag = (PC.data.officerLeaning || {})[id];
+    return tag ? '<span class="small" style="color:#235066"><i>Officers who value ' + esc(tag) + " warm to this</i></span>" : "";
   }
 
   function stepCharacter() {
     var C = PC.creator, Dc = PC.data.creator;
-    var html = '<p class="muted">Pick two traits and one flaw. Traits give +1 on their checks; the flaw gives -1 and a temptation. Your officers will read them.</p>' +
+    var html = head("Traits and flaw", "Pick two traits and one flaw. Traits give +1 to their skills; your flaw costs −1 and tempts you at the worst moments. Your officers will judge you by them.") +
       "<h3>Traits (" + draft.traits.length + " of " + Dc.START.traitCount + ")</h3>";
     Dc.TRAIT_GROUPS.forEach(function (g) {
-      html += '<h4>' + esc(g.group) + '</h4><div class="cards small-cards">' + g.traits.map(function (t) {
+      html += "<h4>" + esc(g.group) + '</h4><div class="cards small-cards">' + g.traits.map(function (t) {
         var full = draft.traits.length >= Dc.START.traitCount && draft.traits.indexOf(t.id) < 0;
-        return card("toggle", "traits", t.id, t.id, t.text, { max: Dc.START.traitCount, blocked: C.blockedBy(draft, t.id), full: full });
+        return card("toggle", "traits", t.id, t.id, t.text, { max: Dc.START.traitCount, blocked: C.blockedBy(draft, t.id), full: full, extra: leanLine(t.id) });
       }).join("") + "</div>";
     });
     html += "<h3>Flaw</h3>" + '<div class="cards small-cards">' + Dc.FLAWS.map(function (f) {
-      return card("pick", "flaw", f.id, f.id, f.text, { blocked: C.blockedBy(draft, f.id) });
+      return card("pick", "flaw", f.id, f.id, f.text, { blocked: C.blockedBy(draft, f.id), extra: leanLine(f.id) });
     }).join("") + "</div>";
     return html;
   }
@@ -1891,10 +1971,10 @@
     var C = PC.creator, Dc = PC.data.creator;
     var n = C.tagsAllowed(draft), d = C.debuffsRequired(draft);
     var loss = C.lossById(draft.loss);
-    var html = '<p class="muted">At ' + draft.age + " you take <b>" + n + "</b> starting tag" + (n > 1 ? "s" : "") +
-      (d ? " and <b>" + d + "</b> debuff" + (d > 1 ? "s" : "") : " and no debuffs") + ". Tags mostly give rerolls and open hidden scenes.</p>" +
+    var words = ["", "one", "two", "three"];
+    var html = head("Tags", "What people say about you: what you're known for, and your quirks. Your years give you <b>" + words[n] + "</b>.") +
       '<p class="small">Already yours: <b>Ash-Born</b>' + (loss ? ", <b>" + esc(loss.tag) + "</b> (" + esc(loss.name.toLowerCase()) + ")" : "") + ". These don't count.</p>" +
-      "<h3>Starting tags (" + draft.tags.length + " of " + n + ")</h3>";
+      "<h3>Tags (" + draft.tags.length + " of " + n + ")</h3>";
     Dc.TAG_GROUPS.forEach(function (g) {
       html += "<h4>" + esc(g.group) + '</h4><div class="cards small-cards">' + g.tags.map(function (t) {
         var full = draft.tags.length >= n && draft.tags.indexOf(t.id) < 0;
@@ -1902,10 +1982,10 @@
       }).join("") + "</div>";
     });
     if (d) {
-      html += "<h3>Debuffs (" + draft.debuffs.length + " of " + d + ")</h3><p class=\"small muted\">The years have left their mark. Some can be cured later, at a price.</p>" +
+      html += "<h3>Old ailments (" + draft.debuffs.length + " of " + d + ')</h3><p class="note">The years leave their mark. Pick <b>' + words[d] + "</b>. Some can be cured, for a price.</p>" +
         '<div class="cards small-cards">' + Dc.DEBUFFS.map(function (x) {
           var full = draft.debuffs.length >= d && draft.debuffs.indexOf(x.id) < 0;
-          return card("toggle", "debuffs", x.id, x.id, x.text, { max: d, blocked: C.blockedBy(draft, x.id), full: full });
+          return card("toggle", "debuffs", x.id, x.id, x.text, { max: d, blocked: C.blockedBy(draft, x.id), full: full, extra: '<span class="small sc" style="color:' + (x.life === "Curable" ? "#2f5a22" : "#7a2416") + '">' + esc(x.life) + "</span>" });
         }).join("") + "</div>";
     }
     return html;
@@ -1915,34 +1995,36 @@
     var C = PC.creator, Dc = PC.data.creator;
     var choices = C.mentorPortraitChoices(draft);
     if (!draft.mentor.portraitSet || !choices.some(function (c) { return c.set === draft.mentor.portraitSet; })) draft.mentor.portraitSet = choices[0].set;
-    var html = '<p class="muted">An old hand who sailed with you out of the ashes. Your mentor is your first officer and your first Quartermaster, starts as your Friend, and once a season lets you reroll a setback on a check they taught you.</p>' +
+    var html = head("Your mentor", "An old hand who sailed with you out of the ashes: your first officer, your first Quartermaster, and already a friend. Once a season, you can reroll a failed check in something your mentor taught you.") +
       '<div class="row2">' + textField("Mentor's first name", "mentor.first", { max: 24 }) + textField("Last name", "mentor.last", { max: 24 }) + "</div>" +
-      '<p><button data-act="randmentor">Random name</button> <span class="small muted">From the Avalon pool, to suit the portrait.</span></p>' +
+      '<p><button class="secondary" data-act="randmentor">Random name</button></p>' +
       cycler(choices, "mentor.portraitSet", "Mentor portrait") +
       "<h3>Type</h3>" + '<div class="cards">' + Dc.OFFICER_TYPES.map(function (t) {
         return card("pick", "mentor.type", t.id, t.id, t.perk + ". Teaches: " + t.lessons + ".");
       }).join("") + "</div>";
     function traitCards(field, blockFn) {
       return ["warm", "neutral", "cold"].map(function (w) {
-        return "<h4>" + { warm: "Sweet and funny", neutral: "Steady and odd", cold: "Dark and terrifying" }[w] + '</h4><div class="cards small-cards">' +
+        return "<h4>" + { warm: "Warm", neutral: "Steady", cold: "Dark" }[w] + '</h4><div class="cards small-cards">' +
           Dc.OFFICER_TRAITS.filter(function (t) { return t.warmth === w; }).map(function (t) {
             return card("pick", field, t.id, t.id, t.hook + ". Likes " + t.likes + ", dislikes " + t.dislikes + ".", { blocked: blockFn ? blockFn(t.id) : null });
           }).join("") + "</div>";
       }).join("");
     }
-    html += "<h3>Voice trait</h3><p class=\"small muted\">How your mentor talks and what he cares about.</p>" + traitCards("mentor.voice") +
-      "<h3>Secondary trait</h3>" + (draft.mentor.voice ? traitCards("mentor.secondary", function (id) { return C.secondaryBlocked(draft, id); }) : '<p class="small muted">Pick a voice trait first.</p>') +
-      '<p class="small muted">The mentor\'s drive and fear are rolled when the game begins, and stay hidden until you learn them.</p>';
+    html += '<h3>Voice trait</h3><p class="note">How your mentor talks and what they care about.</p>' + traitCards("mentor.voice") +
+      "<h3>Secondary trait</h3>" + (draft.mentor.voice ? traitCards("mentor.secondary", function (id) { return C.secondaryBlocked(draft, id); }) : '<p class="note">Pick a voice trait first.</p>') +
+      '<p class="note">Your mentor\'s drive and fear are rolled when the game begins, and stay hidden until you learn them.</p>';
     return html;
   }
 
   function stepShip() {
-    return '<div class="ship-plate"><img class="ship-art" src="' + assetUrl(PC.data.shipArt("Sloop")) + '" alt="A sloop">' +
-      '<p class="small">A battered sloop: 14 of 20 hull, frayed rigging, 6 of 10 guns, shallow draft for the shoals, and a skeleton crew of 12 green hands.</p></div>' +
-      textField("Her name", "shipName", { max: 30, placeholder: "The ship's name" }) +
-      '<p><button data-act="randship">Random name</button> <span class="small muted">Leave off "the": the game adds it ("the ' + esc(PC.creator.shipName(draft.shipName) || "Drunken Saint") + '").</span></p>';
+    return head("Your ship") + '<div class="ship-plate"><img class="ship-art" src="' + assetUrl(PC.data.shipArt("Sloop")) + '" alt="A sloop">' +
+      '<p class="note" style="font-size:19px">She\'s battered and half-armed, but she\'s yours: 14 of 20 hull strength, 6 of 10 guns, a shallow draft for the shoals, and twelve green hands.</p></div>' +
+      textField("Her name", "shipName", { max: 34 }) +
+      '<p><button class="secondary" data-act="randship">Random name</button></p>' +
+      '<p class="note">Leave off “the”; the game adds it (“the Drunken Saint”).</p>';
   }
 
+  // Review (§12.11): both portraits, sections with Change links, the money.
   function stepReview() {
     var C = PC.creator;
     var errs = C.allErrors(draft);
@@ -1954,37 +2036,55 @@
     var training = Object.keys(PC.data.checkTypes).filter(function (t) { return C.trainingTotal(draft, t); })
       .map(function (t) { return esc(t) + " +" + C.trainingTotal(draft, t); }).join(", ");
     var m = draft.mentor;
-    var html = "";
+    var b = C.band(draft.age);
+    var cap = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, b.band, false) : null;
+    var men = m.portraitSet ? C.portraitPath(m.portraitSet, "old", false) : null;
+    var html = head("Review");
     if (errs.length) {
       html += '<div class="todo"><p><b>Still to do:</b></p><ul>' + errs.map(function (e) {
         var i = C.STEPS.map(function (s) { return s.id; }).indexOf(e.step);
         return '<li><button class="link" data-act="gostep" data-i="' + i + '">' + esc(C.STEPS[i].title) + "</button>: " + esc(e.message) + "</li>";
       }).join("") + "</ul></div>";
     }
-    html += sec("Captain", "identity", "<p>" + esc((String(draft.first) + " " + String(draft.last)).trim()) + ", age " + esc(draft.age) + "</p>") +
-      sec("Origin", "origin", "<p>Ash-Born of " + esc(draft.homeCity || "?") + (city ? ' <span class="small muted">(' + esc(city.effect) + ")</span>" : "") +
+    html += '<div style="display:flex;gap:18px;margin:6px 0 10px">' + (cap ? '<figure style="margin:0;text-align:center"><img src="' + assetUrl(cap) + '" alt="" style="width:120px;height:180px;object-fit:cover;border:1px solid #6b5030"><figcaption class="note">You</figcaption></figure>' : "") +
+      (men ? '<figure style="margin:0;text-align:center"><img src="' + assetUrl(men) + '" alt="" style="width:120px;height:180px;object-fit:cover;border:1px solid #6b5030"><figcaption class="note">Your mentor</figcaption></figure>' : "") + "</div>";
+    html += sec("Your captain", "portrait", "<p>Age " + esc(draft.age) + "</p>") +
+      sec("Name", "name", "<p>" + esc((String(draft.first) + " " + String(draft.last)).trim() || "?") + "</p>") +
+      sec("Origin", "origin", "<p>Ash-Born of " + esc(draft.homeCity || "?") + (city ? ' <span class="note">(' + esc(city.effect) + ")</span>" : "") +
         "<br>Once " + esc(aOrAn((draft.profession || "?").toLowerCase())) + (draft.freePoint ? ", free point in " + esc(draft.freePoint) : "") +
-        "<br>" + (loss ? esc(loss.name) + ": " + esc(loss.tag) : "Nothing lost yet") + "</p>") +
+        "<br>" + (loss ? esc(loss.name) + ": " + esc(loss.tag) + ' <span class="note">(' + esc(loss.penalty) + ")</span>" : "Nothing lost yet") + "</p>") +
       sec("Stats", "stats", "<p>" + PC.checks.STATS.map(function (s) { return esc(s) + " " + draft.stats[s]; }).join(" · ") + "</p>") +
-      sec("Training", "training", "<p>" + (training || "None") + "</p>") +
+      sec("Skills", "training", "<p>" + (training || "None") + "</p>") +
       sec("Traits and flaw", "character", "<p>" + esc(draft.traits.join(", ") || "None") + (draft.flaw ? "; flaw: " + esc(draft.flaw) : "") + "</p>") +
       sec("Tags", "tags", "<p>Ash-Born" + (loss ? ", " + esc(loss.tag) : "") + (draft.tags.length ? ", " + esc(draft.tags.join(", ")) : "") +
-        (draft.debuffs.length ? '<br><span class="muted">Debuffs:</span> ' + esc(draft.debuffs.join(", ")) : "") + "</p>") +
-      sec("Mentor", "mentor", "<p>" + esc((String(m.first) + " " + String(m.last)).trim() || "?") + (m.type ? ", " + esc(m.type) : "") +
+        (draft.debuffs.length ? '<br><span class="note">Old ailments:</span> ' + esc(draft.debuffs.join(", ")) : "") + "</p>") +
+      sec("Your mentor", "mentor", "<p>" + esc((String(m.first) + " " + String(m.last)).trim() || "?") + (m.type ? ", " + esc(m.type) : "") +
         (m.voice ? "<br>" + esc(m.voice) + (m.secondary ? ", " + esc(m.secondary) : "") + ", Mentor" : "") + "</p>") +
-      sec("Ship", "ship", "<p><i>" + esc(draft.shipName || "?") + "</i>, a battered sloop</p>") +
-      '<p class="small muted">You start with ' + (600 + (city && city.gold ? city.gold : 0)) + " crew gold, an empty purse and 10 provisions lots. Standing, Heat and Dread start at zero.</p>" +
+      sec("Your ship", "ship", "<p><i>" + esc(PC.creator.shipName(draft.shipName) || "?") + "</i>, a battered sloop</p>") +
+      '<p style="max-width:680px;margin-top:14px">You start with <b>' + gold(600 + (city && city.gold ? city.gold : 0)) + " gold in the ship's chest</b> (the crew's, until it's split) and <b>nothing in your own purse</b>, plus 10 lots of provisions, " + esc(PC.data.creator.START.startKit) + ". <b>No one knows your name yet.</b></p>" +
       '<div class="actions"><button class="primary big" data-act="begin"' + (errs.length ? " disabled" : "") + ">Set sail</button></div>";
     return html;
   }
 
+  // A random-name draw that doesn't repeat until the pool is used up (§36.2).
+  function remember(kind, name) {
+    draft.shown = draft.shown || { captain: [], mentor: [], ship: [] };
+    draft.shown[kind] = (draft.shown[kind] || []).concat([name]);
+  }
+
   var creatorHandlers = {
-    "gostep": function (el) { stepIndex = Number(el.dataset.i); scrollTop(); },
-    "next": function () {
-      if (stepIndex < PC.creator.STEPS.length - 1) stepIndex += 1;
-      scrollTop();
+    "gostep": function (el) { stepIndex = Number(el.dataset.i); },
+    "next": function () { if (stepIndex < PC.creator.STEPS.length - 1) stepIndex += 1; },
+    "back": function () { if (stepIndex > 0) stepIndex -= 1; },
+    "age": function (el) {
+      draft.age = Math.round(Number(el.value));
+      PC.creator.fitToAge(draft);
     },
-    "back": function () { if (stepIndex > 0) stepIndex -= 1; scrollTop(); },
+    "trade": function (el) {
+      draft.profession = el.dataset.prof;
+      draft.freePoint = el.dataset.skill;
+      PC.creator.fitToProfession(draft);
+    },
     "pick": function (el) {
       var f = el.dataset.field, v = el.dataset.value;
       setField(f, v);
@@ -2016,37 +2116,50 @@
     },
     "surprise": function () {
       var key = "surprise|" + PC.rng.newWorldSeed();
+      var shown = draft && draft.shown;
       draft = PC.creator.randomDraft(key);
-      var n = PC.npcs.randomCaptainName(PC.creator.setById(draft.portraitSet).gender, key + "|name");
+      draft.shown = shown || { captain: [], mentor: [], ship: [] };
+      var n = PC.npcs.randomCaptainName(PC.creator.setById(draft.portraitSet).gender, key + "|name", draft.shown.captain);
       draft.first = n.first; draft.last = n.last;
-      draft.shipName = PC.npcs.randomShipName(key + "|ship");
+      draft.shipName = PC.npcs.randomShipName(key + "|ship", null, draft.shown.ship) || PC.npcs.randomShipName(key + "|ship");
       stepIndex = PC.creator.STEPS.length - 1;
     },
-    "resetdraft": function () { draft = PC.creator.blankDraft(); stepIndex = 0; },
-    // The random-name buttons (§36.2).
+    "resetdraft": function () { draft = PC.creator.blankDraft(); draft.shown = { captain: [], mentor: [], ship: [] }; stepIndex = 0; },
+    // The random-name buttons (§36.2): no repeats until the pool is used up.
     "randname": function () {
       var g = draft.portraitSet ? PC.creator.setById(draft.portraitSet).gender : "m";
-      var n = PC.npcs.randomCaptainName(g, "captain-name|" + PC.rng.newWorldSeed());
-      draft.first = n.first; draft.last = n.last;
+      var n = PC.npcs.randomCaptainName(g, "captain-name|" + PC.rng.newWorldSeed(), (draft.shown || {}).captain);
+      draft.first = n.first; draft.last = n.last; remember("captain", n.first + " " + n.last);
     },
     "randmentor": function () {
       var set = draft.mentor.portraitSet ? PC.creator.setById(draft.mentor.portraitSet) : null;
       var key = "mentor-name|" + PC.rng.newWorldSeed();
       for (var i = 0; i < 10; i++) {
-        var n = PC.npcs.randomCaptainName(set ? set.gender : "m", key + "|" + i);
-        if (n.last !== draft.last) { draft.mentor.first = n.first; draft.mentor.last = n.last; break; }
+        var n = PC.npcs.randomCaptainName(set ? set.gender : "m", key + "|" + i, (draft.shown || {}).mentor);
+        if (n.last !== draft.last) { draft.mentor.first = n.first; draft.mentor.last = n.last; remember("mentor", n.first + " " + n.last); break; }
       }
     },
-    "randship": function () { draft.shipName = PC.npcs.randomShipName("ship-name|" + PC.rng.newWorldSeed()); },
+    "randship": function () {
+      var key = "ship-name|" + PC.rng.newWorldSeed();
+      var n = PC.npcs.randomShipName(key, null, (draft.shown || {}).ship);
+      if (!n) { draft.shown.ship = []; n = PC.npcs.randomShipName(key, null, []); }
+      draft.shipName = n; remember("ship", n);
+    },
+    // Set sail: the closing prologue plays, then the beach (§40.4).
     "begin": function () {
       var seed = PC.rng.newWorldSeed();
       var template = PC.creator.build(draft, seed);
-      state = PC.state.newGame(template, { seed: seed });
-      PC.state.addLog(state, "— Spring 1754 begins. —");
-      PC.state.addLog(state, "The quest What Was Lost is open (until the end of Spring 1755).");
+      var built = PC.state.newGame(template, { seed: seed });
+      PC.state.addLog(built, "— Spring 1754 begins. —");
+      PC.state.addLog(built, "The quest What Was Lost is open (until the end of Spring 1755).");
+      var m = (built.officers || []).filter(function (o) { return o.mentor; })[0];
       creating = false;
       clearDraft();
-      scrollTop();
+      PC.state.saveToBrowser(built);
+      prologue = { kind: "closing", game: built, home: built.captain.homeCity, tokens: {
+        city: built.captain.homeCity, loss: PC.data.prologue.LOSS_WORDS[built.captain.loss] || "what was lost",
+        mentor: m ? m.first : "your mentor", "mentor.he": m && m.gender === "f" ? "she" : "he", "mentor.He": m && m.gender === "f" ? "She" : "He",
+        ship: built.ship.name } };
     },
   };
 
@@ -2094,8 +2207,8 @@
       handlers.newconfirmed();
     },
     "newconfirmed": function () {
-      dialog = null;
-      startCreator();
+      dialog = null; menu = null;
+      prologue = { kind: "opening" };
     },
     // Quick start lives in Developer and warns before it replaces a save (§41.2).
     "quickask": function () {
@@ -2266,6 +2379,10 @@
         el.addEventListener("mouseleave", off); el.addEventListener("blur", off);
       });
     }
+    // A skill's Player line: hover on desktop, tap on a phone (§12.6).
+    root.querySelectorAll(".skilltip").forEach(function (t) {
+      t.addEventListener("click", function () { var l = t.parentNode.querySelector(".tipline"); if (l) l.hidden = !l.hidden; });
+    });
     // Clicks inside a menu panel don't close it.
     root.querySelectorAll("[data-stop]").forEach(function (p) { p.addEventListener("click", function (ev) { ev.stopPropagation(); }); });
     refreshTotals();

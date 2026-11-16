@@ -298,7 +298,9 @@
       // proposal). The quest keepsake is never lost.
       var quest = kept.filter(function (i) { return i.tier === "quest"; });
       var rest = nothing ? [] : kept.filter(function (i) { return i.tier !== "quest"; }).sort(function (a, b) { return worth(b) - worth(a); });
-      kept = quest.concat(rest.slice(0, Math.floor(rest.length / 2)));
+      // The Hauler tag keeps the whole haul (§14.2).
+      var hauler = (state.captain.tags || []).indexOf("Hauler") >= 0;
+      kept = quest.concat(hauler ? rest : rest.slice(0, Math.floor(rest.length / 2)));
       M().say(state, game, D().lines.blackout);
       PC.scenes.applyEffect(state, { tag: "Waterlogged", untilSeasonEnd: true });
     } else {

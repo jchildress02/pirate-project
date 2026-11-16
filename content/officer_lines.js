@@ -93,6 +93,8 @@
     },
     // The mentor's fixed-voice milestone (§25.8; S25 appendix, Scenes and beats).
     mentorFirstHire: "“Either a good choice or a bad one. Only one way to find out.”",
+    // The first Articles signing (S25 appendix, mentor milestones; §40.5).
+    mentorFirstArticles: "“Well done, Captain. Remember, those Articles are binding. Breaking them is a serious betrayal of the crew.”",
   };
 
   // §25.5 The captain's leaning: each trait or flaw leans toward one tag.

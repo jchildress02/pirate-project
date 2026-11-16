@@ -124,10 +124,11 @@
   var NICKNAME_RATES = { "Pirate": 0.5, "Pirate Captain": 0.5 };
   var NICKNAME_RATES_OCRACOKE = { "Sailor": 0.15, "Dockhand/Laborer": 0.15 };
 
-  // §36.15 Ships, 25 per flag. Avalon names marked navy are drawn only by
-  // Admiralty ships.
+  // §36.15 Ships, 25 per flag; the Avalon merchant names (40) and the
+  // Pirate names (50) were doubled (approved November 14). Avalon names
+  // marked navy are drawn only by Admiralty ships.
   var SHIPS = {
-    avalon: L("Thistle, Fair Isla, Bonnie Jean, Highland Lass, Saltire, Glasgow Merchant, Clyde, Lochaber, Caledonia, Heather Bell, Prosperity, Good Intent, Charming Peggy, Providence, Industry, Two Brothers, Carolina Packet, Albemarle, Wilmington Trader, Speedwell"),
+    avalon: L("Thistle, Fair Isla, Bonnie Jean, Highland Lass, Saltire, Glasgow Merchant, Clyde, Lochaber, Caledonia, Heather Bell, Prosperity, Good Intent, Charming Peggy, Providence, Industry, Two Brothers, Carolina Packet, Albemarle, Wilmington Trader, Speedwell, Hopewell, Mary and Ann, Kelpie, Bluebell, Orkney Lass, Leith Packet, Dundee, Pamlico, Roanoke, Edenton Packet, Betsey, Diligence, Friendship, Endeavour, Kitty, Tweed, Bonnie Annie, Peace and Plenty, Loyal Subject, Ploughman"),
     avalonNavy: L("Valiant, Resolute, Defiance, Intrepid, Unicorn"),
     frisian: L("Morgenster, Zeepaard, Prins Willem, Hoop, Fortuin, Harlingen, Texel, Ameland, Dokkum, Friesland, Gouden Leeuw, Witte Valk, Rode Hert, Vergulde Draak, Zwaan, Pelikaan, Dolfijn, Walvis, Sint Pieter, Koopman, Zeeland, Havana Trader, Vrede, Oranjeboom, Noorderlicht"),
     french: L("Bonne Espérance, Saint-Esprit, Dauphin, Hirondelle, Fleur de Lys, Vengeur, Hardi, Intrépide, Comète, Étoile du Matin, Tonnerre, Renard, Diligente, Jeune Henri, Bon Père, Saint-Louis, Mouette, Aigle, Belle Poule, Junon, Flore, Veracruz, Marquise, Sans Pareil, Gloire"),
@@ -136,7 +137,7 @@
     sicilian: L("Santa Rosalia, Sant'Agata, Madonna della Lettera, Palermo, Etna, Trinacria, Stella Maris, Scirocco, Delfino, Aquila, Leone, Buona Fortuna, San Nicola, Fenice, Gabbiano, Siracusa, Vespro, Corallo, Carmela, Marsala, Catania, Libeccio, Sirena d'Oro, San Calogero, Tonno"),
     burgundian: L("Belle Provence, Mistral, Rhône, Sainte-Baume, Bonne Mère, Cigale, Lavande, Camargue, Arlésienne, Saintes-Maries, Olivier, Durance, Étoile de Provence, Fortunée, Saint-Victor, Comtesse, Aigle d'Or, Bon Vent, Sardine, Tramontane, Avignon, Lys d'Arles, Marseille, Bouillabaisse, Félibre"),
     swedish: L("Tre Kronor, Kronan, Vasa, Svea, Lejonet, Falken, Lyckan, Hoppet, Freya, Odin, Sleipner, Stockholm, Uppland, Nordstjernan, Prins Carl, Vinland Trader, Gotland, Svarta Ormen, Gripen, Malmo, Riksdag, Hjalmar, Fortuna, Kalmar, Ulrika"),
-    pirate: L("Ill Wind, Black Gull, Rum Runner, Drunken Saint, Widow's Kiss, Gallows Bird, Sea Hag, Hangman's Luck, Merry Corpse, Devil's Due, Salt Dog, Rattlesnake, Jolly Bastard, Scurvy Dog, Thieving Magpie, Last Laugh, Bad Penny, Lucky Strumpet, Fortune's Folly, Black Cat, Crooked Mile, Grinning Skull, Red Raven, Midnight Lady, Salty Nan"),
+    pirate: L("Ill Wind, Black Gull, Rum Runner, Drunken Saint, Widow's Kiss, Gallows Bird, Sea Hag, Hangman's Luck, Merry Corpse, Devil's Due, Salt Dog, Rattlesnake, Jolly Bastard, Scurvy Dog, Thieving Magpie, Last Laugh, Bad Penny, Lucky Strumpet, Fortune's Folly, Black Cat, Crooked Mile, Grinning Skull, Red Raven, Midnight Lady, Salty Nan, Rusty Cutlass, Black Joke, Grog Blossom, Salty Meg, Dead Reckoning, Wicked Wench, Bilge Rat, Gallows Jig, Blind Fiddler, Swaggering Sal, Pickled Parson, Hellfire, Rogue's Revenge, Cackling Crow, Brimstone, Lost Wager, Blackguard, Sinner's Luck, Mad Dog, Scarlet Lass, Empty Bottle, Copperhead, Gilded Rat, Gutter Prince, Fool's Gold"),
   };
   // The player's random ship name (§36.2): Pirate 60%, Avalon merchant 40%.
   var PLAYER_SHIP_WEIGHTS = { pirate: 60, avalon: 40 };
