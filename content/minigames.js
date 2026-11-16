@@ -168,7 +168,7 @@
       tauntPartial: "He glares at you and waves for something stronger.",
       tauntSetback: { line: "He laughs in your face and slides the strong stuff across. \"Let's see if you can handle it.\"", insult: true },
       // DEFAULT: the Proud (Reckless, Wild) opponent's own call for the strong stuff.
-      heCallsStrong: "PLACEHOLDER (drinking line): he bangs the table and calls for the strong stuff.",
+      heCallsStrong: "He bangs the table and calls for the strong stuff.",
       wrongPipe: "It goes down the wrong way, and you spend the next few seconds coughing your lungs out.",
       spins: "The room starts to spin, and it's getting faster now.",
       brawl: { start: "He flips the table and drinks fly everywhere. \"Get over here!\"", clean: "When the dust settles, he's unconscious under the table and you're polishing off your drink.",

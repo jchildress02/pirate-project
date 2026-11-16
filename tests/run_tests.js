@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -749,7 +749,7 @@ test("the first Tavern action (asking for rumors) fires Welcome to the Underworl
   eq(s.current.screen, "node");
   eq(s.money.crew, 575 + 385);
   eq(s.cargo.treasure.clean, 10);
-  eq(s.ap.left, 5);
+  eq(s.ap.left, 6, "the Wish's dive costs 1; Welcome to the Underworld costs none (§41.13)");
   eq(PC.npcs.get(s, "bobby").rungName, "Friendly");
   eq(PC.npcs.get(s, "ollie").rungName, "Friendly");
   ok(PC.npcs.get(s, "geezer").dead, "Geezer dies");
@@ -1075,8 +1075,8 @@ test("the one-armed pirate: 30 to pay, Haggle partial 15, a setback 60, last res
   pickIn(s, "on");
   ok(PC.quests.hasLead(s, "what_was_lost", "trident"));
   ok(!PC.node.oneArmedHere(s), "he's gone once heard");
-  var j = PC.quests.journal(s)[0];
-  eq([j.leads, j.beyond], [1, "The trail leads beyond Ocracoke."]);
+  var j = PC.quests.journal(s).filter(function (x) { return x.id === "what_was_lost"; })[0];
+  eq([j.leads, j.objective, j.summary], [1, "The trail leads beyond Ocracoke.", "Find your brother, pressganged onto a pirate ship."], "the §41.14 objective, with the variant's summary under it");
 });
 
 test("talking to the one-armed pirate first fires Welcome to the Underworld after", function () {
@@ -1814,6 +1814,109 @@ test("a version 5 save renames cut skills and merged tags", function () {
   var back = PC.state.deserialize(PC.state.serialize(s));
   eq(back.captain.training, { "Repair & Refit": 2, "Haggle": 1 });
   eq(back.captain.tags, ["Ash-Born", "Explorer", "Cutpurse"]);
+});
+
+console.log("UI pass 1: the walkthrough's rules (§41.13, §41.14, §41.15)");
+
+test("Haggle: clean 10% in your favor, setback 10% against, once a season before the first trade (§41.13)", function () {
+  var s = at(inTown("hag"), "merchant");
+  var prov = PC.node.slotNpc("ocracoke", "provisioner");
+  var base = PC.node.provisionsPrice(s), sale = PC.node.unitPrice(s, "provisioner", "treasure");
+  ok(PC.node.haggleCheck(s, prov).ok);
+  forced("clean", function () { PC.node.haggle(s, prov); });
+  ok(Math.abs(PC.node.provisionsPrice(s) - base * 0.9) < 0.51, "10% off, rounded to the price step");
+  ok(PC.node.provisionsPrice(s) < base && PC.node.unitPrice(s, "provisioner", "treasure") > sale, "cheaper to buy, dearer to sell");
+  ok(!PC.node.haggleCheck(s, prov).ok, "once a season");
+  var t = at(inTown("hag2"), "merchant");
+  PC.node.buyProvisions(t, 1);
+  eq(PC.node.haggleCheck(t, prov).why, "Only before your first trade this season");
+  var u = at(inTown("hag3"), "merchant");
+  forced("setback", function () { PC.node.haggle(u, prov); });
+  ok(PC.node.provisionsPrice(u) > base, "a setback bites");
+  PC.state.advanceSeason(u);
+  ok(PC.node.haggleCheck(u, prov).ok, "fresh next season");
+});
+
+test("the Docks roll: clean lifts a third of the signings a tier; setback costs a third of the Seasoned and Veterans (§11.4, §41.8)", function () {
+  var s = inTown("docks");
+  PC.node.enter(s, "docks"); s.current = { screen: "node" };
+  s.money.crew = 5000;
+  var pool = PC.node.poolAvailable(s);
+  forced("clean", function () { PC.node.docksRoll(s); });
+  ok(!PC.node.docksRollCheck(s).ok, "once a visit");
+  var green = Math.min(3, pool.Green || 0);
+  if (green) {
+    var before = (s.crew.tiers.Able || 0);
+    var r = PC.node.recruitBatch(s, { Green: green });
+    eq(r.upgraded, 1);
+    eq(s.crew.tiers.Able || 0, before + 1);
+  }
+  var t = inTown("docks2");
+  PC.node.enter(t, "docks"); t.current = { screen: "node" };
+  var p2 = PC.node.poolAvailable(t), top = (p2.Seasoned || 0) + (p2.Veteran || 0);
+  var out = forced("setback", function () { return PC.node.docksRoll(t); });
+  var after = PC.node.poolAvailable(t);
+  eq(out.lost, top ? Math.max(1, Math.floor(top / 3)) : 0);
+  eq((after.Seasoned || 0) + (after.Veteran || 0), top - out.lost);
+});
+
+test("Strike First opens the knife fight with the shark and feeds the clash (§11.4, §41.13)", function () {
+  var s = ocr("shark"); playOpening(s);
+  s.current = { screen: "scene", sceneId: "ocr_dpw_shark", phase: "choosing" };
+  forced("clean", function () { PC.scenes.choose(s, choiceIndex(s, "knife")); });
+  eq(s.current.pending.strikeFirst.value, 1);
+  var v = PC.scenes.viewScene(s);
+  ok(v.result ? v.result.strikeFirst : s.current.pending.strikeFirst, "the result carries the Strike First line");
+  var shove = PC.scenes.sceneById("ocr_twopenny_partial").choices.filter(function (c) { return c.id === "shove"; })[0];
+  ok(!shove.strikeFirst, "no Strike First on the shove (§41.3)");
+});
+
+test("Welcome to the Underworld costs no action; the Hidden Haven takes three leads (§41.13, §41.15)", function () {
+  eq(PC.scenes.sceneById("ocr_uw_1").ap, 0);
+  eq(PC.data.quests.hidden_haven.needed, 3);
+});
+
+test("the keeper's Beach Captain questions: Jack's follows, both name Twopenny and cost nothing (§41.5)", function () {
+  var s = at(ocr("keeper"), "tavern"); playOpening(s); s.location.place = "tavern"; s.current = { screen: "node" };
+  delete s.npcs.twopenny.met;
+  var ap = s.ap.left;
+  eq(PC.node.keeperQuestions(s).map(function (q) { return q.id; }), ["beach_captain"]);
+  var r = PC.node.askKeeperQuestion(s, "beach_captain");
+  ok(r.line.indexOf("Arthur Twopenny") >= 0);
+  ok(PC.npcs.isMet ? PC.npcs.isMet(s, "twopenny") : s.npcs.twopenny.met, "Twopenny is named now");
+  eq(PC.node.keeperQuestions(s).map(function (q) { return q.id + (q.asked ? "*" : ""); }), ["beach_captain*", "amber_jack"]);
+  var j = PC.node.askKeeperQuestion(s, "amber_jack");
+  ok(j.line.indexOf("{keeper}") < 0 && j.line.indexOf(PC.npcs.get(s, PC.node.slotNpc("ocracoke", "keeper")).first + " stares") === 0);
+  eq(s.ap.left, ap);
+});
+
+test("the journal: §41.14's objectives for the startup quests and the loss quest's deadline (§41.12)", function () {
+  var s = opened("journal");
+  var j = PC.quests.journal(s);
+  var by = function (id) { return j.filter(function (x) { return x.id === id; })[0]; };
+  eq(by("dying_wish").status, "done");
+  ok(/mermaid in his hands/.test(by("dying_wish").objective));
+  eq(by("underworld").objective, "Bobby Rats has his coin, and his fence is open to you.");
+  var w = by("what_was_lost");
+  eq(w.deadline, "By the end of Spring 1755");
+  ok(!JSON.stringify(j).match(/PLACEHOLDER/), "no placeholder lines left");
+  while (!(s.time.year === 1755 && s.time.season === 0)) PC.state.advanceSeason(s);
+  eq(PC.quests.expiringNow(s), ["What Was Lost"]);
+  eq(PC.quests.expiringNow(s), [], "warned once");
+  ok(PC.quests.journal(s).filter(function (x) { return x.id === "what_was_lost"; })[0].lastSeason);
+});
+
+test("Developer: Skip the mandatory quests lands the rewards and stops them firing (§41.12)", function () {
+  var s = ocr("skip"); playOpening(s); s.current = { screen: "node" };
+  var crew = s.money.crew;
+  PC.devtools.skipQuests(s);
+  eq(s.money.crew, crew + 385);
+  eq(s.cargo.treasure.clean, 10);
+  ok(PC.officers.aboard(s).some(function (o) { return o.id === "davey"; }), "Davey hired");
+  ok(PC.npcs.get(s, "geezer").dead);
+  eq(PC.node.enter(s, "tavern"), null); eq(PC.node.leave(s), null);
+  eq(PC.node.enter(s, "docks"), null);
+  eq(PC.devtools.skipQuests(s), "Nothing left to skip.");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

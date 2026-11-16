@@ -165,8 +165,11 @@
     mods.parts.forEach(function (p) { parts.push(p); });
     var meter = meterModifier(state, check);
     if (meter) parts.push({ label: "Reputation", value: meter });
+    // Situational edge outside the captain cap: Strike First's opening (§11.4).
+    var extra = 0;
+    (check.extra || []).forEach(function (x) { parts.push({ label: x.label, value: x.value }); extra += x.value; });
     parts.push({ label: "Difficulty (" + DR_LABELS[dr] + ")", value: -dr });
-    var raw = sv + tr + mods.total + meter - dr;
+    var raw = sv + tr + mods.total + meter + extra - dr;
     var edge = clamp(raw, RULES.EDGE_MIN, RULES.EDGE_MAX);
     var o = odds(edge);
     return {

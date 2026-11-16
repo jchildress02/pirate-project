@@ -263,6 +263,7 @@ textarea.note-box { width: 100%; font: inherit; font-size: 18px; padding: 8px 10
 .qcard .obj { font-style: italic; }
 .qcard .dl { font-size: 16.5px; font-style: italic; color: var(--faded); }
 .qcard .dl.last { color: var(--oxblood); }
+.jdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--oxblood); margin-left: 4px; vertical-align: 6px; }
 
 /* Title screen */
 .title-screen { max-width: 620px; margin: 0 auto; padding: 60px 40px 50px; text-align: center; position: relative; }

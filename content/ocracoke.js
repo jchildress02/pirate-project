@@ -83,6 +83,15 @@
         lodgingBought: "\"Hope it's to your liking.\"",
         lodgingUsed: "\"Sorry, no space left.\"",
         rungUp: "\"Always good to see you.\"",
+        // The keeper's questions (§38.11, §41.5), the author's text (November 16).
+        // {keeper} is his first name. A question shows once its "after" has been
+        // asked; "meets" names that person for the rest of the game.
+        questions: [
+          { id: "beach_captain", label: "What's the deal with the Beach Captain?", meets: "twopenny",
+            line: "\"Oh, you must have met Arthur Twopenny. Hope he didn't give you too much trouble.\"\n\n\"Believe it or not, he was a high-ranking captain in Amber Jack's fleet. He's actually known Jack longer than just about anyone. But when the fleet sailed off for the battle at Cape Fear, Twopenny was left behind here. 'Beach Captain' is just a made-up title Jack gave him, but he seems to take it very seriously.\"" },
+          { id: "amber_jack", label: "Who is Amber Jack?", after: "beach_captain",
+            line: "{keeper} stares at you blankly. \"Oh, you're serious?\"\n\n\"He's only the greatest archpirate in a generation. Was a privateer for Avalon for a long time, but he went missing before the French fleet sacked Savannah and Charleston. Some say he tucked tail and ran away, but I suspect there's more to the story.\"" },
+        ],
       },
       shipwright: {
         greet: { "-1": "\"Make it quick.\"", "0": "\"Fine day for sailing.\"", "1": "\"Good day, friend!\"", "2": "\"Good day, friend!\"", "3": "\"Always good to see you. Need anything?\"" },
