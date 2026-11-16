@@ -1,5 +1,5 @@
 /* The Articles (§26.2-§26.5): seven slots, the Standard option first in
- * each. greed: -1 generous, 0 fair, +1 or more hard. Quarter and Quarrels
+ * each. greed: -1 generous, 0 fair, +1 or more harsh. Quarter and Quarrels
  * carry no Greed (greed: null) and can be changed any time.
  */
 (function () {
@@ -63,7 +63,7 @@
     REPUTATION: [
       { name: "Generous", max: -2, pool: 1.2 },
       { name: "Fair", max: 2, pool: 1 },
-      { name: "Hard", max: 5, pool: 0.8 },
+      { name: "Harsh", max: 5, pool: 0.8 },
       { name: "Cruel", max: 99, pool: 0.6, noSeasoned: true },
     ],
 

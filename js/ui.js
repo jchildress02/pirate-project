@@ -258,6 +258,8 @@
     return '<header class="topbar"><div><span class="brand">Pirate Chronicle</span><span class="wt">(working title)</span></div>' +
       '<span class="when">' + esc(PC.state.seasonName(state)) + " " + state.time.year + "</span>" +
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
+      // On a phone the strip scrolls away, so the gold rides in the sticky bar (the author's phone notes).
+      '<span class="pgold">Purse ' + gold(state.money.purse) + " · Crew " + gold(state.money.crew) + "</span>" +
       '<span class="grow"></span>' + seal() +
       '<div class="line2">' + b("menu", "Menu", "menu") + b("journal", "Journal", "journal") + b("rumor", "Rumors", "rumors") + b("captain", "Captain", "captain") + b("notes", "Notes", "notes") + "</div></header>";
   }
@@ -490,12 +492,14 @@
   // A stepper (§41.1). Its running total lives in a total slot whose text
   // is rebuilt from the boxes as the numbers move, without a redraw.
   var liveTotals = [];
-  function qstep(id, value, max, min) {
+  function qstep(id, value, max, min, withMax) {
     min = min == null ? 1 : min;
     value = Math.max(min, Math.min(max, value));
     return '<span class="stepper"><button type="button" data-step="' + id + '" data-d="-1" aria-label="Fewer">−</button>' +
       '<input id="' + id + '" type="number" inputmode="numeric" min="' + min + '" max="' + max + '" value="' + value + '">' +
-      '<button type="button" data-step="' + id + '" data-d="1" aria-label="More">+</button></span>';
+      '<button type="button" data-step="' + id + '" data-d="1" aria-label="More">+</button></span>' +
+      // Max fills the box in one tap (the author's phone notes).
+      (withMax && max > 1 ? '<button type="button" class="maxbtn" data-step="' + id + '" data-d="max">Max</button>' : "");
   }
   function totalSlot(fn, cls) {
     var id = "tot" + liveTotals.length;
@@ -537,6 +541,13 @@
 
   // to: the person the exchange belongs under (an NPC id), or null for the
   // place itself. who: the speaker's label.
+  // Two quoted lines spoken as one: drop the first's closing quote and the
+  // second's opening quote, so the ellipsis runs straight on.
+  function joinQuotes(a, b) {
+    var A = String(a).replace(/"\s*$/, ""), B = String(b).replace(/^\s*"/, "");
+    return A + " " + B;
+  }
+
   function say(to, who, line, note, heard, extra) {
     state.location.say = { to: to || null, who: who || null, line: line || "", note: note || null, heard: heard || null };
     if (extra) Object.keys(extra).forEach(function (k) { state.location.say[k] = extra[k]; });
@@ -733,13 +744,17 @@
       html += '<table class="grid"><tr><th>Hands</th><th>Waiting</th><th>Each</th><th>Sign</th></tr>' + tiers.map(function (t) {
         var max = Math.min(avail[t], berths, afford(N().signingCost(state, t)));
         return '<tr><td><span title="' + esc(TIER_TIP[t] || "") + '" style="border-bottom:1px dotted">' + t + "</span></td><td>" + avail[t] + "</td><td>" + gold(N().signingCost(state, t)) + "</td><td>" +
-          (max > 0 ? qstep("q-hire-" + t, 0, max, 0) : '<span class="note">' + (!avail[t] ? "None left" : !berths ? "No berths" : "Not enough crew gold") + "</span>") + "</td></tr>";
+          (max > 0 ? qstep("q-hire-" + t, 0, max, 0, true) : '<span class="note">' + (!avail[t] ? "None left" : !berths ? "No berths" : "Not enough crew gold") + "</span>") + "</td></tr>";
       }).join("") + "</table>";
       html += '<div class="actions">' + '<button class="primary" data-act="signhands" data-tiers="' + tiers.join(",") + '">' +
         totalSlot(function () {
-          var n = 0, cost = 0;
-          tiers.forEach(function (t) { var k = val("q-hire-" + t); n += k; cost += k * N().signingCost(state, t); });
-          return "Sign " + plural(n, "hand") + " · " + gold(cost) + " crew gold · " + (state.crew.count + n) + " of " + sh.crewMax + " berths";
+          var n = 0, cost = 0, ask = {}, asked = 0;
+          tiers.forEach(function (t) { ask[t] = val("q-hire-" + t); asked += ask[t]; });
+          var p = N().trimPlan(state, ask);
+          tiers.forEach(function (t) { n += p[t]; cost += p[t] * N().signingCost(state, t); });
+          var cut = asked - n;
+          return "Sign " + plural(n, "hand") + " · " + gold(cost) + " crew gold · " + (state.crew.count + n) + " of " + sh.crewMax + " berths" +
+            (cut ? " (" + cut + " fewer: " + Object.keys(p.left).map(function (t) { return p.left[t] + " " + t; }).join(", ") + " stay on the docks)" : "");
         }, "") + "</button></div>";
     }
     // Put hands ashore (§24.7)
@@ -763,7 +778,9 @@
     var c = N().haggleCheck(state, npc), h = (N().season(state).haggle || {})[npc];
     if (h) {
       var pct = Math.round(Math.abs(N().HAGGLE[h]) * 100);
-      return '<p class="small"><b>Haggled:</b> prices ' + pct + "% " + (N().HAGGLE[h] > 0 ? "in your favor" : "against you") + " this season.</p>";
+      // The result stands out as a result (the author's phone notes).
+      return '<div class="haggled">' + badge(h) + '<p style="margin:0"><b>' + (N().HAGGLE[h] > 0 ? "You talked the prices down" : "The haggling went badly") + ":</b> prices " + pct + "% " +
+        (N().HAGGLE[h] > 0 ? "in your favor" : "against you") + " here this season.</p></div>";
     }
     if (!c.ok) return "";
     return opts([opt({ act: "haggle", attrs: 'data-npc="' + esc(npc) + '"', label: "Haggle (optional)",
@@ -846,7 +863,7 @@
           var max = Math.min(stock[gname], free, afford(price));
           var info = PC.data.goods[gname], sid = "q-good-" + slug(gname);
           return "<tr><td>" + esc(gname) + (info && info.stores ? " " + STORES : "") + demandTag(gname) + "</td><td>" + stock[gname] + "</td><td>" + gold(price) + "</td><td>" +
-            (max > 0 ? '<div class="buyrow">' + qstep(sid, Math.min(max, 2), max) + '<button class="secondary" data-act="buygood" data-good="' + esc(gname) + '" data-for="' + sid + '">' +
+            (max > 0 ? '<div class="buyrow">' + qstep(sid, 1, max) + '<button class="secondary" data-act="buygood" data-good="' + esc(gname) + '" data-for="' + sid + '">' +
               totalSlot(function () { return "Buy · " + gold(val(sid) * price); }, "") + "</button></div>" : '<span class="note">' + (stock[gname] ? "No room" : "Sold out") + "</span>") +
             "</td></tr>";
         }).join("") + "</table></div>";
@@ -940,9 +957,18 @@
   // ---- The minigames (§18, §38.8, §41.6, §41.10) ----
   // The rules are in js/salvage.js, js/drinking.js and js/liarsdice.js.
 
+  // The log: what the last move did stands out in a box at the top; the
+  // lines before it sit faded below (the author's phone notes). mgMark is
+  // where the log stood when the player last acted.
+  var mgMark = 0;
+  function markLog() { mgMark = state && state.minigame && state.minigame.log ? state.minigame.log.length : 0; }
+  function mgLatest(lines) {
+    var fresh = lines.slice(Math.min(mgMark, lines.length)).filter(function (l) { return l; });
+    return fresh.length ? '<div class="mglatest">' + fresh.map(function (l) { return prose(l); }).join("") + "</div>" : "";
+  }
   function mgLog(lines) {
-    var last = lines.slice(-8);
-    return last.length ? '<div class="mglog">' + last.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>" : "";
+    var old = lines.slice(0, Math.min(mgMark, lines.length)).slice(-6);
+    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>" : "";
   }
 
   function gpips(n, max, cls) {
@@ -970,7 +996,9 @@
   function divePanel(v) {
     var html = mgHead("Ocracoke · Lilyhook's Graveyard", v.title) +
       '<div class="gauges"><div class="gauge"><span class="lbl">Breath</span>' + gpips(v.breath, v.breathMax, "breath") + ' <span class="small">' + v.breath + " of " + v.breathMax + "</span></div></div>";
-    if (v.pending) return html + mgLog(v.log) + mgPending(v.pending);
+    if (!v.over && v.haul && v.haul.length) html += '<p class="small" style="margin:0 0 6px"><b>In your arms:</b> ' + v.haul.map(esc).join(", ") + "</p>";
+    html += mgLatest(v.log);
+    if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
     if (!v.over) {
       var sel = diveZone && v.zones.filter(function (z) { return z.id === diveZone; })[0];
       html += '<div class="hotframe">' + v.zones.map(function (z) {
@@ -987,7 +1015,7 @@
       html += '<div class="actions"><button class="primary" data-act="mgdive" data-op="surface">Surface</button>' + (v.canQuick ? '<button class="secondary" data-act="mgquick">Quick Dive instead</button>' : "") + "</div>";
       return html + mgLog(v.log);
     }
-    html += mgLog(v.log) + '<div class="h4" style="max-width:680px">' + (v.blackout ? "What you kept" : "Your haul") + "</div>";
+    html += '<div class="h4" style="max-width:680px">' + (v.blackout ? "What you kept" : "Your haul") + "</div>";
     var kept = (v.kept || v.haul || []).map(function (k) { return { icon: /treasure|gold|coin/i.test(k) ? "treasure" : "item", text: k, ink: "mid" }; });
     var lostList = [];
     if (v.blackout && v.kept) {
@@ -1011,7 +1039,8 @@
       '<div class="namecard"><b style="font-size:22px">' + esc(v.opponent) + '</b><span class="role">' + esc(v.role) + "</span>" + (v.trait ? '<span class="traits">' + esc(v.trait) + "</span>" : "") + "</div>" +
       '<div class="gauges"><div class="gauge"><span class="lbl">Your Wits</span>' + gpips(v.wits, v.witsMax) + "</div>" +
       '<div class="gauge"><span class="lbl">Him</span><span class="big">' + esc(v.state) + "</span>" + (v.tolerance ? '<span class="small"> · Tolerance ' + esc(v.tolerance) + "</span>" : "") + "</div></div>";
-    if (v.pending) return html + mgLog(v.log) + mgPending(v.pending);
+    html += mgLatest(v.log);
+    if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
     if (v.offerOneMore) {
       return html + mgLog(v.log) + '<p class="notice">Heavy Drinker: another pirate wants a go. Play on with the Wits you have left, for another rumor?</p>' +
         '<div class="actions"><button class="secondary" data-act="mgonemore" data-yes="1">One more round</button><button class="primary" data-act="mgonemore" data-yes="0">Call it a night</button></div>';
@@ -1127,16 +1156,16 @@
     var o = aboard().filter(function (x) { return x.id === b.id; })[0];
     if (!o) return "";
     return '<div class="bark" style="position:relative;right:auto;top:auto;width:auto;max-width:560px;margin:4px 0 12px">' + officerFace(o, 34, 50) +
-      "<div><b style=\"font-weight:normal\">" + esc(o.first) + "</b> " + inline(b.line) + "</div></div>";
+      "<div><b style=\"font-weight:normal\">" + esc(o.first) + ":</b> " + inline(b.line) + "</div></div>";
   }
 
   var articleDraft = null;
   var PURPOSE = { share: "Your cut of every haul.", officers: "What your officers and fleet captains take.", compensation: "What the maimed and the dismissed are paid.",
     quarter: "Whether captives may be executed.", discipline: "How hard you may drive the crew.", quarrels: "How feuds between officers are settled.", chest: "Where a prize's ship's chest goes." };
 
-  function greedWord(n) { return n == null ? "" : n < 0 ? '<span style="color:#2f5a22">Generous</span>' : n > 0 ? '<span style="color:#8f2a1c">Hard</span>' : "Fair"; }
+  function greedWord(n) { return n == null ? "" : n < 0 ? '<span style="color:#2f5a22">Generous</span>' : n > 0 ? '<span style="color:#8f2a1c">Harsh</span>' : "Fair"; }
 
-  // The Greed gauge: a needle across Generous · Fair · Hard · Cruel.
+  // The Greed gauge: a needle across Generous · Fair · Harsh · Cruel.
   function greedGauge(g) {
     var R = PC.data.articles.REPUTATION;
     var lo = -4, bands = R.map(function (r, i) { var from = i ? R[i - 1].max + 1 : lo; return { name: r.name, from: from, to: Math.min(r.max, 9) }; });
@@ -1150,7 +1179,7 @@
     };
     var lab = function (i, t) { var a = Math.PI * (1 - (i + 0.5) / 4); return '<text x="' + (cx + (r + 22) * Math.cos(a)) + '" y="' + (cy - (r + 22) * Math.sin(a) + 4) + '" text-anchor="middle" font-family="IM Fell English SC, Georgia, serif" font-size="13" fill="#5e4528">' + t + "</text>"; };
     return '<svg viewBox="-34 0 308 130" style="width:300px;max-width:100%" role="img" aria-label="Greed: ' + esc(b.name) + '">' +
-      arc(0, "#2f5a22") + arc(1, "#b89a66") + arc(2, "#a8604a") + arc(3, "#8f2a1c") + lab(0, "Generous") + lab(1, "Fair") + lab(2, "Hard") + lab(3, "Cruel") +
+      arc(0, "#2f5a22") + arc(1, "#b89a66") + arc(2, "#a8604a") + arc(3, "#8f2a1c") + lab(0, "Generous") + lab(1, "Fair") + lab(2, "Harsh") + lab(3, "Cruel") +
       '<line x1="' + cx + '" y1="' + cy + '" x2="' + (cx + (r - 8) * Math.cos(ang)) + '" y2="' + (cy - (r - 8) * Math.sin(ang)) + '" stroke="#2a1c10" stroke-width="3" stroke-linecap="round"/><circle cx="' + cx + '" cy="' + cy + '" r="6" fill="#7a2416"/></svg>';
   }
 
@@ -1178,7 +1207,7 @@
     var check = !signed_ && rd.dr != null ? PC.checks.assess(state, { type: "Pirate Code", dr: rd.dr }) : null;
     html += '<div class="svc" style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">' + greedGauge(g) + '<div style="flex:1;min-width:220px"><p class="sc" style="margin:0">Greed: ' + esc(rep.name) + "</p>" +
       '<ul class="small" style="padding-left:1.1em;margin:4px 0">' +
-      "<li>" + (rd.cheer ? "The crew will cheer: morale +" + rd.cheer + "." : rd.dr == null ? "The crew will accept these terms." : "Hard terms: you'll read them out with a Pirate Code check.") + "</li>" +
+      "<li>" + (rd.cheer ? "The crew will cheer: morale +" + rd.cheer + "." : rd.dr == null ? "The crew will accept these terms." : "Terms this harsh have to be read out to the crew: a Pirate Code check.") + "</li>" +
       "<li>In port: " + (rep.pool === 1 ? "word of fair terms; crew pools as usual." : "crew pools " + (rep.pool > 1 ? "+" : "−") + Math.abs(Math.round((rep.pool - 1) * 100)) + "% at every port.") + "</li>" +
       "<li>You can always loosen a term. Harder terms wait for the Winter split.</li></ul>" + "</div></div>";
     if (!signed_) {
@@ -1501,18 +1530,18 @@
 
   var nodeHandlers = {
     // ---- The minigames (§18) ----
-    "drink": function () { drinkSpot = null; PC.drinking.start(state); },
+    "drink": function () { drinkSpot = null; mgMark = 0; PC.drinking.start(state); },
     "dice": function () { PC.liarsdice.start(state); },
-    "divewreck": function (el) { diveZone = null; PC.salvage.startGraveyardDive(state, el.dataset.wreck, false); },
-    "divequick": function (el) { diveZone = null; PC.salvage.startGraveyardDive(state, el.dataset.wreck, true); },
-    "miranda": function () { diveZone = null; PC.salvage.retryMiranda(state); },
+    "divewreck": function (el) { diveZone = null; mgMark = 0; PC.salvage.startGraveyardDive(state, el.dataset.wreck, false); },
+    "divequick": function (el) { diveZone = null; mgMark = 0; PC.salvage.startGraveyardDive(state, el.dataset.wreck, true); },
+    "miranda": function () { diveZone = null; mgMark = 0; PC.salvage.retryMiranda(state); },
     "divezone": function (el) { diveZone = el.dataset.zone; },
     "drinkspot": function (el) { drinkSpot = drinkSpot === el.dataset.spot ? null : el.dataset.spot; },
-    "mgdive": function (el) { PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
-    "mgquick": function () { PC.salvage.quickDive(state); },
+    "mgdive": function (el) { markLog(); PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
+    "mgquick": function () { markLog(); PC.salvage.quickDive(state); },
     "mgbank": function (el) { PC.salvage.bank(state, state.minigame, el.dataset.pot); },
-    "mgdrink": function (el) { PC.drinking.act(state, el.dataset.op); drinkSpot = null; },
-    "mgonemore": function (el) { PC.drinking.oneMore(state, el.dataset.yes === "1"); },
+    "mgdrink": function (el) { markLog(); PC.drinking.act(state, el.dataset.op); drinkSpot = null; },
+    "mgonemore": function (el) { markLog(); PC.drinking.oneMore(state, el.dataset.yes === "1"); },
     "mgreroll": function () { PC.minigames.reroll(state); },
     "mgaccept": function () { PC.minigames.settle(state); },
     "mgleave": function () { diveZone = null; drinkSpot = null; PC.minigames.leave(state); },
@@ -1539,7 +1568,8 @@
       var L = N().nodeData(N().here(state)).lines.keeper;
       if (r.refuse) { say(id, firstName(id), r.line); return; }
       var heard = r.rumors.map(function (x) { return x.text; });
-      if (r.extra) heard.push(r.extraLine + " " + r.extra.text);
+      // One quote, running on: "I did hear one other thing... [rumor]" (the author, UI pass 1 review).
+      if (r.extra) heard.push(joinQuotes(r.extraLine, r.extra.text));
       say(id, firstName(id), g.line, null, heard, { ask: L.askRumors, heardNote: heard.length ? "Added to your Rumors." : null,
         chips: state.settings.showDice ? [{ icon: "ap", text: "Tavern Talk: " + r.talk.outcome + " (dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge + ")" }] : null });
     },
@@ -1603,15 +1633,19 @@
       var hp = el.dataset.all ? state.ship.hullMax - state.ship.hull : qty(el);
       var r = N().repair(state, hp);
       say(id, firstName(id), r.line, r.fixedRigging ? "The frayed rigging is fixed: Speed " + state.ship.speed + "." : null);
+      bought(r, "Repaired " + hp + " hull");
     },
-    "upgrade": function (el) { var id = who("shipwright"); var r = N().upgrade(state, el.dataset.track); say(id, firstName(id), r.line); },
-    "guns": function (el) { var id = who("shipwright"); var r = N().buyGuns(state, qty(el)); say(id, firstName(id), r.line); },
+    "upgrade": function (el) { var id = who("shipwright"); var r = N().upgrade(state, el.dataset.track); say(id, firstName(id), r.line); bought(r, "Upgrade bought"); },
+    "guns": function (el) { var id = who("shipwright"); var n = qty(el); var r = N().buyGuns(state, n); say(id, firstName(id), r.line); bought(r, "Bought " + plural(n, "gun")); },
     // One Sign button for every tier (§41.8).
     "signhands": function (el) {
       var plan = {};
       el.dataset.tiers.split(",").forEach(function (t) { plan[t] = val("q-hire-" + t); });
       var r = N().recruitBatch(state, plan);
-      say("hands", null, r.line, r.n ? plural(r.n, "hand") + " for " + gold(r.cost) + " crew gold." + (r.upgraded ? " " + plural(r.upgraded, "of them turns", "of them turn") + " out better than they looked." : "") : null);
+      var leftOn = r.left ? Object.keys(r.left).map(function (t) { return r.left[t] + " " + t; }) : [];
+      say("hands", null, r.line, r.n ? plural(r.n, "hand") + " for " + gold(r.cost) + " crew gold." + (r.upgraded ? " " + plural(r.upgraded, "of them turns", "of them turn") + " out better than they looked." : "") +
+        (leftOn.length ? " No room for " + leftOn.join(", ") + "." : "") : null);
+      if (r.n) toast("Signed " + plural(r.n, "hand") + " · −" + gold(r.cost) + " crew gold");
     },
     "docksroll": function () {
       var r = N().docksRoll(state);
@@ -1622,14 +1656,17 @@
       // The result stays as a line at the top of the block (§41.9).
       var r = N().haggle(state, el.dataset.npc);
       state.location.say = null;
-      if (state.settings.showDice) toast("Haggle: " + r.outcome + " (dice " + r.dice.join(" + ") + ", edge " + r.edge + ")");
+      var pct = Math.round(Math.abs(N().HAGGLE[r.outcome]) * 100);
+      toast("Haggle: " + OUTCOME[r.outcome][0] + " · prices " + pct + "% " + (N().HAGGLE[r.outcome] > 0 ? "in your favor" : "against you") +
+        (state.settings.showDice ? " (dice " + r.dice.join(" + ") + ", edge " + r.edge + ")" : ""));
     },
-    "payoff": function (el) { var r = N().payOff(state, el.dataset.tier, qty(el)); say("hands", null, r.line, gold(r.cost) + " crew gold."); },
-    "buyprov": function (el) { var id = who("provisioner"); var r = N().buyProvisions(state, qty(el)); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
-    "buygood": function (el) { var id = who("provisioner"); var r = N().buyGood(state, el.dataset.good, qty(el)); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); },
+    "payoff": function (el) { var n = qty(el); var r = N().payOff(state, el.dataset.tier, n); say("hands", null, r.line, gold(r.cost) + " crew gold."); bought(r, plural(n, "hand") + " put ashore"); },
+    "buyprov": function (el) { var id = who("provisioner"); var n = qty(el); var r = N().buyProvisions(state, n); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); bought(r, "Bought " + n + " provisions"); },
+    "buygood": function (el) { var id = who("provisioner"); var n = qty(el); var r = N().buyGood(state, el.dataset.good, n); say(id, firstName(id), r.line, r.cost ? gold(r.cost) + " crew gold." : null); bought(r, "Bought " + n + " " + el.dataset.good); },
     "sell": function (el) {
       var r = N().sell(state, el.dataset.buyer, el.dataset.what, qty(el));
       var id = el.dataset.buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : who("provisioner");
+      if (r.units) toast("Sold " + r.units + " · +" + gold(r.gold) + " crew gold");
       say(id, firstName(id), r.line, r.units ? "Sold " + r.units + " for " + gold(r.gold) + " crew gold." : null,
         r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null, r.rumor ? { heardNote: "Added to your Rumors." } : null);
     },
@@ -1762,7 +1799,15 @@
     return "";
   }
 
+  // A purchase lands with a toast, so a tap is never in doubt (the author's
+  // phone notes: he bought twice the rum he meant to).
+  function bought(r, what) {
+    if (!r || r.failed || !r.cost) return;
+    toast(what + " · −" + gold(r.cost) + " crew gold");
+  }
+
   function toast(msg) {
+    document.querySelectorAll(".toast").forEach(function (x) { x.remove(); }); // the newest replaces the last
     var t = document.createElement("div");
     t.className = "toast";
     t.textContent = msg;
@@ -2379,7 +2424,21 @@
   }
   function clearPreview() { root.querySelectorAll(".topbar .pip.preview").forEach(function (p) { p.classList.remove("preview"); p.classList.add("on"); }); }
 
+  // Press feedback: a button darkens the moment a finger or mouse goes down,
+  // before the click redraws the screen (the author's phone notes).
+  var pressWired = false;
+  function wirePress() {
+    if (pressWired || typeof document === "undefined") return;
+    pressWired = true;
+    var on = function (ev) { var b = ev.target.closest && ev.target.closest("button, .hot"); if (b) b.classList.add("pressing"); };
+    var off = function () { document.querySelectorAll(".pressing").forEach(function (b) { b.classList.remove("pressing"); }); };
+    document.addEventListener("pointerdown", on, { passive: true });
+    document.addEventListener("pointerup", function () { setTimeout(off, 120); }, { passive: true });
+    document.addEventListener("pointercancel", off, { passive: true });
+  }
+
   function wire() {
+    wirePress();
     wireFields();
     if (state) wireNotes();
     root.querySelectorAll("[data-act]").forEach(function (el) {
@@ -2408,7 +2467,7 @@
     root.querySelectorAll("[data-step]").forEach(function (b) {
       b.addEventListener("click", function () {
         var box = document.getElementById(b.dataset.step);
-        var n = (Math.floor(Number(box.value)) || 0) + Number(b.dataset.d);
+        var n = b.dataset.d === "max" ? Number(box.max) : (Math.floor(Number(box.value)) || 0) + Number(b.dataset.d);
         box.value = Math.max(Number(box.min), Math.min(Number(box.max), n));
         refreshTotals();
       });
@@ -2451,6 +2510,13 @@
     // A skill's Player line: hover on desktop, tap on a phone (§12.6).
     root.querySelectorAll(".skilltip").forEach(function (t) {
       t.addEventListener("click", function () { var l = t.parentNode.querySelector(".tipline"); if (l) l.hidden = !l.hidden; });
+    });
+    // The italic line under a choice picks it too (the author's phone notes).
+    root.querySelectorAll(".choice .meta:not(.lock)").forEach(function (m) {
+      var pick = m.parentNode.querySelector(".pick");
+      if (!pick || pick.disabled) return;
+      m.classList.add("tappable");
+      m.addEventListener("click", function () { pick.click(); });
     });
     // Clicks inside a menu panel don't close it.
     root.querySelectorAll("[data-stop]").forEach(function (p) { p.addEventListener("click", function (ev) { ev.stopPropagation(); }); });

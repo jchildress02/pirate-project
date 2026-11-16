@@ -21,6 +21,9 @@
     ZONES: { sloop: ["hull", "hold"], brig: ["hull", "hold", "cabin"], frigate: ["hull", "hold", "cabin"] },
     WRECK_WEIGHTS: { sloop: 55, brig: 30, frigate: 15 },
     WRECKS_OFFERED: 3,
+    // One of each at Lilyhook's Graveyard (the author, November 16); other
+    // dive sites set their own mix in their node chats.
+    WRECK_MIX: { ocracoke: ["sloop", "brig", "frigate"] },
     HAZARDS: { snag: 35, current: 30, shark: 20, cryptid: 15 },
     // DEFAULT (§18.2 gives no DR): the shark's Notice Danger and the
     // cryptid's Ghost Sense.
