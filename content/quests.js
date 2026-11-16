@@ -17,7 +17,6 @@
         A: P + "Find your brother, pressganged by pirates.",
         B: P + "Get back your family's jewels.",
         C: P + "Find the man who shot you.",
-        D: P + "Clear your name.",
       },
       beyond: "The trail leads beyond Ocracoke.",
       leads: {

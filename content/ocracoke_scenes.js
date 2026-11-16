@@ -379,8 +379,7 @@
             {
               "when": {
                 "loss": [
-                  "C",
-                  "D"
+                  "C"
                 ]
               },
               "text": "I'm looking for someone."
@@ -1037,8 +1036,7 @@
           "when": {
             "loss": [
               "A",
-              "C",
-              "D"
+              "C"
             ]
           },
           "text": " \"There's a one-armed pirate in there who mentioned something like that.\""

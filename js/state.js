@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 5;
+  var SAVE_VERSION = 6;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -49,7 +49,25 @@
     addMilestone2Fields(state, startNode);
     addMilestone3Fields(state);
     addMilestone4Fields(state);
+    if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
+  }
+
+  // UI pass 1 (the Creator chat, §11.4, §14.2): five skills cut or merged,
+  // two tags merged, Deserter's Mark gone.
+  var SKILL_RENAMES = { "Repair at Sea": "Repair & Refit", "Refit & Careen": "Repair & Refit", "Fence": "Haggle", "Run Blockade": "Outrun", "Sabotage": "Plan & Ambush", "Haul & Labor": "Endure" };
+  var TAG_RENAMES = { "Cartographer": "Explorer", "Speedy": "Cutpurse", "Deserter's Mark": null };
+  function renameSkillsAndTags(data) {
+    var c = data.captain || {};
+    var tr = c.training || {};
+    Object.keys(SKILL_RENAMES).forEach(function (old) {
+      if (!tr[old]) return;
+      var to = SKILL_RENAMES[old];
+      tr[to] = Math.min(3, (tr[to] || 0) + tr[old]);
+      delete tr[old];
+    });
+    c.tags = (c.tags || []).map(function (t) { return t in TAG_RENAMES ? TAG_RENAMES[t] : t; })
+      .filter(function (t, i, a) { return t && a.indexOf(t) === i; });
   }
 
   // Milestone 4: the minigames (§18). The game in play (state.minigame) and
@@ -176,6 +194,13 @@
       // changes; a captain standing at the stand-in dive plays the real one.
       addMilestone4Fields(data);
       data.saveVersion = 5;
+    }
+    if (data.saveVersion === 5) {
+      // Version 6 (UI pass 1): the skill cuts and tag merges, and the
+      // Acting Quartermaster when no officer is aboard (§25.9).
+      renameSkillsAndTags(data);
+      if (PC.officers && data.world) PC.officers.ensureQuartermaster(data);
+      data.saveVersion = 6;
     }
     return data;
   }

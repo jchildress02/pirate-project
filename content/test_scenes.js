@@ -167,7 +167,7 @@
         {
           id: "arm",
           label: "Arm-wrestle the bosun for the price of the drinks.",
-          check: { type: "Haul & Labor", stat2: "Daring", dr: 3 },
+          check: { type: "Endure", stat2: "Daring", dr: 3 },
           approval: ["Glory"],
           outcomes: {
             clean: { text: "The bosun's knuckles hit the table. He pays, and he isn't happy about it.", effects: [{ gold: 25 }, { morale: 2 }], exit: "hub" },

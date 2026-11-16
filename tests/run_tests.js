@@ -64,7 +64,7 @@ test("two stats average, rounded up", function () {
   var a = PC.checks.assess(s, { type: "Read People", stat2: "Charm", dr: 0 });
   eq(a.parts[0].value, 2);
   s.captain.stats.Grit = 1; s.captain.stats.Daring = 2;
-  eq(PC.checks.assess(s, { type: "Haul & Labor", stat2: "Daring", dr: 0 }).parts[0].value, 2, "1 and 2 rounds up to 2");
+  eq(PC.checks.assess(s, { type: "Endure", stat2: "Daring", dr: 0 }).parts[0].value, 2, "1 and 2 rounds up to 2");
 });
 
 test("scene stat override replaces the home stat", function () {
@@ -500,9 +500,9 @@ test("a trait adds +1 on its types; a flaw -1", function () {
   eq(PC.checks.assess(s, { type: "Notice Danger", dr: 0 }).edge, 0);
 });
 
-test("group modifiers: Rheumy Hands hits all of Fine Work", function () {
+test("old ailments (§12.4): Rheumy Hands hits Light Fingers and Repair & Refit", function () {
   var s = built(function (d) { d.debuffs = ["Rheumy Hands"]; });
-  ["Forge", "Repair at Sea", "Treat Wounds"].forEach(function (t) {
+  ["Light Fingers", "Repair & Refit"].forEach(function (t) {
     var a = PC.checks.assess(s, { type: t, dr: 0 });
     ok(a.parts.some(function (p) { return p.label === "Rheumy Hands" && p.value === -1; }), t);
   });
@@ -1753,11 +1753,11 @@ test("Card Sharp comes after 500 gold won at Liar's Dice", function () {
   ok(g.won); ok(s.captain.tags.indexOf("Card Sharp") >= 0);
 });
 
-test("a version 4 save loads as version 5 with the minigame fields", function () {
+test("a version 4 save loads (now as version 6) with the minigame fields", function () {
   var old = JSON.parse(PC.state.serialize(opened()));
   old.saveVersion = 4; delete old.minigames; delete old.minigame;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 5); ok(back.minigames); eq(back.minigame, null);
+  eq(back.saveVersion, 6); ok(back.minigames); eq(back.minigame, null);
 });
 
 test("a save made mid-dive round-trips", function () {
@@ -1768,6 +1768,52 @@ test("a save made mid-dive round-trips", function () {
   eq(back, s);
   PC.salvage.act(back, "surface");
   ok(back.minigame.over);
+});
+
+console.log("UI pass 1: the creator chat's rules (§11, §12, §14, §25.9)");
+
+test("55 skills, each with a Player line; the cut ones are gone (§11.4)", function () {
+  var T = PC.data.checkTypes;
+  eq(Object.keys(T).length, 55);
+  ["Fence", "Run Blockade", "Sabotage", "Haul & Labor", "Repair at Sea", "Refit & Careen"].forEach(function (t) { ok(!T[t], t); });
+  ok(T["Repair & Refit"]);
+  Object.keys(T).forEach(function (t) { ok(T[t].player, t + " has a Player line"); });
+});
+
+test("29 creation tags, five greyed out and unpickable (§14.2)", function () {
+  var all = PC.creator.allTags();
+  eq(all.length, 29);
+  var d = PC.creator.blankDraft();
+  eq(all.filter(function (t) { return PC.creator.blockedBy(d, t.id); }).map(function (t) { return t.id; }).sort(),
+    ["Animal Friend", "Haunted", "Heathen", "Loremaster", "Revolutionary"]);
+});
+
+test("Vengeful reads [Grudge]: the French or a Wronged-Me Target (§11.7)", function () {
+  var s = built(function (d) { d.traits = ["Vengeful", "Shrewd"]; });
+  var base = PC.checks.assess(s, { type: "Swordsmanship", dr: 0 }).edge;
+  eq(PC.checks.assess(s, { type: "Swordsmanship", dr: 0 }, { conditions: ["French"] }).edge, base + 1);
+  eq(PC.checks.assess(s, { type: "Gather Intelligence", dr: 0 }, { conditions: ["Wronged-Me Target"] }).edge, PC.checks.assess(s, { type: "Gather Intelligence", dr: 0 }).edge + 1);
+});
+
+test("the Acting Quartermaster: elected with no officers, replaced when one joins (§25.9)", function () {
+  var s = fresh();
+  ok(s.actingQM && s.actingQM.active, "elected at the start with no officers");
+  eq(PC.officers.quartermaster(s), s.actingQM);
+  PC.officers.joinNamed(s, "davey");
+  ok(!s.actingQM.active, "back to the crew");
+  eq(PC.officers.quartermaster(s).id, "davey");
+  PC.officers.dismiss(s, PC.officers.quartermaster(s));
+  ok(s.actingQM.active, "re-elected under the same name");
+});
+
+test("a version 5 save renames cut skills and merged tags", function () {
+  var s = fresh();
+  s.saveVersion = 5; s.captain.training = { "Repair at Sea": 1, "Refit & Careen": 1, "Fence": 1 };
+  s.captain.tags = ["Ash-Born", "Cartographer", "Speedy", "Deserter's Mark"];
+  delete s.actingQM;
+  var back = PC.state.deserialize(PC.state.serialize(s));
+  eq(back.captain.training, { "Repair & Refit": 2, "Haggle": 1 });
+  eq(back.captain.tags, ["Ash-Born", "Explorer", "Cutpurse"]);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

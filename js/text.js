@@ -30,7 +30,7 @@
     mr: ["Mr.", "Missus"], // Davey's "Mr. Shipwright" / "Missus Shipwright" (ruled)
   };
 
-  var LOSS_TARGET = { A: "your brother", B: "your family jewels", C: "the man who shot you", D: "that treacherous official" };
+  var LOSS_TARGET = { A: "your brother", B: "your family jewels", C: "the man who shot you" };
 
   function capFirst(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 

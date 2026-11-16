@@ -157,7 +157,44 @@
     if (o.id === "davey") state.flags.davey_at_tavern = true;
     var line = o.id === "davey" ? PC.data.namedOfficers.davey.dismissal : (o.mentor ? (L().dismissal[o.voice] || "") : (L().dismissal[o.voice] || ""));
     PC.state.addLog(state, (o.first + " " + (o.last || "")).trim() + " is dismissed, with " + paid + " crew gold.");
+    ensureQuartermaster(state);
     return { officer: o, pay: paid, line: line };
+  }
+
+  // ---- The Quartermaster (§25.9) -----------------------------------------
+  // There is always a Quartermaster. With no officer aboard the flagship the
+  // crew elects one of their own, the Acting Quartermaster: a generated
+  // name, no traits, no bonuses, no officer slot. When a real officer joins,
+  // the officer wins the vote outright and the acting man goes back to the
+  // crew under the same name; if the officers all leave, he's re-elected.
+  function onFlagship(state) { return aboard(state).filter(function (o) { return (o.aboard || "flagship") === "flagship"; }); }
+
+  function ensureQuartermaster(state, winner) {
+    var ab = onFlagship(state), aq = state.actingQM;
+    if (!ab.length) {
+      if (!aq) {
+        var rec = PC.npcs.generate(state, { id: "acting_qm", role: "Sailor", pool: "master", node: null, key: state.world.seed + "|acting-qm", persistent: false });
+        aq = state.actingQM = { first: rec.first, last: rec.last || "", full: rec.full || (rec.first + " " + (rec.last || "")).trim(), gender: rec.gender || "m", active: false };
+      }
+      if (!aq.active) { aq.active = true; PC.state.addLog(state, "With no officers aboard, the crew elects " + aq.full + " their Acting Quartermaster."); }
+      return aq;
+    }
+    if (aq && aq.active) {
+      aq.active = false;
+      if (!ab.some(function (o) { return o.quartermaster; })) {
+        var w = winner && ab.indexOf(winner) >= 0 ? winner : ab[0];
+        w.quartermaster = true;
+        PC.state.addLog(state, "The crew vote: " + (w.first + " " + (w.last || "")).trim() + " is your Quartermaster now, and " + aq.full + " goes back to the crew.");
+      }
+    }
+    return null;
+  }
+
+  // Who speaks as Quartermaster: the officer, or the Acting Quartermaster.
+  function quartermaster(state) {
+    var o = onFlagship(state).filter(function (x) { return x.quartermaster; })[0];
+    if (o) return o;
+    return state.actingQM && state.actingQM.active ? state.actingQM : null;
   }
 
   function makeOfficer(state, c) {
@@ -192,6 +229,7 @@
     var first = !state.flags.first_officer_hired;
     state.flags.first_officer_hired = true;
     out.mentorLine = first && mentor(state) ? L().mentorFirstHire : null; // §25.8 milestone
+    ensureQuartermaster(state, o);
     return out;
   }
 
@@ -220,6 +258,8 @@
   }
 
   PC.officers = {
+    ensureQuartermaster: ensureQuartermaster,
+    quartermaster: quartermaster,
     FEE: FEE,
     aboard: aboard,
     holding: holding,

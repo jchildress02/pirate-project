@@ -239,13 +239,16 @@
 
   // ---- The creator's random-name buttons (§36.2) -------------------------
 
-  function randomCaptainName(gender, key) {
+  // avoid: full names already shown by this button, so it doesn't repeat
+  // until the pool is used up (§36.2).
+  function randomCaptainName(gender, key, avoid) {
     var r = PC.rng.fromKey(key);
     var res = reserved();
-    for (var i = 0; i < 50; i++) {
+    for (var i = 0; i < 200; i++) {
       var first = givenName(r, "avalon", gender, "Captain");
       var last = one(r, N().POOLS.avalon.surnames);
       if (last === first || res.given[first.toLowerCase()] || res.surnames[last.toLowerCase()]) continue;
+      if (avoid && avoid.indexOf(first + " " + last) >= 0) continue;
       return { first: first, last: last };
     }
     return { first: "Jamie", last: "Fraser" };
@@ -253,12 +256,16 @@
 
   // Ship names: the player's button draws Pirate 60% / Avalon merchant 40%,
   // never navy names or reserved ones.
-  function randomShipName(key, flag) {
+  // avoid: names already shown; null once every name has been shown.
+  function randomShipName(key, flag, avoid) {
     var r = PC.rng.fromKey(key);
     var S = N().SHIPS;
     var banned = {};
     N().RESERVED.ships.forEach(function (x) { banned[x] = true; });
-    for (var i = 0; i < 50; i++) {
+    (avoid || []).forEach(function (x) { banned[x] = true; });
+    var left = (flag ? [flag] : Object.keys(N().PLAYER_SHIP_WEIGHTS)).some(function (f) { return S[f].some(function (n) { return !banned[n]; }); });
+    if (!left) return avoid ? null : one(r, S.pirate);
+    for (var i = 0; i < 500; i++) {
       var f = flag || weighted(r, N().PLAYER_SHIP_WEIGHTS);
       var name = one(r, S[f]);
       if (!banned[name]) return name;

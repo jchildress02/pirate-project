@@ -193,6 +193,10 @@
     },
   };
 
+  // The first signing of the Articles (§40.5): fires when the captain first
+  // tries to leave Ocracoke without them.
+  PC.data.firstSigning = "Before you weigh anchor, there's one last order of business. Every pirate crew sails under Articles: terms agreed and signed by all hands, setting the rules aboard and what each man can expect in return.";
+
   // Named NPCs who get woodcut busts (§38.3, §41.13). No art yet: the game
   // shows a labeled frame until the author's portrait drops into assets/.
   PC.data.npcPortraits = { twopenny: null, bobby: null, davey: null, ollie: null, geezer: null };
