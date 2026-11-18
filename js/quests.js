@@ -81,12 +81,12 @@
   }
 
   // The startup quests read their scenes and flags (content/quests.js).
-  function inScene(state, prefix) {
+  function inScene(state, prefix, before) {
     var c = state.current;
-    return !!(c && c.screen === "scene" && c.sceneId && c.sceneId.indexOf(prefix) === 0);
+    return !!(c && c.screen === "scene" && c.sceneId && c.sceneId.indexOf(prefix) === 0 && (before || []).indexOf(c.sceneId) < 0);
   }
-  function seenAny(state, prefix) {
-    return Object.keys(state.seen || {}).some(function (k) { return k.indexOf(prefix) === 0; });
+  function seenAny(state, prefix, before) {
+    return Object.keys(state.seen || {}).some(function (k) { return k.indexOf(prefix) === 0 && (before || []).indexOf(k) < 0; });
   }
   function startupJournal(state) {
     var S = PC.data.startupQuests || {}, f = state.flags, out = [];
@@ -94,7 +94,7 @@
       return { id: key, name: S[key].name, status: status, leads: 0, needed: 0, summary: "", objective: objective, entries: [], beyond: null, deadline: null };
     };
     var w = S.dying_wish;
-    if (w && (f[w.done] || inScene(state, w.scenes) || seenAny(state, w.scenes))) {
+    if (w && (f[w.done] || inScene(state, w.scenes, w.beforeOffer) || seenAny(state, w.scenes, w.beforeOffer))) {
       if (f[w.done]) out.push(entry("dying_wish", "done", w.doneLine));
       else {
         var atYard = (state.seen || {}).ocr_dpw_4 || (inScene(state, w.scenes) && /Graveyard/.test((PC.data.scenes[state.current.sceneId] || {}).where || ""));
@@ -102,7 +102,7 @@
       }
     }
     var u = S.underworld;
-    if (u && (f[u.done] || inScene(state, u.scenes) || seenAny(state, u.scenes))) {
+    if (u && (f[u.done] || inScene(state, u.scenes, u.beforeOffer) || seenAny(state, u.scenes, u.beforeOffer))) {
       out.push(f[u.done] ? entry("underworld", "done", u.doneLine) : entry("underworld", "open", u.steps.collect));
     }
     var rr = S.restless;

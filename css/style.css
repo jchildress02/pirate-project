@@ -575,3 +575,11 @@ details.stats > summary { cursor: pointer; color: var(--faded); font-style: ital
 .fleetship { border: 1px solid var(--rule); background: rgba(255,251,238,.55); padding: 8px 12px; margin: 8px 0; max-width: 760px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .fleetship .pmain { flex: 1; min-width: 240px; }
 .pickrow td { vertical-align: middle; }
+/* The creator's age slider: labeled ticks (B1). */
+.sliderwrap { position: relative; display: block; padding-bottom: 26px; max-width: 380px; }
+.field .sliderwrap .slider { width: 100%; max-width: none; padding: 0; margin: 6px 0; }
+.field .sliderwrap .ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 24px; pointer-events: none; letter-spacing: 0; }
+.sliderwrap .ticks i { position: absolute; top: 0; transform: translateX(-50%); font-style: normal; font-size: 15px; color: var(--faded); text-align: center; line-height: 1; }
+.sliderwrap .ticks i b { display: block; width: 1.5px; height: 7px; margin: 0 auto 3px; background: #6b5030; }
+/* Liar's Dice: the opponent's name, smaller (B20). */
+h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
