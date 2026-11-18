@@ -2116,5 +2116,19 @@ test("captives are freed at Ocracoke on the arrival, for a reward", function () 
   ok(s.money.crew >= crew + 60 - 60, "reward paid before the harbor due");
 });
 
+// ---- The M5 playtest patch ----
+
+test("a minigame roll records its outcome and where the log stood, for the result box (G4)", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 200;
+  PC.liarsdice.start(s);
+  var before = s.minigame.log.length;
+  PC.liarsdice.sizeUp(s);
+  if (s.minigame.pending) PC.minigames.settle(s);
+  var v = PC.minigames.view(s);
+  ok(v.lastRoll && ["clean", "partial", "setback"].indexOf(v.lastRoll.outcome) >= 0, "the outcome is kept");
+  eq(v.lastRoll.logAt, before);
+  ok(v.log.length > before, "its line follows");
+});
+
 console.log("\n" + passed + " passed, " + failed + " failed");
 process.exit(failed ? 1 : 0);
