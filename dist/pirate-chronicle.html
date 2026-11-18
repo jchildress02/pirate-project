@@ -6476,6 +6476,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var total = dice[0] + dice[1] + e;
     return { outcome: PC.checks.readTotal(total), dice: dice, edge: e, total: total };
   }
+  // The player's own raw rolls (the Exchange, a clash) get the same
+  // color-coded result box as checked rolls (G4 of the M5 playtest).
+  function markRoll(game, type, r) {
+    game.rollSeq = (game.rollSeq || 0) + 1;
+    game.lastRoll = { type: type, outcome: r.outcome, roll: { dice: r.dice, edge: r.edge, total: r.total }, logAt: game.log.length, seq: game.rollSeq, chips: [], op: type === "The Exchange" ? "exchange" : "clash" };
+  }
   function chance(state, game, what, p) { return M().rand(state, game, what)() < p; }
   // Probabilistic rounding (§21.11): 4% of 12 men is 0 or 1, averaging right.
   function prnd(state, game, x) { var f = Math.floor(x); return f + (chance(state, game, "prnd", x - f) ? 1 : 0); }
@@ -6981,6 +6987,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var r = rawRoll(state, game, "exchange", ed.edge);
     b.firstExchange = false;
     b.lastExchange = { outcome: r.outcome, dice: r.dice, edge: r.edge, mine: shot, theirs: theirs };
+    markRoll(game, "The Exchange", r);
     say(state, game, L().exchange[r.outcome] + " (" + L().theirShot[theirs] + ")");
     if (r.outcome === "clean") hit(state, game, b, "flagship", en.id, true, shot);
     else if (r.outcome === "partial") { hit(state, game, b, "flagship", en.id, false, shot); hit(state, game, b, en.id, "flagship", false, theirs); }
@@ -7337,6 +7344,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var edge = parts.reduce(function (a, x) { return a + x.value; }, 0);
     var r = rawRoll(state, game, "clash", edge);
     b.lastClash = { outcome: r.outcome, dice: r.dice, edge: r.edge, parts: parts };
+    markRoll(game, "The clash", r);
     say(state, game, L().clash[r.outcome]);
     var me = ship(state, b, "flagship"), them = ship(state, b, e.id);
     var lossFor = function (winnerAdv, loserCrew) {
