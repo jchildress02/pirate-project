@@ -40,6 +40,25 @@
     return { likes: likes, dislikes: dislikes };
   }
 
+  // Why an officer reacts to a choice's approval tags (B5 of the M5
+  // playtest): which trait, drive or fear moved him. A drive or fear the
+  // captain hasn't learned stays unnamed.
+  function reactions(o, tags) {
+    var out = [];
+    (tags || []).forEach(function (tag) {
+      [o.voice, o.secondary, o.third].forEach(function (t) {
+        var ti = traitInfo(t);
+        if (ti && ti.likes === tag) out.push({ tag: tag, dir: 1, source: t });
+        if (ti && ti.dislikes === tag) out.push({ tag: tag, dir: -1, source: t });
+      });
+      (o.likes || []).forEach(function (x) { if (x === tag) out.push({ tag: tag, dir: 1, source: null }); });
+      (o.dislikes || []).forEach(function (x) { if (x === tag) out.push({ tag: tag, dir: -1, source: null }); });
+      if (PC.data.driveLikes[o.drive] === tag) out.push({ tag: tag, dir: 1, source: o.driveKnown ? "Drive: " + o.drive : null, hidden: o.driveKnown ? null : "drive" });
+      if (PC.data.fearDislikes[o.fear] === tag) out.push({ tag: tag, dir: -1, source: o.fearKnown ? "Fear: " + o.fear : null, hidden: o.fearKnown ? null : "fear" });
+    });
+    return out;
+  }
+
   // §25.5 The captain's leaning: count the officer's likes minus dislikes
   // over the captain's traits and flaw; +2 or more, one rung warmer.
   function leaning(state, o) {
@@ -353,6 +372,7 @@
     aboard: aboard,
     holding: holding,
     likesOf: likesOf,
+    reactions: reactions,
     leaning: leaning,
     candidates: candidates,
     hiringText: hiringText,

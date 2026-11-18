@@ -12,11 +12,22 @@ The game saves itself in your browser after every action. **Save file** download
 
 ## Where things stand
 
+**The Milestone 5 playtest patch** (the "Playtest Pins (Milestone 5)" doc):
+
+- the screen lands on what an action produced, every roll's result sits in a color-coded box with its effects as chips, and a popup warns before you lose something (an officer, cargo, a stake);
+- the top bar is Menu, Journal, Rumors, Captain and Ship; the Ship opens over any screen, mid-hunt and mid-battle included, and has a Fleet tab (every ship, her crew and hold, and hands moved between them); Notes is a Journal tab;
+- after a battle you pick which cargo to take and how much, watching the hold fill; the summary totals every ship taken; Board her rolls the grapple at once;
+- crew gold pays the harbor due and the payouts first, the purse covers any shortfall; dirty goods and hulls carry a black spot;
+- a vacant Quartermaster's post is held by the Acting Quartermaster until the crew votes at the next action at sea;
+- the author's text fixes, Liar's Dice without a game cap, curable ailments at −2 on their main skill.
+
+**Milestone 5: the prize hunt** (§21, §22): Hunt for Prizes from Ocracoke, sightings, battles, boarding, prizes, fleets.
+
 **Milestone 4: the minigames** (§18, §32.15). The three Year 1 minigames are playable:
 
 - **The salvage dive** at Lilyhook's Graveyard: three seeded wrecks a season (sloop, brig or frigate), once a season for an action. Grab (a Dive check), Scout or Surface; breath, the hazard deck (snag, current, the shark, something moving below), blackouts that keep half the haul, the Giant Tooth relic, and a Quick Dive. A Dying Pirate's Wish now plays the real dive on the *Miranda*, with retries from the Graveyard at an action each.
 - **Under the Table**, the drinking match in the Tavern: Wits against a pirate's hidden Tolerance, Size him up, one taunt a match, the strong stuff, four mishaps, the tab, the Hangover, the Heavy Drinker's "One more round". A win pays a rumor, or the loss quest's drinking lead.
-- **Liar's Dice**: up to five games a sitting against a dockhand, stakes from your purse, Size them up and Cheat (with Loaded Dice), Card Sharp after 500 gold won.
+- **Liar's Dice**: as many games a sitting as your purse covers, against a dockhand, stakes from your purse, Size them up and Cheat (with Loaded Dice), Card Sharp after 500 gold won.
 
 **Milestone 3: scenes and quests** (§17.2, §30, §25.7, §37.9). Ocracoke's opening is the author's real scenes now:
 
@@ -53,7 +64,7 @@ Menu entries for later milestones show what's coming.
 
 **Milestone 0: the engine.** The check system, seeded dice, the scene runner, effects, pronoun tokens, seasons and actions, autosave and save files, the content checker and the Developer panel.
 
-Next: Milestone 5, the prize hunt and combat (§37.8).
+Next: the Norfolk node and the art drop-in.
 
 ## Folders
 

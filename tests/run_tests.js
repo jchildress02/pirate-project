@@ -1730,7 +1730,7 @@ test("Liar's Dice: caught cheating forfeits the pot and costs black Standing -5;
   ok(s.minigame.round.caught, "the second mark");
 });
 
-test("Liar's Dice: Loaded Dice reroll the Cheat once a sitting; five games a sitting", function () {
+test("Liar's Dice: Loaded Dice reroll the Cheat once a sitting; no cap on games a sitting (B21)", function () {
   var s = at(inTown(), "tavern"); s.money.purse = 500; s.captain.items.push("Loaded Dice");
   PC.liarsdice.start(s); PC.liarsdice.newGame(s, 25);
   forced("setback", function () { PC.liarsdice.cheat(s, 0); });
@@ -1740,8 +1740,23 @@ test("Liar's Dice: Loaded Dice reroll the Cheat once a sitting; five games a sit
   ok(!s.minigame.round.caught);
   for (var i = 1; i < 5; i++) { s.minigame.round.over = true; PC.liarsdice.closeGame(s); PC.liarsdice.newGame(s, 25); }
   s.minigame.round.over = true; PC.liarsdice.closeGame(s);
-  var threw = false; try { PC.liarsdice.newGame(s, 25); } catch (e) { threw = true; }
-  ok(threw, "a sixth game");
+  PC.liarsdice.newGame(s, 25);
+  eq(s.minigame.games, 6, "a sixth game, as the purse covers");
+});
+
+test("Liar's Dice: leaving mid-game forfeits the stake (B26); the caught line names the cause (B25)", function () {
+  var s = at(inTown(), "tavern"); s.money.purse = 500;
+  PC.liarsdice.start(s); PC.liarsdice.newGame(s, 30);
+  var threw = false; try { PC.liarsdice.stop(s); } catch (e) { threw = true; }
+  ok(threw, "not without forfeiting");
+  PC.liarsdice.stop(s, true);
+  eq(s.minigame.lost, 1); eq(s.minigame.net, -30); ok(s.minigame.over);
+  var t = at(inTown(), "tavern"); t.money.purse = 500;
+  PC.liarsdice.start(t); PC.liarsdice.newGame(t, 25);
+  forced("setback", function () { PC.liarsdice.cheat(t, 0); });
+  if (t.minigame.pending) PC.minigames.settle(t);
+  ok(t.minigame.round.caught && t.minigame.round.caughtWhy === "setback");
+  ok(/he saw it/.test(t.minigame.log.join(" ")));
 });
 
 test("Card Sharp comes after 500 gold won at Liar's Dice", function () {
@@ -2252,6 +2267,23 @@ test("selling a hull shows her effect on the hold, and throws the overflow over 
   var r = PC.node.sellHull(s, "p1");
   ok(PC.crew.slotsUsed(s) <= PC.crew.holdCapacity(s), "it all fits after");
   ok(r.jettisoned.length, "the overflow went over the side");
+});
+
+test("a curable ailment costs -2 on its main skill, -1 on the other (B2)", function () {
+  var s = fresh("ail");
+  var base = function (t) { return PC.checks.assess(s, { type: t, dr: 0 }).edge; };
+  s.captain.tags = s.captain.tags.filter(function (t) { return t !== "Bad Knee"; });
+  var c0 = base("Chase & Climb"), b0 = base("Board");
+  s.captain.tags.push("Bad Knee");
+  eq(base("Chase & Climb"), c0 - 2); eq(base("Board"), b0 - 1);
+});
+
+test("the startup quests' journal entries open at the actual offer (B9)", function () {
+  var s = PC.state.newGame(PC.data.testCaptain, { seed: "offer" });
+  PC.scenes.enterScene(s, "ocr_uw_1");
+  ok(!PC.quests.journal(s).some(function (j) { return j.id === "underworld"; }), "not while Bobby only waves you over");
+  PC.scenes.enterScene(s, "ocr_uw_2");
+  ok(PC.quests.journal(s).some(function (j) { return j.id === "underworld"; }), "open once he asks for the coin");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

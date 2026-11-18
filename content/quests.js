@@ -61,6 +61,9 @@
       name: "A Dying Pirate's Wish",
       scenes: "ocr_dpw_",
       done: "ocr_dpw_done",
+      // The entry opens at the actual offer, not when the dialogue opens (B9):
+      // Ollie names the job (the wrecks) in ocr_dpw_2.
+      beforeOffer: ["ocr_dpw_1"],
       steps: {
         follow: "Follow the young man to his dying father at Lilyhook's Graveyard.",
         dive: "Dive the wreck of the *Miranda* and bring up Geezer's ivory mermaid.",
@@ -72,6 +75,8 @@
       name: "Welcome to the Underworld",
       scenes: "ocr_uw_",
       done: "ocr_underworld_done",
+      // Opens when Bobby asks for the coin (ocr_uw_2), not when he waves you over (B9).
+      beforeOffer: ["ocr_uw_1"],
       steps: { collect: "Collect the coin a drunk in the Tavern owes Bobby Rats." },
       doneLine: "Bobby Rats has his coin, and his fence is open to you.",
     },

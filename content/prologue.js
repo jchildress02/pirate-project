@@ -41,7 +41,7 @@
   var CLOSING = [
     { bg: "page", paras: [
       { html: "After months spent trying to pick up the pieces in the ashes of {city}, you realize you can’t stay any longer. There’s nothing left for you here, and you still need to find {loss}.", cue: "home" },
-      { html: "You sell just enough of what you have left to buy a battered old sloop. She has holes in her sails and splinters in her deck, but she’ll float and she’ll sail, and that’s all you need." }] },
+      { html: "You sell just enough of what you have left to buy a battered old sloop. She has holes in her sails and splinters in her deck, but she’ll float and she’ll sail, and that’s all you need. You name her <i>{ship}</i>." }] },
     { bg: "page", paras: [
       { html: "As you say your goodbyes to your old friend {mentor}, {mentor.he} stops you. “Don’t think you’re leaving without me,” {mentor.he} says, and {mentor.he} won’t take no for an answer." },
       { html: "The two of you find a dozen men down at the docks who are as desperate to leave {city} as you are, and they sign aboard for nothing more than a handshake. {mentor} suggests the pirate haven of Ocracoke as a first stop: a place to hear the latest rumors, hire more crew, and refit the {ship} cheaply." },

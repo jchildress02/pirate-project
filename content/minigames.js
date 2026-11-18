@@ -191,7 +191,9 @@
   // ---- Liar's Dice (§18.3) -------------------------------------------------------
   var dice = {
     DICE: 5,                  // each, the classic game (ruled November 14; §18.3 had 3 as the placeholder)
-    GAMES_PER_SESSION: 5,
+    // No cap on games a sitting: one action holds as many games as the
+    // purse covers (B21 of the M5 playtest).
+    STAKE_STEP: 5,            // the stake stepper moves in fives (B24)
     STAKES: { "Very poor": [25, 50], "Poor": [25, 100], "Modest": [50, 150], "Wealthy": [50, 200] },
     SIZE_CHECK: { type: "Cards & Dice", dr: 3 },
     CHEAT_CHECK: { type: "Cards & Dice", dr: 3 },
@@ -216,6 +218,9 @@
       vague: "He shifts in his seat.",
       cheat: { clean: "A quick glance under the edge of his cup, and he's none the wiser.", partial: "You sneak a quick peek, but he narrows his eyes and pulls the cup closer." },
       caught: "He slams his hand on the table. \"Cheater!\" he cries, and the whole tavern hears it.",
+      // The caught line names the cause (B25 of the M5 playtest).
+      caughtWhy: { setback: "Setback: he saw it.", marks: "Second mark: he's had enough." },
+      forfeit: "PLACEHOLDER: You push back your stool mid-game. He sweeps your stake into his pile without a word.",
       win: "He groans and pushes the coins across.",
       lose: "He sweeps up the coins with a grin. \"I'd love to take more of your coin. Another?\"",
       broke: "\"Come back when you've got more gold.\"",

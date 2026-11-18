@@ -81,7 +81,7 @@
     // logAt: where the log stood, so the screen can show this roll's result
     // box beside the lines it wrote (§41.1, G4 of the M5 playtest).
     game.rollSeq = (game.rollSeq || 0) + 1;
-    game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null, logAt: game.log.length, seq: game.rollSeq, chips: [] };
+    game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null, logAt: game.log.length, seq: game.rollSeq, chips: [], op: p.op };
     return engine(game).settle(state, game, p);
   }
 

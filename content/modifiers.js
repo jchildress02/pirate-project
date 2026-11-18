@@ -108,8 +108,11 @@
   add("Deep Scar", { edge: plus(["Hold Your Ground", "Strike First"], -1, { condition: "Under Fire" }) });
 
   // ---- Debuffs: physical tags (§12.4) ----
-  add("Bad Knee", { edge: plus(["Chase & Climb", "Board"], -1) });
-  add("Old Wound", { edge: plus(["Endure", "Swordsmanship"], -1) });
+  // A curable ailment costs -2 on its main skill (the often-rolled one)
+  // and -1 on the other until it's cured; for-life ailments stay -1 on
+  // both (ruled in the M5 playtest, B2).
+  add("Bad Knee", { edge: plus(["Chase & Climb"], -2).concat(plus(["Board"], -1)) });
+  add("Old Wound", { edge: plus(["Endure"], -2).concat(plus(["Swordsmanship"], -1)) });
   add("Failing Eyes", { edge: plus(["Keep Watch", "Appraise"], -1) });
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
@@ -130,8 +133,8 @@
   add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
   // Old ailments, rebalanced in the Creator chat (§12.4): one often-rolled
   // skill and one rarer one each.
-  add("Weak Chest", { edge: plus(["Endure", "Dive"], -1).concat([{ any: true, value: -1, when: { condition: "Cold" } }]) });
-  add("Bad Back", { edge: plus(["Brawling", "Hold Your Ground"], -1) });
+  add("Weak Chest", { edge: plus(["Endure"], -2).concat(plus(["Dive"], -1)).concat([{ any: true, value: -1, when: { condition: "Cold" } }]) });
+  add("Bad Back", { edge: plus(["Hold Your Ground"], -2).concat(plus(["Brawling"], -1)) });
   add("Rheumy Hands", { edge: plus(["Light Fingers", "Repair & Refit"], -1) });
   add("Hard of Hearing", { edge: plus(["Notice Danger"], -1).concat(plus(["Leadership"], -1, { anyOf: ["Under Fire", "Storm"] })) });
   add("Marsh Fever", { note: "Fever Flares fire more often and last two seasons (§11.9)." });

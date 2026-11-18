@@ -11,7 +11,7 @@
 
   var state = null;
   var root = null;
-  var BUILD = "Prototype build 0.5 · UI pass 1";
+  var BUILD = "Prototype build 0.6 · the M5 playtest patch";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -79,6 +79,7 @@
     dread: '<path d="M4 9a6 6 0 0 1 12 0v3l-2 1v3H6v-3l-2-1z"/><circle cx="7.5" cy="9.5" r="1.5"/><circle cx="12.5" cy="9.5" r="1.5"/><path d="M8.5 16v-2M11.5 16v-2"/>',
     rel: '<circle cx="6.5" cy="6" r="2.6"/><circle cx="13.5" cy="6" r="2.6"/><path d="M1.5 17q0-6 5-6q2.5 0 3.5 1.5q1-1.5 3.5-1.5q5 0 5 6"/><path d="M10 15.5l-1.2-1.1a.9.9 0 0 1 1.2-1.3a.9.9 0 0 1 1.2 1.3z" fill="currentColor"/>',
     officer: '<circle cx="8" cy="6" r="3"/><path d="M2 17q0-6 6-6t6 6"/><path d="M16 4v8M13.5 6.5L16 4l2.5 2.5"/>',
+    person: '<circle cx="10" cy="6" r="3.2"/><path d="M3.5 17.5q0-6.5 6.5-6.5t6.5 6.5"/>',
     cond: '<path d="M3 13L13 3l4 4L7 17z"/><path d="M8 8l4 4M9 7l1 1M12 10l1 1"/>',
     tag: '<path d="M3 3h7l7 7l-7 7l-7-7z"/><circle cx="7" cy="7" r="1.5"/>',
     item: '<path d="M10 2l6 6l-6 10L4 8z"/><path d="M4 8h12M7 8l3 10l3-10"/>',
@@ -284,7 +285,7 @@
     if (prologue) return drawPrologue();
     if (!state && creating) return drawCreator();
     if (!state) return drawTitle();
-    liveTotals = [];
+    liveTotals = []; liveMax = {};
     expiryWarning();
     var screen = state.current.screen;
     var content = screen === "hub" ? hubPanel() : screen === "node" ? nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
@@ -505,26 +506,30 @@
     return '<div class="dice">Dice ' + roll.dice[0] + " + " + roll.dice[1] + ", edge " + signed(roll.edge) + " = " + roll.total + "</div>";
   }
 
-  // Officer approval: small faces with an up or down mark (§38.6), read
-  // from the choice's approval tags against each officer's likes.
-  function approvalChip(tags) {
-    if (!tags || !tags.length) return null;
-    var faces = aboard().map(function (o) {
-      var lk = PC.officers.likesOf(o), up = 0;
-      tags.forEach(function (t) { if (lk.likes.indexOf(t) >= 0) up++; if (lk.dislikes.indexOf(t) >= 0) up--; });
-      if (!up) return "";
-      return '<span class="appr" title="' + esc(o.first + (up > 0 ? " approves" : " disapproves")) + '">' + officerFace(o, 22, 32) +
-        '<span style="color:' + (up > 0 ? INK.good : INK.bad) + '">' + ic(up > 0 ? "up" : "down", "mark", 2) + "</span></span>";
+  // Officer approval (§38.6): one chip an officer, his face with a single
+  // up or down mark beside it, saying which trait or drive moved him
+  // (B4, B5 of the M5 playtest). The chip's own icon stays plain ink.
+  function approvalChips(tags) {
+    if (!tags || !tags.length) return [];
+    return aboard().map(function (o) {
+      var rx = PC.officers.reactions(o, tags);
+      var up = rx.reduce(function (a, r) { return a + r.dir; }, 0);
+      if (!up) return null;
+      var why = rx.filter(function (r) { return r.dir === (up > 0 ? 1 : -1); }).map(function (r) {
+        var src = r.source || (r.hidden === "fear" ? "A fear " + (o.gender === "f" ? "she" : "he") + " hasn't told you" : r.hidden === "drive" ? "A drive " + (o.gender === "f" ? "she" : "he") + " hasn't told you" : "Their nature");
+        return src + ": " + (r.dir > 0 ? "likes " : "dislikes ") + r.tag;
+      }).join("; ");
+      return { icon: "person", ink: "ink", html: '<span class="appr" title="' + esc(o.first + (up > 0 ? " approves" : " disapproves")) + '">' + officerFace(o, 22, 32) +
+        '<span style="color:' + (up > 0 ? INK.good : INK.bad) + '">' + ic(up > 0 ? "up" : "down", "mark", 2) + "</span></span> " + esc(o.first) + " · " + esc(why) };
     }).filter(Boolean);
-    return faces.length ? { icon: "officer", ink: "good", html: faces.join(" ") + " Officers" } : null;
   }
-  function approvalChips(tags) { var c = approvalChip(tags); return c ? [c] : []; }
 
   // Strike First (§11.4): the automatic opening roll of a close fight, in
   // the same result styling (§38.6).
   function strikeFirstLine(sf) {
     if (!sf) return "";
-    var t = sf.value > 0 ? "You strike first: +1 on the first clash." : sf.value < 0 ? "It gets the jump: −1 to you on the first clash." : "Neither of you gets the jump.";
+    // A scene's close fight is one clash (B15 of the M5 playtest).
+    var t = sf.value > 0 ? "You strike first: +1 on the clash." : sf.value < 0 ? "It gets the jump: −1 to you on the clash." : "Neither of you gets the jump.";
     return '<p class="sfline" style="color:' + (sf.value > 0 ? INK.good : sf.value < 0 ? INK.bad : "inherit") + '">' + esc(t) +
       (state.settings.showDice && sf.dice ? ' <span class="note">(Strike First: dice ' + sf.dice.join(" + ") + ", edge " + sf.edge + ")</span>" : "") + "</p>";
   }
@@ -581,12 +586,14 @@
   // A stepper (§41.1). Its running total lives in a total slot whose text
   // is rebuilt from the boxes as the numbers move, without a redraw.
   var liveTotals = [];
-  function qstep(id, value, max, min, withMax) {
+  var liveMax = {}; // a stepper's live cap, read when + or Max is pressed
+  function qstep(id, value, max, min, withMax, step) {
     min = min == null ? 1 : min;
+    step = step || 1;
     value = Math.max(min, Math.min(max, value));
-    return '<span class="stepper"><button type="button" data-step="' + id + '" data-d="-1" aria-label="Fewer">−</button>' +
-      '<input id="' + id + '" type="number" inputmode="numeric" min="' + min + '" max="' + max + '" value="' + value + '">' +
-      '<button type="button" data-step="' + id + '" data-d="1" aria-label="More">+</button></span>' +
+    return '<span class="stepper"><button type="button" data-step="' + id + '" data-d="' + (-step) + '" aria-label="Fewer">−</button>' +
+      '<input id="' + id + '" type="number" inputmode="numeric" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '">' +
+      '<button type="button" data-step="' + id + '" data-d="' + step + '" aria-label="More">+</button></span>' +
       // Max fills the box in one tap (the author's phone notes).
       (withMax && max > 1 ? '<button type="button" class="maxbtn" data-step="' + id + '" data-d="max">Max</button>' : "");
   }
@@ -747,7 +754,7 @@
     var dk = PC.drinking.canDrink(state);
     list2.push(opt({ act: "drink", label: "Under the Table " + apText(1), ap: 1, meta: "Drink with a pirate. Once a season; the loser pays the " + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.", lock: dk.ok ? null : dk.why }));
     var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
-    list2.push(opt({ act: "dice", label: "Liar's Dice " + apText(1), ap: 1, meta: "Up to " + PC.data.minigames.dice.GAMES_PER_SESSION + " games a sitting, " + st[0] + "-" + st[1] + " gold a game from your purse.", lock: lp.ok ? null : lp.why }));
+    list2.push(opt({ act: "dice", label: "Liar's Dice " + apText(1), ap: 1, meta: "As many games a sitting as your purse covers, " + st[0] + "-" + st[1] + " gold a game from your purse.", lock: lp.ok ? null : lp.why }));
     var gi = N().tavernServiceCheck(state, 1);
     list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.",
       check: gi.ok ? PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] }) : null, lock: gi.ok ? null : gi.why }));
@@ -868,6 +875,15 @@
     var tiers = PC.data.economy.TIER_ORDER.filter(function (t) { return avail[t] || (N().season(state).pool[t]); });
     if (!tiers.length) html += '<p class="note">Nobody is looking for a berth.</p>';
     else {
+      // Max fills only what the berths and crew gold leave after the other
+      // tiers' numbers, so nobody is left on the docks (B34).
+      tiers.forEach(function (t) {
+        liveMax["q-hire-" + t] = function () {
+          var b = berths, g = state.money.crew;
+          tiers.forEach(function (u) { if (u !== t) { var n = val("q-hire-" + u); b -= n; g -= n * N().signingCost(state, u); } });
+          return Math.max(0, Math.min(avail[t], b, Math.floor(g / N().signingCost(state, t) + 1e-9)));
+        };
+      });
       html += '<table class="grid"><tr><th>Hands</th><th>Waiting</th><th>Each</th><th>Sign</th></tr>' + tiers.map(function (t) {
         var max = Math.min(avail[t], berths, afford(N().signingCost(state, t)));
         return '<tr><td><span title="' + esc(TIER_TIP[t] || "") + '" style="border-bottom:1px dotted">' + t + "</span></td><td>" + avail[t] + "</td><td>" + gold(N().signingCost(state, t)) + "</td><td>" +
@@ -1123,6 +1139,9 @@
   // where the log stood when the player last acted.
   var mgMark = 0;
   function markLog() { mgMark = state && state.minigame && state.minigame.log ? state.minigame.log.length : 0; }
+  // What a minigame roll is called in its result box (B22: "Size him up").
+  var OP_NAME = { size: "Size him up", cheat: "The Cheat", grab: "Grab", quick: "Quick Dive", repair: "Repairs at sea", grapple: "The grapple", repel: "Repel boarders",
+    chase: "The chase", show: "A show of force", position: "Position", strikeFirst: "Strike First", endure: "Hold on", drink: "Drink", strong: "The strong stuff", vote: "The vote" };
   // The latest move's lines, in the roll's color-coded box when a roll made
   // them (G4); the screen scrolls here (G1).
   function mgLatest(lines, v) {
@@ -1130,7 +1149,7 @@
     var lr = v && v.lastRoll && v.lastRoll.logAt >= mgMark && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
     if (!fresh.length && !lr) return "";
     var key = "mg:" + (v ? v.kind : "") + ":" + lines.length + ":" + (lr ? lr.seq : 0);
-    var inner = (lr ? rollBadge(lr.outcome, lr.type) : "") + fresh.map(function (l) { return prose(l); }).join("") + (lr && lr.chips && lr.chips.length ? chips(lr.chips) : "");
+    var inner = (lr ? rollBadge(lr.outcome, OP_NAME[lr.op] || lr.type) : "") + fresh.map(function (l) { return prose(l); }).join("") + (lr && lr.chips && lr.chips.length ? chips(lr.chips) : "");
     return rbox(lr ? lr.outcome : null, inner, key, "mglatest");
   }
   function mgLog(lines) {
@@ -1537,8 +1556,10 @@
   }
 
   function dicePanel(v) {
-    var html = mgHead("Ocracoke · The Tavern · Liar's Dice", v.opponent);
-    var board = '<div class="scoreboard"><p class="sc" style="margin:0 0 4px">The scoreboard</p>Game ' + v.games + " of " + v.maxGames + "<br>Won " + v.won + " · lost " + v.lost +
+    // The opponent's name card, smaller (B20).
+    var html = '<div class="where">Ocracoke · The Tavern · Liar\'s Dice</div><h2 class="title smallname">' + esc(v.opponent) + "</h2>";
+    // No cap on games a sitting (B21): games played and the running tally.
+    var board = '<div class="scoreboard"><p class="sc" style="margin:0 0 4px">The scoreboard</p>' + plural(v.games, "game") + " played<br>Won " + v.won + " · lost " + v.lost +
       "<br>Net " + (v.net >= 0 ? "+" : "−") + Math.abs(v.net) + " gold<br>Your purse " + gold(v.purse) + "</div>";
     if (v.pending) return html + mgLog(v.log) + mgPending(v.pending);
     var g = v.round;
@@ -1549,10 +1570,13 @@
       if (v.canSize) list.push(opt({ act: "mgsize", label: "Size him up", check: v.sizeAssess, meta: "Once a sitting" }));
       html += opts(list);
       if (v.canStart) {
-        html += '<div class="svc"><h4>The stake</h4><div class="buyrow">' + qstep("q-stake", v.stakes[0], Math.min(v.stakes[1], Math.floor(v.purse)), v.stakes[0]) +
+        // The stake stepper moves in fives (B24).
+        var smax = Math.min(v.stakes[1], Math.floor(v.purse));
+        smax = v.stakes[0] + Math.floor((smax - v.stakes[0]) / v.stakeStep) * v.stakeStep;
+        html += '<div class="svc"><h4>The stake</h4><div class="buyrow">' + qstep("q-stake", v.stakes[0], smax, v.stakes[0], false, v.stakeStep) +
           '<button class="primary" data-act="mgstake" data-for="q-stake">Play a game</button></div><p class="note">Stake ' + v.stakes[0] + "-" + v.stakes[1] + " gold from your purse; the winner takes both stakes.</p></div>";
       }
-      return html + '<div class="actions"><button class="secondary" data-act="mgstop">Leave the table</button></div>';
+      return html + '<div class="actions"><button class="secondary" data-act="mgstop" data-top="1">Leave the table</button></div>';
     }
     var bidHtml = g.bid ? '<span class="bidbox">' + g.bid.q + " × " + die(g.bid.f, "sm") + "</span>" : '<span class="bidbox" style="font-size:18px">You open the bidding</span>';
     html += '<div class="dicetable"><div class="felt"><div class="cupsrow">' + g.his.map(function (d) { return die(d); }).join("") + '</div><div style="text-align:center">' + bidHtml +
@@ -1560,7 +1584,7 @@
       '<div class="cupsrow">' + g.mine.map(function (d) { return die(d); }).join("") + "</div></div>" + board + "</div>";
     if (g.history.length) html += '<div class="mglog">' + g.history.slice(-6).map(function (h) { return "<p>" + esc(h) + "</p>"; }).join("") + "</div>";
     if (g.over) {
-      return html + '<p class="notice">' + (g.caught ? "Caught cheating: the pot is his." : g.won ? "You take the pot: " + g.stake * 2 + " gold." : "He takes the pot.") + "</p>" +
+      return html + '<p class="notice" data-result="dice-end:' + v.games + '">' + (g.caught ? (g.caughtWhy === "marks" ? "Second mark: he's had enough. " : "Setback: he saw it. ") + "Caught cheating: the pot is his, and the pirates think less of you." : g.won ? "You take the pot: " + g.stake * 2 + " gold." : "He takes the pot.") + "</p>" +
         '<div class="actions"><button class="primary" data-top="1" data-act="mgclosegame">Continue</button></div>';
     }
     if (g.revealed) return html + '<div class="actions"><button class="primary" data-act="mgnextround">Next round</button></div>';
@@ -1572,12 +1596,16 @@
         return '<button type="button" class="' + (n === f ? "on" : "") + '" data-face="' + n + '" aria-label="' + n + '">' + die(n, "sm") + "</button>";
       }).join("") + "</span></div>" +
       '<div class="actions"><button class="primary" data-act="mgbid">Bid</button>' + (g.bid ? '<button class="secondary" data-act="mgliar">Call Liar!</button>' : "") + "</div></div>";
+    // Cheating, made clear (B25): what each outcome does, and the marks.
+    var marks = v.marks || 0;
+    var susp = '<span class="susp" title="Suspicion: ' + marks + ' of 2 marks. Two and you\'re caught.">' + [0, 1].map(function (i) { return '<i class="' + (i < marks ? "on" : "") + '"></i>'; }).join("") + "</span>";
     if (!g.cheated) {
-      html += '<details class="svc"><summary class="sc" style="cursor:pointer;color:#5e4528">Cheat: peek under his cup (once a game) <span class="susp">' +
-        [0, 1].map(function (i) { return '<i class="' + (i < (v.marks || 0) ? "on" : "") + '"></i>'; }).join("") + "</span></summary>" +
-        opts([opt({ act: "nop", label: "Peek at a die", check: v.cheatAssess, meta: "Two suspicion marks and you are caught: the pot is forfeit, and the pirates think less of you." })]) +
+      html += '<details class="svc"><summary class="sc" style="cursor:pointer;color:#5e4528">Cheat: peek under his cup (once a game) · suspicion ' + susp + " " + marks + " of 2</summary>" +
+        opts([opt({ act: "nop", label: "Peek at a die", check: v.cheatAssess, meta: "Clean: you see the die, and he's none the wiser. Partial: you see it, but he's suspicious: a suspicion mark (two marks and you're caught). Setback: caught at once: the pot and Standing with the pirates are lost." })]) +
         '<div class="actions">' + g.his.map(function (d, i) { return '<button class="secondary" data-act="mgcheat" data-i="' + i + '">Die ' + (i + 1) + "</button>"; }).join("") + "</div></details>";
-    }
+    } else if (marks) html += '<p class="small">Suspicion ' + susp + " " + marks + " of 2: one more mark and you're caught.</p>";
+    // Leaving mid-game forfeits the stake: a warning first (B26, G7).
+    html += '<div class="actions"><button class="secondary" data-act="mgstop" data-midgame="1">Leave the table</button></div>';
     return html;
   }
 
@@ -1709,7 +1737,8 @@
     ]);
     var giveMax = state.money.purse;
     html += '<div class="svc"><h4>Give to the crew</h4>' + sayFor("ship:give") + '<p class="small">Move gold from your purse into crew gold: +1 morale for every 5 gold a head (at most +10 a gift, +15 a season).</p>' +
-      (giveMax > 0 ? '<div class="buyrow">' + qstep("q-give", Math.min(giveMax, c.count * 5 * 2), giveMax) + '<button class="secondary" data-act="give" data-for="q-give"' + lockAttr(shipLock(false)) + '>Give</button> ' +
+      // The purse beside the stepper (B33).
+      (giveMax > 0 ? '<div class="buyrow"><span class="small">Your purse: <b>' + gold(state.money.purse) + "</b></span>" + qstep("q-give", Math.min(giveMax, c.count * 5 * 2), giveMax) + '<button class="secondary" data-act="give" data-for="q-give"' + lockAttr(shipLock(false)) + '>Give</button> ' +
         totalSlot(function () { var n = val("q-give"); return gold(n) + " gold · morale +" + (n > 0 ? PC.crew.giftMorale(state, n) : 0); }) + "</div>" : '<p class="note">Your purse is empty.</p>') + "</div>";
     html += '<div class="svc"><h4>Rationing</h4><p class="small">' + (c.rationing ? "On: provisions burn 25% slower, and a Ration Stores check each season sets the cost to morale." : "Off.") + "</p>" +
       '<button class="secondary" data-act="rationing"' + lockAttr(shipLock(false)) + ">" + (c.rationing ? "Lift rationing" : "Order rationing") + "</button></div>";
@@ -2083,7 +2112,17 @@
     "mgcheat": function (el) { markLog(); PC.liarsdice.cheat(state, Number(el.dataset.i)); },
     "mgnextround": function () { markLog(); PC.liarsdice.nextRound(state); },
     "mgclosegame": function () { markLog(); PC.liarsdice.closeGame(state); },
-    "mgstop": function () { markLog(); PC.liarsdice.stop(state); },
+    // Leave the table in one click between games; mid-game, warn first:
+    // the stake on the table is forfeit (B26, G7).
+    "mgstop": function (el) {
+      var g = state.minigame && state.minigame.round;
+      if (g && !g.over) {
+        if (confirmFirst(el, "Leave mid-game?", "Leave now and you forfeit the " + g.stake + " gold on the table.", "Forfeit and leave")) return;
+        PC.liarsdice.stop(state, true);
+      } else { markLog(); PC.liarsdice.stop(state); }
+      diveZone = null; drinkSpot = null;
+      PC.minigames.leave(state);
+    },
     // ---- The prize hunt (Milestone 5) ----
     "hunt": function () { mgMark = 0; var f = devForce; devForce = null; PC.hunt.start(state, { force: f }); },
     "hnext": function () { markLog(); PC.hunt.next(state, state.minigame); },
@@ -2141,7 +2180,9 @@
       var heard = r.rumors.map(function (x) { return x.text; });
       // One quote, running on: "I did hear one other thing... [rumor]" (the author, UI pass 1 review).
       if (r.extra) heard.push(joinQuotes(r.extraLine, r.extra.text));
-      say(id, firstName(id), g.line, null, heard, { ask: L.askRumors, heardNote: heard.length ? "Added to your Rumors." : null,
+      // No "Welcome back." between your question and the rumor (B8).
+      var greet = /^\s*"?Welcome back\.?"?\s*$/.test(g.line || "") ? null : g.line;
+      say(id, firstName(id), greet, null, heard, { ask: L.askRumors, heardNote: heard.length ? "Added to your Rumors." : null,
         outcome: r.talk.outcome, rollType: "Tavern Talk",
         chips: [heard.length ? { icon: "rumor", text: plural(heard.length, "rumor") + " heard" } : null,
           state.settings.showDice ? { icon: "ap", text: "Dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge } : null] });
@@ -2547,7 +2588,9 @@
     var age = Number(draft.age) || 25;
     var track = "linear-gradient(90deg, rgba(47,90,34,.25) 0 " + (100 * 10.5 / 25) + "%, rgba(122,86,8,.25) 0 " + (100 * 20.5 / 25) + "%, rgba(143,42,28,.25) 0)";
     return head("Your captain") +
-      '<label class="field"><span>Age</span><input class="slider" type="range" min="15" max="40" step="1" value="' + age + '" data-act="age" style="background:' + track + '"></label>' +
+      '<label class="field"><span>Age</span><span class="sliderwrap"><input class="slider" type="range" min="15" max="40" step="1" value="' + age + '" data-act="age" style="background:' + track + '">' +
+      // Labeled ticks on the track (B1 of the M5 playtest).
+      '<span class="ticks" aria-hidden="true">' + [15, 20, 25, 30, 35, 40].map(function (t) { return '<i style="left:' + (100 * (t - 15) / 25) + '%"><b></b>' + t + "</i>"; }).join("") + "</span></span></label>" +
       '<p class="sc" style="margin:0">Age ' + age + (b ? " · " + tagLine(b.tags) + ", " + ailmentLine(b.debuffs) : "") + "</p>" +
       '<p class="note">15–25: one starting tag. 26–35: two tags and one old ailment. 36–40: three tags and two old ailments.</p>' +
       (choices.length ? cycler(choices, "portraitSet", "Portrait") : "") +
@@ -3072,7 +3115,9 @@
     root.querySelectorAll("[data-step]").forEach(function (b) {
       b.addEventListener("click", function () {
         var box = document.getElementById(b.dataset.step);
-        var n = b.dataset.d === "max" ? Number(box.max) : (Math.floor(Number(box.value)) || 0) + Number(b.dataset.d);
+        var cap = liveMax[b.dataset.step] ? Math.min(Number(box.max), liveMax[b.dataset.step]()) : Number(box.max);
+        var n = b.dataset.d === "max" ? cap : (Math.floor(Number(box.value)) || 0) + Number(b.dataset.d);
+        if (Number(b.dataset.d) > 0) n = Math.min(n, Math.max(cap, Math.floor(Number(box.value)) || 0));
         box.value = Math.max(Number(box.min), Math.min(Number(box.max), n));
         refreshTotals();
       });

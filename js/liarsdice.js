@@ -1,6 +1,7 @@
 /* Pirate Chronicle — Liar's Dice, the Tavern's gambling (§18.3).
  *
- * One session costs 1 AP and holds up to five games against one ephemeral
+ * One session costs 1 AP and holds as many games as the purse covers
+ * (no cap, the M5 playtest) against one ephemeral
  * opponent (a Dockhand at Ocracoke). Each game: three dice each under a
  * cup; bid "at least N dice showing X" across both cups, or call Liar. The
  * loser of a call loses a die; the last with dice takes the pot. Stakes come
@@ -75,7 +76,6 @@
     stake = Math.round(stake);
     if (stake < lim[0] || stake > lim[1]) throw new Error("Stakes here are " + lim[0] + "-" + lim[1] + " gold.");
     if (state.money.purse < stake) throw new Error(D().lines.broke);
-    if (game.games >= D().GAMES_PER_SESSION) throw new Error("That's enough for one sitting.");
     state.money.purse -= stake;
     game.games += 1;
     game.round = { stake: stake, myN: D().DICE, hisN: D().DICE, opener: "me", peeked: [], cheated: false, history: [] };
@@ -226,7 +226,6 @@
     var game = state.minigame;
     if (!game.round || !game.round.over) throw new Error("The game isn't over.");
     game.round = null;
-    if (game.games >= D().GAMES_PER_SESSION) M().say(state, game, "That's enough for one sitting.");
     return game;
   }
 
@@ -258,12 +257,12 @@
     }
     if (p.op === "cheat") {
       var g = game.round;
-      if (p.outcome === "setback") return caught(state, game);
+      if (p.outcome === "setback") return caught(state, game, "setback");
       g.peeked.push(p.data.index);
       M().say(state, game, D().lines.cheat[p.outcome]);
       if (p.outcome === "partial") {
         game.marks += 1;
-        if (game.marks >= D().MARKS_TO_CATCH) return caught(state, game);
+        if (game.marks >= D().MARKS_TO_CATCH) return caught(state, game, "marks");
       }
       return game;
     }
@@ -272,9 +271,10 @@
 
   // Caught: the game ends, the pot is forfeit, and Standing with the node's
   // faction drops (black Standing at Ocracoke, §18.3).
-  function caught(state, game) {
+  function caught(state, game, why) {
     var g = game.round;
-    M().say(state, game, D().lines.caught);
+    M().say(state, game, (D().lines.caughtWhy && D().lines.caughtWhy[why] ? D().lines.caughtWhy[why] + " " : "") + D().lines.caught);
+    g.caughtWhy = why || null;
     var faction = PC.node.nodeData(game.node).faction;
     PC.scenes.applyEffect(state, { standing: { faction: faction, delta: D().CAUGHT_STANDING } });
     g.over = true; g.won = false; g.caught = true;
@@ -283,9 +283,17 @@
     return game;
   }
 
-  function stop(state) {
+  // Leave the table. Between games it's one click; mid-game the stake on
+  // the table is forfeit (the screen warns first, B26 of the M5 playtest).
+  function stop(state, forfeit) {
     var game = state.minigame;
-    if (game.round && !game.round.over) throw new Error("Finish the game first.");
+    if (game.round && !game.round.over) {
+      if (!forfeit) throw new Error("Finish the game first.");
+      var g = game.round;
+      g.over = true; g.won = false; g.forfeit = true;
+      game.lost += 1; game.net -= g.stake;
+      M().say(state, game, D().lines.forfeit);
+    }
     game.round = null;
     game.over = true;
     PC.state.addLog(state, "Liar's Dice: " + game.won + " won, " + game.lost + " lost (" + (game.net >= 0 ? "+" : "") + game.net + " gold).");
@@ -296,15 +304,15 @@
     var g = game.round;
     var lim = stakes(state, game.node);
     return {
-      opponent: game.opp.name, games: game.games, maxGames: D().GAMES_PER_SESSION, won: game.won, lost: game.lost, net: game.net,
+      opponent: game.opp.name, games: game.games, won: game.won, lost: game.lost, net: game.net, stakeStep: D().STAKE_STEP || 5,
       stakes: lim, purse: state.money.purse, sized: game.sized, marks: game.marks,
       canSize: !game.sized && !g, sizeAssess: M().assess(state, checkFor(game, D().SIZE_CHECK), COND),
       cheatAssess: M().assess(state, checkFor(game, D().CHEAT_CHECK), COND),
-      canStart: !g && game.games < D().GAMES_PER_SESSION && state.money.purse >= lim[0],
+      canStart: !g && state.money.purse >= lim[0],
       round: g ? {
         stake: g.stake, mine: g.mine, myN: g.myN, hisN: g.hisN, bid: g.bid, turn: g.turn, history: g.history.slice(),
         his: g.his.map(function (d, i) { return g.revealed || g.peeked.indexOf(i) >= 0 ? d : null; }),
-        revealed: !!g.revealed, over: !!g.over, won: g.won, caught: !!g.caught, cheated: g.cheated,
+        revealed: !!g.revealed, over: !!g.over, won: g.won, caught: !!g.caught, caughtWhy: g.caughtWhy || null, forfeit: !!g.forfeit, cheated: g.cheated,
         total: g.myN + g.hisN,
       } : null,
     };
