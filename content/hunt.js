@@ -235,7 +235,10 @@
     rally: { clean: "PLACEHOLDER: Your crew roars back at you.", partial: "PLACEHOLDER: The men steady at your shout.", setback: "PLACEHOLDER: Your shout is lost in the din." },
     hold: { clean: "PLACEHOLDER: Your crew locks shoulders and holds.", partial: "PLACEHOLDER: Your crew gives ground slowly.", setback: "PLACEHOLDER: The line buckles." },
     duel: { clean: "PLACEHOLDER: You beat their captain to his knees. His crew sees it.", partial: "PLACEHOLDER: You trade cuts with their captain until the melee pulls you apart.", setback: "PLACEHOLDER: Their captain's blade opens your arm, and his crew cheers." },
-    demand: { clean: "PLACEHOLDER: \"Throw down your arms!\" They do.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
+    // The Quartermaster's vote (§25.9, §25.15): the result is the S25 appendix's text.
+    votePre: "PLACEHOLDER: The crew want a Quartermaster of their own choosing. They'll vote before the day is out.",
+    voteResult: "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.",
+    demand: { clean: "Her crew throw down their arms. She's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
     shot: { clean: "PLACEHOLDER: Your pistol barks and a man drops.", partial: "PLACEHOLDER: Your shot goes wide.", setback: "PLACEHOLDER: Your pistol misfires." },
     strikeFirst: { clean: "You strike first: +1 on the first clash.", partial: "Neither side gets the jump.", setback: "They strike first: +1 to them on the first clash." },
     flee: "PLACEHOLDER: You break off and run.",

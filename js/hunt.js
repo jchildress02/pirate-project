@@ -76,6 +76,44 @@
     var hunter = force && force.kind === "hunter" ? force.flag || "Avalon" : G().rollHunter(state, game.waters, r);
     game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force };
     game.force = null;
+    // A vacant Quartermaster's post is filled at the next voyage event
+    // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
+    // save with the post empty is caught here too.
+    PC.officers.ensureQuartermaster(state);
+    if (PC.officers.votePending(state)) {
+      game.vote = { step: "pre", candidates: PC.officers.voteScores(state, null).map(function (x) { return { id: x.id, name: x.name }; }) };
+      game.phase = "vote";
+      M().say(state, game, L().votePre || "The crew want a Quartermaster of their own choosing. They'll vote before the day is out.");
+      return;
+    }
+    reveal(state, game);
+  }
+
+  // ---- The Vote (§25.9, the template §25.15) ------------------------------------
+  // The pre-vote beat: speak for a candidate (Order), or stay out of it.
+  function vote(state, game, speakFor) {
+    if (game.phase !== "vote" || !game.vote || game.vote.step !== "pre") throw new Error("Not the moment for that.");
+    var r = PC.officers.runVote(state, speakFor || null, M().key(state, game, "vote"));
+    game.vote.step = "result";
+    game.vote.winner = { id: r.winner.id, name: (r.winner.first + " " + (r.winner.last || "")).trim() };
+    game.vote.scores = r.scores;
+    game.vote.spokeFor = speakFor || null;
+    M().say(state, game, (L().voteResult || "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.").replace("[Officer]", game.vote.winner.name));
+    return r;
+  }
+
+  // The captain's reaction (§25.15): Congratulate (Honor), keep silent
+  // (Caution), sulk (Retreat), or loudly disagree (Defiance). The tags are
+  // recorded for the officers' approval; then the hunt goes on.
+  var VOTE_REACT = { congratulate: ["Congratulate the winner", "Honor"], silent: ["Observe and keep silent", "Caution"], sulk: ["Sulk in your cabin", "Retreat"], disagree: ["Loudly disagree with the crew's decision", "Defiance"] };
+  function voteReact(state, game, choice) {
+    if (game.phase !== "vote" || !game.vote || game.vote.step !== "result") throw new Error("Not the moment for that.");
+    var c = VOTE_REACT[choice] || VOTE_REACT.silent;
+    var w = game.vote.winner.name;
+    M().say(state, game, { congratulate: "PLACEHOLDER: You congratulate " + w + ". The crew made the right choice.", silent: "PLACEHOLDER: You watch, and keep your own counsel.",
+      sulk: "PLACEHOLDER: You retire to your cabin and sulk.", disagree: "PLACEHOLDER: You tell the crew, loudly, that they got it wrong." }[choice] || "");
+    game.lastApproval = { label: c[0], approval: [c[1]], at: game.log.length };
+    game.vote = null;
     reveal(state, game);
   }
 
@@ -143,8 +181,33 @@
 
   // ---- After the battle (§21.15, §22.7) -------------------------------------------
 
+  // The after-battle chips (A10 of the M5 playtest): chips with a merge key
+  // (k) and an amount (n) are totalled across every ship taken, one line
+  // per good or effect; tpl spells the line ({+n} signed, {n} plain;
+  // tpl1 when n is 1).
+  function mchip(icon, k, n, tpl, ink, tpl1) { return { icon: icon, k: k, n: n, tpl: tpl, tpl1: tpl1 || null, ink: ink || null, text: chipText({ n: n, tpl: tpl, tpl1: tpl1 }) }; }
+  function chipText(c) {
+    var t = c.n === 1 && c.tpl1 ? c.tpl1 : c.tpl;
+    return t.replace("{+n}", (c.n > 0 ? "+" : c.n < 0 ? "−" : "±") + Math.abs(c.n)).replace("{n}", Math.abs(c.n));
+  }
+  function mergeChips(list) {
+    var out = [], byKey = {};
+    (list || []).forEach(function (c) {
+      if (!c.k) { out.push(c); return; }
+      var m = byKey[c.k];
+      if (!m) { m = byKey[c.k] = Object.assign({}, c); out.push(m); return; }
+      m.n += c.n;
+    });
+    return out.filter(function (c) { return !c.k || c.n; }).map(function (c) {
+      if (!c.k) return c;
+      var x = Object.assign({}, c, { text: chipText(c) });
+      if (c.k === "morale") x.ink = c.n > 0 ? "good" : "bad";
+      return x;
+    });
+  }
+
   function afterBattle(state, game) {
-    var b = game.battle, chips = [];
+    var b = game.battle, chips = [], battleChips = [];
     // Hull points are whole numbers outside a battle (a part-point of
     // damage counts as a whole one).
     state.ship.hull = Math.max(0, Math.floor(state.ship.hull + 1e-9));
@@ -154,10 +217,10 @@
     var killed = b.killed.flagship || 0;
     var start = b.startCrew.flagship || 1;
     var mloss = Math.floor(100 * killed / start / 2);
-    if (mloss) { PC.crew.addMorale(state, -mloss); chips.push({ icon: "morale", text: "Morale −" + mloss + " for the dead", ink: "bad" }); }
-    if (killed) chips.push({ icon: "cond", text: plural(killed, "hand") + " killed", ink: "bad" });
+    if (mloss) { PC.crew.addMorale(state, -mloss); battleChips.push({ icon: "morale", text: "Morale −" + mloss + " for the dead", ink: "bad" }); chips.push(mchip("morale", "morale", -mloss, "Crew morale {+n}")); }
+    if (killed) battleChips.push({ icon: "cond", text: plural(killed, "hand") + " killed", ink: "bad" });
     var w = Object.keys(b.woundedTiers).reduce(function (a, k) { return a + b.woundedTiers[k]; }, 0);
-    if (w) chips.push({ icon: "cond", text: plural(w, "hand") + " wounded (aboard until the next port)" });
+    if (w) battleChips.push({ icon: "cond", text: plural(w, "hand") + " wounded (aboard until the next port)" });
     // Track the wounded by tier for the arrival (§24.9).
     var wt = (state.crew.woundedTiers = state.crew.woundedTiers || {});
     Object.keys(b.woundedTiers).forEach(function (k) { wt[k] = (wt[k] || 0) + b.woundedTiers[k]; });
@@ -170,7 +233,7 @@
         var n = 0; for (var i = 0; i < (state.crew.tiers[x[0]] || 0); i++) if (sr() < x[2]) n++;
         if (n) { state.crew.tiers[x[0]] -= n; state.crew.tiers[x[1]] = (state.crew.tiers[x[1]] || 0) + n; up += n; }
       });
-      if (up) chips.push({ icon: "morale", text: plural(up, "hand") + " seasoned a step" });
+      if (up) battleChips.push({ icon: "morale", text: plural(up, "hand") + " seasoned a step", ink: "good" });
     }
     // Records: Prize Taker at 5 captures, Duelist at 3 duels won (§14.4).
     var rec = (state.records = state.records || { prizes: 0, duels: 0 });
@@ -178,9 +241,11 @@
     rec.prizes += captured.length;
     if (rec.prizes >= H().PRIZE_TAKER_AT && state.captain.tags.indexOf("Prize Taker") < 0) { state.captain.tags.push("Prize Taker"); chips.push({ icon: "tag", text: "New tag: Prize Taker", ink: "oxblood" }); }
     if (rec.duels >= H().DUELIST_AT && state.captain.tags.indexOf("Duelist") < 0) { state.captain.tags.push("Duelist"); chips.push({ icon: "tag", text: "New tag: Duelist", ink: "oxblood" }); }
-    if (b.over === "fled") chips.push({ icon: "morale", text: "Morale −15 for running", ink: "bad" });
+    if (b.over === "fled") { battleChips.push({ icon: "morale", text: "Morale −15 for running", ink: "bad" }); chips.push(mchip("morale", "morale", H().FLEE_MORALE, "Crew morale {+n}")); }
     var hpLost = Math.max(0, b.startHull.flagship - state.ship.hull);
-    game.after = { chips: chips, queue: captured.map(function (e) { return e.id; }), current: null, repairDone: hpLost <= 0, treatDone: false, hpLost: hpLost };
+    // battleChips show once, on the first screen after the battle; chips
+    // add up into the summary (A10).
+    game.after = { chips: chips, battleChips: battleChips, battleSeen: false, queue: captured.map(function (e) { return e.id; }), current: null, repairDone: hpLost <= 0, treatDone: false, hpLost: hpLost, taken: [] };
     game.phase = "after";
     // Fleet ships lost in the fight leave the fleet.
     state.fleet = fleet(state).filter(function (f) { return !f.out; });
@@ -207,8 +272,9 @@
     if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
     var chip = { icon: "hull", text: hp ? "Repaired at sea: hull +" + hp : "No repairs at sea", ink: hp ? "good" : null };
-    a.chips.push(chip);
-    if (game.lastRoll) game.lastRoll.chips = [chip]; // shown in the roll's result box (G4)
+    a.battleSeen = true;
+    // Shown once, in the roll's result box (G4); not in the summary (A10).
+    if (game.lastRoll) game.lastRoll.chips = [chip];
   }
 
   // Treat Wounds (§21.15): a Cook aboard rolls on a Wounded captain. Clean
@@ -307,13 +373,14 @@
       var ex = canExecute(state, e);
       PC.scenes.applyEffect(state, { dread: H().EXECUTE_DREAD });
       PC.scenes.applyEffect(state, { standing: { faction: "pirates", delta: 1 } });
-      chips.push({ icon: "dread", text: "Dread +" + H().EXECUTE_DREAD + " · dead men tell no tales", ink: "bad" });
-      if (!ex.legal) { PC.crew.addMorale(state, -20); state.crew.pressure = (state.crew.pressure || 0) + 2; chips.push({ icon: "pressure", text: "You broke the Articles: morale −20", ink: "bad" }); }
+      chips.push(mchip("dread", "dread", H().EXECUTE_DREAD, "Dread {+n}", "bad"));
+      chips.push(mchip("standing", "standing:pirates", 1, "Pirates Standing {+n}", "pirates"));
+      if (!ex.legal) { PC.crew.addMorale(state, -20); state.crew.pressure = (state.crew.pressure || 0) + 2; chips.push(mchip("morale", "morale", -20, "Crew morale {+n}")); chips.push(mchip("pressure", "pressure", 2, "Pressure {+n}: you broke the Articles", "bad")); }
       M().say(state, game, "PLACEHOLDER: Her crew go over the side. Nobody will report this one.");
     } else if (crewChoice === "recruit" && cur.volunteers) {
       var room = PC.crew.berths(state);
       var n = Math.min(cur.volunteers, room);
-      if (n) { PC.crew.addHands(state, cur.volTier, n); chips.push({ icon: "morale", text: plural(n, cur.volTier + " volunteer") + " sign on" }); }
+      if (n) { PC.crew.addHands(state, cur.volTier, n); chips.push(mchip("officer", "vol:" + cur.volTier, n, "{n} " + cur.volTier + " volunteers sign on", "good", "1 " + cur.volTier + " volunteer signs on")); }
       else chips.push({ icon: "cond", text: "No berths for her volunteers" });
     }
     // Standing and Heat (§28.3, §28.6): no letter, so every prize but a
@@ -331,16 +398,19 @@
     // The ship's chest (§22.6): coin, always clean, by the Chest Article.
     var pot = state.articles && state.articles.terms.chest === "captains_chest" ? "purse" : "crew";
     state.money[pot] += loot.chest;
-    chips.push({ icon: "gold", text: "Ship's chest: " + loot.chest + " gold to " + (pot === "purse" ? "your purse" : "crew gold") });
-    // Her cargo into the pooled hold, the densest first (§22.7).
+    if (loot.chest) chips.push(mchip("gold", "chest:" + pot, loot.chest, "Ship's chest: {n} gold to " + (pot === "purse" ? "your purse" : "crew gold"), "mid"));
+    // Her cargo into the pooled hold: what the player picked (A7), or the
+    // densest first when nothing was picked (the sim, §22.7).
     var dirty = e.flag !== "Pirate";
-    var taken = loadCargo(state, loot, dirty);
-    taken.forEach(function (t) { chips.push({ icon: t.icon, text: t.text }); });
+    var taken = ch.cargo ? loadPicked(state, loot, dirty, ch.cargo) : loadCargo(state, loot, dirty);
+    // Goods leave the chip list (they were picked on the screen); provisions stay (A10).
+    taken.forEach(function (t) { if (t.prov) chips.push(mchip("prov", "prov", t.prov, "+{n} provisions")); });
+    game.after.taken = (game.after.taken || []).concat(taken.filter(function (t) { return !t.prov && t.n; }));
     if (loot.item) { state.captain.items.push(loot.item); chips.push({ icon: "item", text: "Found aboard: " + loot.item, ink: "oxblood" }); }
     // Captives (§22.7).
     if (loot.captives) {
       var cc = ch.captives || "free";
-      if (cc === "free") { state.captives = (state.captives || 0) + loot.captives; chips.push({ icon: "dgood", text: plural(loot.captives, "captive") + " aboard to be freed at a free port" }); }
+      if (cc === "free") { state.captives = (state.captives || 0) + loot.captives; chips.push(mchip("dgood", "captives", loot.captives, "{n} captives aboard, to be freed at a free port", null, "1 captive aboard, to be freed at a free port")); }
       else if (cc === "recruit") {
         var k = Math.min(Math.ceil(loot.captives / 2), PC.crew.berths(state));
         if (k) PC.crew.addHands(state, "Green", k);
@@ -350,10 +420,12 @@
     }
     // Morale for a prize: +5, or +10 at Rich or Superior; at most +10 a hunt.
     var gain = Math.min(loot.level >= 3 ? H().PRIZE_MORALE.big : H().PRIZE_MORALE.small, H().PRIZE_MORALE.cap - game.prizeMorale);
-    if (gain > 0 && !e.hunter) { game.prizeMorale += gain; PC.crew.addMorale(state, gain); chips.push({ icon: "morale", text: "Morale +" + gain }); }
+    if (gain > 0 && !e.hunter) { game.prizeMorale += gain; PC.crew.addMorale(state, gain); chips.push(mchip("morale", "morale", gain, "Crew morale {+n}")); }
     game.prizesTaken += 1;
     PC.state.addLog(state, "Took " + name + " (" + e.flag + " " + e.cls + ").");
     game.after.chips = game.after.chips.concat(chips);
+    game.after.battleSeen = true;
+    game.after.names = (game.after.names || []).concat([name]);
     game.after.lastPrize = { name: name, chips: chips };
     game.after.current = null;
     return chips;
@@ -363,7 +435,7 @@
     var out = [];
     if (e.hunter) {
       var hf = e.flag === "Avalon" ? "avalon" : e.flag === "Frisia" ? "frisia" : null;
-      if (hf && !executed) { PC.scenes.applyEffect(state, { heat: { faction: hf, delta: H().HUNTER_TAKEN_HEAT } }); out.push({ icon: "heat", text: e.flag + " Heat +" + H().HUNTER_TAKEN_HEAT, ink: hf }); }
+      if (hf && !executed) { PC.scenes.applyEffect(state, { heat: { faction: hf, delta: H().HUNTER_TAKEN_HEAT } }); out.push(mchip("heat", "heat:" + hf, H().HUNTER_TAKEN_HEAT, e.flag + " Heat {+n}", hf)); }
     } else {
       ["Avalon", "Frisia"].forEach(function (fac) {
         var side = H().SIDES[fac][e.flag];
@@ -371,8 +443,8 @@
         var kind = e.role === "War" ? "navy" : "merchant";
         var d = H().UNCOVERED[side + " " + kind], key = fac.toLowerCase();
         PC.scenes.applyEffect(state, { standing: { faction: key, delta: d[1] } });
-        out.push({ icon: "standing", text: fac + " Standing " + d[1], ink: key });
-        if (!executed) { PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } }); out.push({ icon: "heat", text: fac + " Heat +" + d[0], ink: key }); }
+        out.push(mchip("standing", "standing:" + key, d[1], fac + " Standing {+n}", key));
+        if (!executed) { PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } }); out.push(mchip("heat", "heat:" + key, d[0], fac + " Heat {+n}", key)); }
       });
     }
     // France and Sicily keep grudge counters (§22.5); Spain feeds France's.
@@ -388,20 +460,30 @@
   // Load what fits: treasure first (5 to a slot), then precious, fine and
   // bulk goods, then provisions. The rest stays in her hold.
   function loadCargo(state, loot, dirty) {
+    var pick = { treasure: loot.treasure, goods: {}, provisions: loot.provisions };
+    Object.keys(loot.goods).forEach(function (g) { pick.goods[g] = loot.goods[g]; });
+    return loadPicked(state, loot, dirty, pick);
+  }
+
+  // Load what the player picked on the prize screen (A7), within what she
+  // carries and what fits: treasure, then goods densest first, then
+  // provisions. Returns [{ what, n, dirty, left, icon, text }].
+  function loadPicked(state, loot, dirty, pick) {
     var out = [];
     var k = dirty ? "dirty" : "clean";
-    var room = PC.crew.treasureRoom(state);
-    var t = Math.min(loot.treasure, room);
-    if (t > 0) { state.cargo.treasure[k] += t; out.push({ icon: "treasure", text: t + " " + (dirty ? "dirty " : "") + "treasure" + (t < loot.treasure ? " (" + (loot.treasure - t) + " left behind: the hold is full)" : "") }); }
-    else if (loot.treasure) out.push({ icon: "treasure", text: loot.treasure + " treasure left behind: the hold is full" });
+    var want = Math.max(0, Math.min(loot.treasure || 0, Math.floor(pick.treasure || 0)));
+    var t = Math.min(want, PC.crew.treasureRoom(state));
+    if (t > 0) state.cargo.treasure[k] += t;
+    if (loot.treasure) out.push({ what: "treasure", n: t, dirty: dirty, left: loot.treasure - t, icon: "treasure", text: t + " " + (dirty ? "dirty " : "") + "treasure" + (t < loot.treasure ? " (" + (loot.treasure - t) + " left behind)" : "") });
     var goods = Object.keys(loot.goods).sort(function (a, b) { return PC.data.goods[b].base - PC.data.goods[a].base; });
     goods.forEach(function (g) {
-      var n = Math.min(loot.goods[g], PC.crew.slotsFree(state));
-      if (n > 0) { PC.crew.addGood(state, g, n, dirty); out.push({ icon: "treasure", text: n + " " + (dirty ? "dirty " : "") + g + (n < loot.goods[g] ? " (" + (loot.goods[g] - n) + " left behind)" : "") }); }
-      else out.push({ icon: "treasure", text: loot.goods[g] + " " + g + " left behind: the hold is full" });
+      var w = Math.max(0, Math.min(loot.goods[g], Math.floor((pick.goods || {})[g] || 0)));
+      var n = Math.min(w, PC.crew.slotsFree(state));
+      if (n > 0) PC.crew.addGood(state, g, n, dirty);
+      out.push({ what: g, n: n, dirty: dirty, left: loot.goods[g] - n, icon: "treasure", text: n + " " + (dirty ? "dirty " : "") + g + (n < loot.goods[g] ? " (" + (loot.goods[g] - n) + " left behind)" : "") });
     });
-    var p = Math.min(loot.provisions, PC.crew.slotsFree(state));
-    if (p > 0) { state.provisions += p; out.push({ icon: "prov", text: "+" + p + " provisions" }); }
+    var p = Math.min(loot.provisions || 0, Math.max(0, Math.floor(pick.provisions || 0)), PC.crew.slotsFree(state));
+    if (p > 0) { state.provisions += p; out.push({ what: "provisions", prov: p, n: p, icon: "prov", text: "+" + p + " provisions" }); }
     return out;
   }
 
@@ -427,7 +509,10 @@
       if (!o) throw new Error("Needs an officer to captain her.");
       o.aboard = rec.id;
       rec.officer = o.id;
-      PC.officers.ensureQuartermaster(state);
+      // A fleet command vacates the Quartermaster's post (§25.9): the
+      // Acting Quartermaster holds the seat until the next vote (A4).
+      if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
+      else PC.officers.ensureQuartermaster(state);
     }
     fleet(state).push(rec);
     return rec;
@@ -542,16 +627,26 @@
     var qm = PC.officers.quartermaster ? PC.officers.quartermaster(state) : null;
     return {
       phase: game.phase, apUsed: game.apUsed, apLeft: state.ap.left, maxAp: H().MAX_AP,
+      vote: game.vote || null, lastApproval: game.lastApproval || null,
       batch: game.batch ? { n: game.batch.n, next: game.batch.next } : null,
       waters: H().WATERS[game.waters].name, scout: sv, advice: advice(state, game, sv), qm: qm ? qm.first || qm.full : null,
       battle: game.battle && game.phase === "battle" ? C().view(state, game) : null,
       after: game.after ? {
-        chips: game.after.chips, repairDone: game.after.repairDone, hpLost: game.after.hpLost, repairCheck: repairCheck(state),
+        chips: game.after.chips, summary: mergeChips(game.after.chips), battleChips: game.after.battleSeen ? [] : (game.after.battleChips || []),
+        taken: mergeTaken(game.after.taken || []), names: game.after.names || [],
+        repairDone: game.after.repairDone, hpLost: game.after.hpLost, repairCheck: repairCheck(state),
         prize: cur ? prizeView(state, game, cur) : null, lastPrize: game.after.lastPrize || null, left: game.after.queue.length,
       } : null,
       canContinue: canContinue(state, game), prizesTaken: game.prizesTaken, gameOver: game.gameOver || null,
       holdFree: PC.crew.slotsFree(state), holdMax: PC.crew.holdCapacity(state),
     };
+  }
+
+  // Cargo taken across every ship, one line a good (A10): 50 + 25 tobacco = 75.
+  function mergeTaken(list) {
+    var by = {}, out = [];
+    list.forEach(function (t) { var key = t.what + (t.dirty ? "|d" : ""); if (!by[key]) { by[key] = { what: t.what, n: 0, dirty: t.dirty }; out.push(by[key]); } by[key].n += t.n; });
+    return out.filter(function (t) { return t.n; });
   }
 
   function prizeView(state, game, cur) {
@@ -560,8 +655,14 @@
       id: e.id, cls: e.cls, name: e.name, flag: e.flag, role: e.role, captain: e.captain, title: e.title, level: H().LEVELS[l.level],
       hull: Math.round(e.hull), hullMax: e.hullMax, guns: e.guns, crew: e.crew, crewMin: e.crewMin, cargo: e.cargo,
       treasure: l.treasure, goods: l.goods, provisions: l.provisions, chest: l.chest, captives: l.captives,
-      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), hullOptions: hullOptions(state, game),
+      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), hullOptions: hullOptions(state, game).map(function (o) {
+        // Keeping her hull adds her hold to the pool before her cargo comes across (A7).
+        o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
+        return o;
+      }),
       dirty: e.flag !== "Pirate",
+      // The hold as it stands, for the cargo picker's stacked bar (A7, B42).
+      hold: { cap: PC.crew.holdCapacity(state), provisions: state.provisions, goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), per: PC.data.economy.TREASURE_PER_SLOT },
     };
   }
 
@@ -578,16 +679,19 @@
     o.aboard = id; o.joined = { year: state.time.year, season: state.time.season };
     state.officers.push(o);
     var crew = Math.max(c.crewMin, Math.round(c.crewMax * 0.6));
-    fleet(state).push({ id: id, kind: "fleet", cls: cls, name: PC.huntGen && (PC.data.names.SHIPS.pirate[(state.world.shipSeq * 7) % PC.data.names.SHIPS.pirate.length]),
+    var pool = PC.data.names.SHIPS.pirate, taken = [state.ship.name].concat(fleet(state).map(function (f) { return f.name; }));
+    var nm = null;
+    for (var i = 0; i < pool.length && (!nm || taken.indexOf(nm) >= 0); i++) nm = pool[(state.world.shipSeq * 7 + i) % pool.length];
+    fleet(state).push({ id: id, kind: "fleet", cls: cls, name: nm,
       flag: "Pirate", role: c.role, size: c.size, hull: c.hull, hullMax: c.hull, guns: c.guns, gunsMax: c.guns, crew: crew, crewMin: c.crewMin,
       crewMax: c.crewMax, cargo: c.cargo, speed: c.speed, handling: c.handling, officer: o.id, dirty: false, crewTiers: { Able: crew }, wounded: 0, dev: true });
     return { ship: cls, officer: o.first + " " + (o.last || "") };
   }
 
   PC.hunt = {
-    canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter,
+    canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
-    loadCargo: loadCargo, currentPrize: currentPrize,
+    loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
   };
 })();

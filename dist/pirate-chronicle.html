@@ -560,6 +560,28 @@ button.big { font-size: 22px; padding: 12px 30px; }
 .say .effects { margin-top: 8px; }
 /* Popups sit above the menus (the Ship menu's warnings, G7). */
 .modal.popup { z-index: 40; }
+/* Dirty goods and hulls (B44): oxblood name, a black spot after it. */
+.dirty { color: var(--oxblood); cursor: help; }
+.dirty .spot { color: #1a120b; font-size: .8em; }
+/* The stacked hold bar (A7, A8). */
+.holdbar { display: flex; height: 18px; max-width: 680px; border: 1px solid #6b5030; background: rgba(255,251,238,.6); margin: 6px 0 4px; overflow: hidden; }
+.holdbar i { display: block; height: 100%; }
+.holdbar i.new { background-image: repeating-linear-gradient(45deg, rgba(255,251,238,.55) 0 3px, transparent 3px 7px); }
+.holdkey { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 15.5px; color: var(--faded); }
+.holdkey b { display: inline-block; width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; border: 1px solid #6b5030; }
+.holdkey .over { color: var(--bad); font-style: normal; }
+/* Collapsed cards (merchants, B46; her full stats, A12). */
+details.card2 { border: 1px solid var(--rule); background: rgba(255,251,238,.5); margin: 10px 0; max-width: 760px; }
+details.card2 > summary { cursor: pointer; padding: 10px 14px; list-style: none; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+details.card2 > summary::-webkit-details-marker { display: none; }
+details.card2 > summary .caret { width: 12px; height: 12px; transition: transform .2s; }
+details.card2[open] > summary .caret { transform: rotate(180deg); }
+details.card2 > .inner { padding: 0 14px 12px; }
+details.stats { margin: 2px 0 0; font-size: 15.5px; }
+details.stats > summary { cursor: pointer; color: var(--faded); font-style: italic; }
+.fleetship { border: 1px solid var(--rule); background: rgba(255,251,238,.55); padding: 8px 12px; margin: 8px 0; max-width: 760px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.fleetship .pmain { flex: 1; min-width: 240px; }
+.pickrow td { vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -1749,6 +1771,106 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     PC.state.addLog(state, "Jettisoned " + n + " " + (what === "treasure" ? (dirty ? "dirty " : "clean ") + "treasure" : what) + ".");
   }
 
+  // What each ship adds to the pooled hold (A8 of the M5 playtest).
+  function holdByShip(state) {
+    var out = [{ id: "flagship", name: state.ship.name, cls: state.ship.type, kind: "flagship", cargo: state.ship.cargo }];
+    (state.fleet || []).forEach(function (f) { if (!f.out) out.push({ id: f.id, name: f.name || f.cls, cls: f.cls, kind: f.kind, cargo: f.cargo || 0, dirty: !!f.dirty }); });
+    return out;
+  }
+
+  // What would go over the side to free `slots` of hold space (A9). The
+  // cheapest goods go first, then provisions, then treasure (DEFAULT, the
+  // M5 playtest patch). Returns [{ what, n, dirty }]; changes nothing.
+  function jettisonPlan(state, slots) {
+    var plan = [];
+    if (slots <= 0) return plan;
+    var goods = [];
+    Object.keys(state.cargo.goods).forEach(function (g) {
+      var e = state.cargo.goods[g], base = (PC.data.goods[g] || {}).base || 0;
+      if (e.clean) goods.push({ what: g, n: e.clean, dirty: false, base: base });
+      if (e.dirty) goods.push({ what: g, n: e.dirty, dirty: true, base: base });
+    });
+    goods.sort(function (a, b) { return a.base - b.base || (a.dirty ? -1 : 1); });
+    goods.forEach(function (g) { if (slots <= 0) return; var k = Math.min(g.n, slots); plan.push({ what: g.what, n: k, dirty: g.dirty }); slots -= k; });
+    if (slots > 0 && state.provisions) { var p = Math.min(state.provisions, slots); plan.push({ what: "provisions", n: p, dirty: false }); slots -= p; }
+    if (slots > 0) {
+      var per = E().TREASURE_PER_SLOT, t = state.cargo.treasure;
+      // Treasure packs five to a slot: freeing a slot can take up to five units.
+      ["dirty", "clean"].forEach(function (k) {
+        if (slots <= 0 || !t[k]) return;
+        var units = Math.min(t[k], slots * per);
+        plan.push({ what: "treasure", n: units, dirty: k === "dirty" });
+        slots -= Math.ceil(units / per);
+      });
+    }
+    return plan;
+  }
+
+  // Throw what no longer fits over the side (after a hull is sold, A9).
+  function jettisonOverflow(state) {
+    var over = slotsUsed(state) - holdCapacity(state);
+    if (over <= 0) return [];
+    var plan = jettisonPlan(state, over);
+    plan.forEach(function (x) { jettison(state, x.what, x.n, x.dirty); });
+    return plan;
+  }
+
+  // Pay a sum the crew owes as a crew: crew gold first, any shortfall from
+  // the captain's purse automatically (B45 of the M5 playtest, replacing the
+  // optional purse gift of §24.9). Returns { crew, purse, short }: what each
+  // pot paid, and what neither could cover (nothing is taken then).
+  function payFrom(state, amount, partial) {
+    amount = Math.max(0, Math.round(amount));
+    var have = state.money.crew + state.money.purse;
+    if (have < amount && !partial) return { crew: 0, purse: 0, short: amount - have };
+    var fromCrew = Math.min(state.money.crew, amount);
+    var fromPurse = Math.min(state.money.purse, amount - fromCrew);
+    state.money.crew -= fromCrew;
+    state.money.purse -= fromPurse;
+    return { crew: fromCrew, purse: fromPurse, short: amount - fromCrew - fromPurse };
+  }
+  function canPay(state, amount) { return state.money.crew + state.money.purse >= amount; }
+
+  // ---- Moving hands between your own ships (A3 of the M5 playtest) ---------
+  // Between the flagship and fleet ships only: a prize ship keeps exactly
+  // her minimum crew until she's sold. Free (no action) whenever no battle
+  // is being fought. The greenest hands move first (DEFAULT).
+  function shipCrew(state, id) {
+    if (id === "flagship") return { id: id, crew: state.crew.count, wounded: state.crew.wounded || 0, min: state.ship.crewMin || 5, max: state.ship.crewMax, tiers: state.crew.tiers };
+    var f = (state.fleet || []).filter(function (x) { return x.id === id && !x.out; })[0];
+    if (!f) return null;
+    f.crewTiers = f.crewTiers || { Green: f.crew };
+    return { id: id, crew: f.crew, wounded: f.wounded || 0, min: f.crewMin, max: f.crewMax, tiers: f.crewTiers, kind: f.kind, rec: f };
+  }
+  function canMoveHands(state, from, to) {
+    var g = state.minigame;
+    if (g && g.kind === "hunt" && g.phase === "battle") return { ok: false, why: "Not during a battle", max: 0 };
+    var a = shipCrew(state, from), b = shipCrew(state, to);
+    if (!a || !b || from === to) return { ok: false, why: "No such ship", max: 0 };
+    if ((a.kind && a.kind !== "fleet") || (b.kind && b.kind !== "fleet")) return { ok: false, why: "A prize ship keeps her minimum crew until she's sold", max: 0 };
+    var max = Math.min(a.crew - a.min, b.max - b.crew - b.wounded);
+    if (max <= 0) return { ok: false, why: a.crew - a.min <= 0 ? "She can't spare a hand" : "No berths free", max: 0 };
+    return { ok: true, max: max };
+  }
+  function moveHands(state, from, to, n) {
+    n = Math.floor(n);
+    var c = canMoveHands(state, from, to);
+    if (!c.ok) throw new Error(c.why);
+    if (n <= 0) throw new Error("Move at least one hand.");
+    n = Math.min(n, c.max);
+    var a = shipCrew(state, from), b = shipCrew(state, to), moved = {};
+    E().TIER_ORDER.forEach(function (t) {
+      var k = Math.min(n, a.tiers[t] || 0);
+      if (!k) return;
+      a.tiers[t] -= k; b.tiers[t] = (b.tiers[t] || 0) + k; moved[t] = k; n -= k;
+    });
+    var total = Object.keys(moved).reduce(function (s, t) { return s + moved[t]; }, 0);
+    if (from === "flagship") state.crew.count -= total; else a.rec.crew -= total;
+    if (to === "flagship") state.crew.count += total; else b.rec.crew += total;
+    PC.state.addLog(state, "Moved " + total + " hand" + (total === 1 ? "" : "s") + " to " + (to === "flagship" ? "the flagship" : "the " + (b.rec.name || b.rec.cls)) + ".");
+    return { n: total, tiers: moved };
+  }
+
   // ---- Joining and leaving -------------------------------------------------
 
   // New hands join at the crew's morale or 50 + the floor, whichever is
@@ -1922,6 +2044,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     addGood: addGood,
     removeGood: removeGood,
     jettison: jettison,
+    holdByShip: holdByShip,
+    jettisonPlan: jettisonPlan,
+    jettisonOverflow: jettisonOverflow,
+    payFrom: payFrom,
+    canPay: canPay,
+    shipCrew: shipCrew,
+    canMoveHands: canMoveHands,
+    moveHands: moveHands,
     addHands: addHands,
     removeHands: removeHands,
     berths: berths,
@@ -2659,6 +2789,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return { ok: true, hull: hull, guns: guns, total: hull + guns, dirty: dirty, repair: repair };
   }
 
+  // What selling her does to the pooled hold (A9): the space she takes
+  // away, and what would go over the side if the rest no longer fits.
+  function hullSaleHold(state, fid) {
+    var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
+    if (!f) return null;
+    var cap = PC.crew.holdCapacity(state), used = PC.crew.slotsUsed(state), after = cap - (f.cargo || 0);
+    var over = Math.max(0, used - after);
+    return { capBefore: cap, capAfter: after, used: used, loses: f.cargo || 0, over: over, plan: PC.crew.jettisonPlan(state, over) };
+  }
+
   function sellHull(state, fid) {
     var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
     if (!f) throw new Error("No such ship.");
@@ -2678,9 +2818,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (k) { state.crew.tiers[t] = (state.crew.tiers[t] || 0) + k; state.crew.count += k; home += k; }
       if (n - k) { paid += n - k; }
     });
-    if (paid) state.money.crew = Math.max(0, state.money.crew - paid * each);
+    var paidOff = paid ? PC.crew.payFrom(state, paid * each, true) : { crew: 0, purse: 0 };
+    // What no longer fits in the smaller hold goes over the side (A9).
+    var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
-    return { gold: p.total, home: home, paid: paid, payEach: each, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
@@ -2849,11 +2991,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (n <= 0) throw new Error("Pay off at least one hand.");
     var each = PC.crew.payOffEach(state);
     var cost = each * n;
-    if (state.money.crew < cost) throw new Error("Needs " + cost + " crew gold (" + each + " a hand).");
+    // Crew gold first, then the purse (B45 of the M5 playtest).
+    if (!PC.crew.canPay(state, cost)) throw new Error("Needs " + cost + " gold (" + each + " a hand), and crew gold and your purse together fall short.");
     PC.crew.removeHands(state, tier, n);
-    state.money.crew -= cost;
-    PC.state.addLog(state, "Paid off " + n + " " + tier + " hand" + (n > 1 ? "s" : "") + " at " + each + " each (" + cost + " crew gold).");
-    return { n: n, cost: cost, each: each, line: L.paidOff.replace("[number]", n) };
+    var paid = PC.crew.payFrom(state, cost);
+    PC.state.addLog(state, "Paid off " + n + " " + tier + " hand" + (n > 1 ? "s" : "") + " at " + each + " each (" + cost + " gold" + (paid.purse ? ", " + paid.purse + " of it from your purse" : "") + ").");
+    return { n: n, cost: cost, each: each, fromCrew: paid.crew, fromPurse: paid.purse, line: L.paidOff.replace("[number]", n) };
   }
 
   // ---- The arrival and the port fee (§17.1, §20.4, §24.9) ---------------------
@@ -2864,25 +3007,25 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return Math.round(nd.portFeeBase * state.ship.size * standingBand(state, nd.faction).fee);
   }
 
-  // The harbor due and its shortfall (§17.2). The crew gold on hand pays
-  // what it can; the rest is waived by a leader at Friend or better, or
-  // taken in kind at the provisioner's prices: clean treasure, dirty
-  // treasure, goods (clean before dirty), provisions. With nothing left: a
-  // night in the stocks, 1 AP lost (placeholder until jail exists).
-  // Taking the gold on hand first is this build's reading (flagged).
+  // The harbor due and its shortfall (§17.2). Crew gold pays first and
+  // the captain's purse covers any shortfall automatically (B45 of the M5
+  // playtest); only if both together fall short is the rest waived by a
+  // leader at Friend or better, or taken in kind at the provisioner's
+  // prices: clean treasure, dirty treasure, goods (clean before dirty),
+  // provisions. With nothing left: a night in the stocks, 1 AP lost
+  // (placeholder until jail exists).
   function payPortFee(state, id) {
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
     var fee = portFee(state, id);
-    if (state.money.crew >= fee) {
-      state.money.crew -= fee;
-      return { fee: fee, paid: fee, lines: [L.duePaid + " (" + fee + " gold)"] };
+    var pay = PC.crew.payFrom(state, fee, true);
+    if (!pay.short) {
+      return { fee: fee, paid: fee, fromCrew: pay.crew, fromPurse: pay.purse, lines: [L.duePaid + " (" + fee + " gold)"] };
     }
-    var paid = state.money.crew;
-    state.money.crew = 0;
-    var short = fee - paid;
+    var paid = pay.crew + pay.purse;
+    var short = pay.short;
     if (nd.dueWaivedBy && PC.npcs.rung(state, nd.dueWaivedBy) >= 2) {
-      return { fee: fee, paid: paid, waived: short, lines: [L.dueWaived] };
+      return { fee: fee, paid: paid, fromCrew: pay.crew, fromPurse: pay.purse, waived: short, lines: [L.dueWaived] };
     }
     var taken = [];
     function takeUnits(label, have, price, remove) {
@@ -2909,7 +3052,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       lines.push(L.stocks);
     }
     PC.state.addLog(state, "Couldn't pay the harbor due in full" + (taken.length ? "; they took " + taken.join(", ") : "") + (short > 0 ? "; a night in the stocks (1 action lost)" : "") + ".");
-    return { fee: fee, paid: paid, taken: taken, stocks: short > 0, lines: lines };
+    return { fee: fee, paid: paid, fromCrew: pay.crew, fromPurse: pay.purse, taken: taken, stocks: short > 0, lines: lines };
   }
 
   // Every arrival (a hunt's return counts): the wounded, the maimed, the
@@ -2918,7 +3061,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     opts = opts || {};
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
-    var lines = [];
+    var lines = [], payChips = [];
     if (opts.fromHunt) lines.push(L.back);
     var c = state.crew;
     if (c.wounded > 0) {
@@ -2943,11 +3086,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         var comp = PC.crew.articleOption(state, "compensation");
         var each = Math.max(comp.min, Math.round(PC.crew.oneShare(state) * comp.shares));
         var cost = each * maimed;
-        if (state.money.crew >= cost) {
-          state.money.crew -= cost;
+        // Crew gold first, then the purse (B45); only if both fall short
+        // is it a breach of the Articles.
+        if (PC.crew.canPay(state, cost)) {
+          var mp = PC.crew.payFrom(state, cost);
           lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + cost + " gold)");
+          payChips.push(payChip("The maimed paid off", cost, mp));
         } else {
-          state.money.crew = 0;
+          var part = PC.crew.payFrom(state, cost, true);
+          payChips.push(payChip("The maimed, part paid", part.crew + part.purse, part, true));
           PC.crew.addMorale(state, -20);
           c.pressure += 2;
           lines.push(L.maimed.replace(/\[number\]/i, maimed) + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
@@ -2964,8 +3111,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Holdings come after the prototype.
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
-    state.location.popup = { title: "Arrival at " + nd.name, lines: lines };
+    if (fee.paid) payChips.push(payChip("Harbor due", fee.paid, { crew: fee.fromCrew || 0, purse: fee.fromPurse || 0 }, fee.paid < fee.fee));
+    // The popup's chips say which pot paid (B45).
+    var chips = lines.map(function (l) { return { icon: "port", text: l }; }).concat(payChips);
+    state.location.popup = { title: "Arrival at " + nd.name, lines: lines, chips: chips };
     return state.location.popup;
+  }
+
+  // "Harbor due 40 gold: 30 crew gold, 10 from your purse"
+  function payChip(what, total, p, bad) {
+    var parts = [];
+    if (p.crew) parts.push(p.crew + " crew gold");
+    if (p.purse) parts.push(p.purse + " from your purse");
+    return { icon: "gold", text: what + " " + total + " gold" + (parts.length ? ": " + parts.join(", ") : ""), ink: bad || p.purse ? "bad" : "mid" };
   }
 
   PC.node = {
@@ -2973,6 +3131,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     keeperQuestions: keeperQuestions,
     hullSalePrice: hullSalePrice,
     sellHull: sellHull,
+    hullSaleHold: hullSaleHold,
     stripGuns: stripGuns,
     askKeeperQuestion: askKeeperQuestion,
     haggleCheck: haggleCheck,
@@ -3835,7 +3994,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     state.money.crew -= paid;
     o.gone = true;
     o.left = "dismissed";
-    if (o.quartermaster) o.quartermaster = false; // the vote waits for the voyage events
+    if (o.quartermaster) { o.quartermaster = false; vacate(state); } // the vote waits for the next voyage event (§25.9)
     if (o.id === "davey") state.flags.davey_at_tavern = true;
     var line = o.id === "davey" ? PC.data.namedOfficers.davey.dismissal : (o.mentor ? (L().dismissal[o.voice] || "") : (L().dismissal[o.voice] || ""));
     PC.state.addLog(state, (o.first + " " + (o.last || "")).trim() + " is dismissed, with " + paid + " crew gold.");
@@ -3851,25 +4010,109 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // crew under the same name; if the officers all leave, he's re-elected.
   function onFlagship(state) { return aboard(state).filter(function (o) { return (o.aboard || "flagship") === "flagship"; }); }
 
+  // A playtest ruling (A4 of the M5 playtest): between a vacancy and the
+  // crew's vote at the next voyage event, the Acting Quartermaster holds
+  // the seat and gives the advice panel, even with officers aboard
+  // (actingQM.pending). With no officers aboard at all he is simply the
+  // crew's pick; an officer who joins then wins outright (§25.15).
+  function actingRecord(state) {
+    if (!state.actingQM) {
+      var rec = PC.npcs.generate(state, { id: "acting_qm", role: "Sailor", pool: "master", node: null, key: state.world.seed + "|acting-qm", persistent: false });
+      state.actingQM = { first: rec.first, last: rec.last || "", full: rec.full || (rec.first + " " + (rec.last || "")).trim(), gender: rec.gender || "m", active: false };
+    }
+    return state.actingQM;
+  }
+
+  // The post falls vacant (a fleet command, a dismissal): the Acting
+  // Quartermaster steps in until the vote.
+  function vacate(state) {
+    var aq = actingRecord(state);
+    aq.pending = true;
+    ensureQuartermaster(state);
+  }
+
   function ensureQuartermaster(state, winner) {
     var ab = onFlagship(state), aq = state.actingQM;
+    if (ab.some(function (o) { return o.quartermaster; })) {
+      if (aq) { aq.active = false; aq.pending = false; }
+      return null;
+    }
+    aq = actingRecord(state);
     if (!ab.length) {
-      if (!aq) {
-        var rec = PC.npcs.generate(state, { id: "acting_qm", role: "Sailor", pool: "master", node: null, key: state.world.seed + "|acting-qm", persistent: false });
-        aq = state.actingQM = { first: rec.first, last: rec.last || "", full: rec.full || (rec.first + " " + (rec.last || "")).trim(), gender: rec.gender || "m", active: false };
-      }
+      aq.pending = false;
       if (!aq.active) { aq.active = true; PC.state.addLog(state, "With no officers aboard, the crew elects " + aq.full + " their Acting Quartermaster."); }
       return aq;
     }
-    if (aq && aq.active) {
+    if (aq.active && !aq.pending) {
       aq.active = false;
-      if (!ab.some(function (o) { return o.quartermaster; })) {
-        var w = winner && ab.indexOf(winner) >= 0 ? winner : ab[0];
-        w.quartermaster = true;
-        PC.state.addLog(state, "The crew vote: " + (w.first + " " + (w.last || "")).trim() + " is your Quartermaster now, and " + aq.full + " goes back to the crew.");
-      }
+      var w = winner && ab.indexOf(winner) >= 0 ? winner : ab[0];
+      w.quartermaster = true;
+      PC.state.addLog(state, "The crew vote: " + (w.first + " " + (w.last || "")).trim() + " is your Quartermaster now, and " + aq.full + " goes back to the crew.");
+      return null;
     }
-    return null;
+    // Officers aboard, no Quartermaster: the seat is vacant until the vote.
+    aq.pending = true;
+    if (!aq.active) { aq.active = true; PC.state.addLog(state, "The Quartermaster's post is vacant: " + aq.full + " holds the seat until the crew votes."); }
+    return aq;
+  }
+
+  // ---- The Vote (§25.9, the template §25.15) -------------------------------
+  var VOTE_POINTS = { "Jovial": 3, "Kindly": 3, "Old Salt": 3, "Penny-Pincher": 3,
+    "Shanty-Singer": 2, "Yarn-Spinner": 2, "Daredevil": 2, "Prankster": 2, "Frightening": 2, "By-the-Book": 2, "Ambitious": 2, "Schemer": 2,
+    "Eager": 1, "Sot": 1, "Gossip": 1, "Devout": 1, "Godless": 1, "Superstitious": 1, "Bloodthirsty": 1, "Grudge-Keeper": 1, "Proud": 1,
+    "Paranoid": 0, "Secretive": 0, "Lonesome": 0 };
+
+  function votePending(state) {
+    var aq = state.actingQM;
+    return !!(aq && aq.active && aq.pending && onFlagship(state).length);
+  }
+
+  // Speaking for a candidate before the vote (Order): +2 at Eager or
+  // Devoted, +1 at Steady, -1 at Sullen or Mutinous.
+  function speakBonus(state) {
+    var b = PC.crew.band(state.crew.morale);
+    return b === "Eager" || b === "Devoted" ? 2 : b === "Steady" ? 1 : -1;
+  }
+
+  function seasonsAboard(state, o) {
+    var j = o.joined || { year: 1754, season: 0 };
+    return (state.time.year - j.year) * 4 + (state.time.season - j.season);
+  }
+
+  // Each flagship officer's score: voice + secondary trait points, Mentor
+  // +2, +1 a full year aboard, a mutinous officer +3 while morale is
+  // Sullen or worse, and the captain's word if he spoke for them.
+  function voteScores(state, speakFor) {
+    var band = PC.crew.band(state.crew.morale), angry = band === "Sullen" || band === "Mutinous";
+    return onFlagship(state).map(function (o) {
+      var parts = [];
+      [o.voice, o.secondary].forEach(function (t) { if (t && VOTE_POINTS[t]) parts.push({ label: t, value: VOTE_POINTS[t] }); });
+      if (o.mentor) parts.push({ label: "Mentor", value: 2 });
+      var years = Math.floor(seasonsAboard(state, o) / 4);
+      if (years > 0) parts.push({ label: years + " year" + (years === 1 ? "" : "s") + " aboard", value: years });
+      var mutinous = o.rung <= PC.npcs.RUNG_VALUE.Enemy || (o.rung <= PC.npcs.RUNG_VALUE.Rival && (state.crew.pressure || 0) >= 3);
+      if (mutinous && angry) parts.push({ label: "The angry crew's man", value: 3 });
+      if (speakFor && speakFor === o.id) parts.push({ label: "You spoke for " + (o.gender === "f" ? "her" : "him"), value: speakBonus(state) });
+      return { id: o.id, name: (o.first + " " + (o.last || "")).trim(), first: o.first, score: parts.reduce(function (a, x) { return a + x.value; }, 0), parts: parts,
+        schemer: o.voice === "Schemer" || o.secondary === "Schemer", aboard: seasonsAboard(state, o) };
+    });
+  }
+
+  // Run the vote: highest wins; a Schemer wins every tie, then the officer
+  // aboard longest, then a seeded coin.
+  function runVote(state, speakFor, key) {
+    var scores = voteScores(state, speakFor);
+    if (!scores.length) return null;
+    var r = PC.rng.fromKey(key || [state.world.seed, PC.state.stamp(state), "qm-vote"].join("|"));
+    scores.forEach(function (x) { x.coin = r(); });
+    scores.sort(function (a, b) { return b.score - a.score || (b.schemer ? 1 : 0) - (a.schemer ? 1 : 0) || b.aboard - a.aboard || b.coin - a.coin; });
+    var w = onFlagship(state).filter(function (o) { return o.id === scores[0].id; })[0];
+    onFlagship(state).forEach(function (o) { o.quartermaster = false; });
+    w.quartermaster = true;
+    var aq = state.actingQM;
+    if (aq) { aq.active = false; aq.pending = false; }
+    PC.state.addLog(state, "The crew vote: " + scores[0].name + " is your Quartermaster" + (aq ? ", and " + aq.full + " goes back to the crew" : "") + ".");
+    return { winner: w, scores: scores };
   }
 
   // Who speaks as Quartermaster: the officer, or the Acting Quartermaster.
@@ -3941,6 +4184,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   PC.officers = {
     ensureQuartermaster: ensureQuartermaster,
+    vacate: vacate,
+    votePending: votePending,
+    voteScores: voteScores,
+    runVote: runVote,
+    speakBonus: speakBonus,
     quartermaster: quartermaster,
     FEE: FEE,
     aboard: aboard,
@@ -6346,7 +6594,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return group(state, ships, shape, false, r);
   }
 
+  // Escorts, convoys and your own fleet never share a name with another
+  // ship in the same group (A13 of the M5 playtest): a clash rerolls.
   function group(state, ships, shape, hunter, r) {
+    var taken = {};
+    [state.ship && state.ship.name].concat((state.fleet || []).map(function (f) { return f.name; })).forEach(function (n) { if (n) taken[n] = true; });
+    ships.forEach(function (s) {
+      for (var i = 0; i < 12 && s.name && taken[s.name]; i++) s.name = shipName(state, s.flag, s.role, r);
+      if (s.name && taken[s.name]) s.name = null; // a nameless ship rather than a twin
+      if (s.name) taken[s.name] = true;
+    });
     return { ships: ships, shape: shape, hunter: hunter };
   }
 
@@ -6716,10 +6973,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // An enemy leaves the fight: struck, captured (crew broken, knocked out),
   // sunk or escaped. Triggers the convoy and flagship strike rolls (§21.13).
-  function knockOut(state, game, b, e, how) {
+  function knockOut(state, game, b, e, how, quiet) {
     if (e.out) return;
     e.out = how;
-    if (how === "struck" || how === "captured") say(state, game, how === "struck" ? L().struck : L().crewBroken);
+    if (!quiet && (how === "struck" || how === "captured")) say(state, game, how === "struck" ? L().struck : L().crewBroken);
     if (how === "sunk") say(state, game, L().knockedOut.sunk);
     var taken = how === "struck" || how === "captured" || how === "sunk";
     if (!taken) return;
@@ -6952,7 +7209,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (b.step !== "posChoice") throw new Error("Not the moment for that.");
     if (what === "rake") b.exMod = 2;
     else if (what === "open") { b.exMod = 0; b.openRange = true; }
-    else if (what === "close") { b.closeBonus = 1; afterBeat(state, game); if (!b.over) b.step = "grapple"; return; }
+    // Closing for boarding rolls the grapple at once (B37 of the M5 playtest).
+    else if (what === "close") { b.closeBonus = 1; afterBeat(state, game); if (!b.over && b.step !== "retarget") { b.step = "grapple"; return doGrapple(state, game); } return; }
     afterBeat(state, game);
     if (!b.over && b.step !== "retarget") b.step = "exchange";
   }
@@ -7091,7 +7349,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       return toStrikeFirst(state, game);
     }
     if (intent === "board") { say(state, game, L().enemyBoards); b.step = "repel"; return; }
-    if (what === "board") { b.step = "grapple"; return; }
+    // Board her rolls the grapple directly: it's the only step after Board
+    // (§21.12; B37 of the M5 playtest).
+    if (what === "board") { b.step = "grapple"; return doGrapple(state, game); }
     startRound(state, game);
   }
 
@@ -7320,8 +7580,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       } else if (p.outcome === "partial") say(state, game, L().duel.partial);
       else { say(state, game, L().duel.setback); PC.scenes.applyEffect(state, { tag: "Wounded", untilSeasonEnd: true }); bd.enemyNext += 1; }
     } else if (id === "demand") {
+      // A clean demand shows only the surrender line (B40 of the M5 playtest).
       say(state, game, L().demand[p.outcome]);
-      if (p.outcome === "clean") { e.demanded = true; knockOut(state, game, b, e, "struck"); return afterBoardingOut(state, game); }
+      if (p.outcome === "clean") { e.demanded = true; knockOut(state, game, b, e, "struck", true); return afterBoardingOut(state, game); }
       e.refusedDemand = true; // the Quarter Asked Article's test (§22.7)
       if (p.outcome === "partial") shake(e, 1);
     }
@@ -7499,6 +7760,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (b.step === "position") v.check = positionCheck(state, b);
     if (b.step === "exchange") v.exchange = exchangeEdge(state, b);
     if (b.step === "grapple") v.check = { type: "Board", dr: clamp(en.rating, 0, 8), extra: b.closeBonus ? [{ label: "Closed on her", value: 1 }] : [] };
+    // The Decision's Board her shows the grapple's odds (B37).
+    if (b.step === "decision" && en) v.grappleCheck = { type: "Board", dr: clamp(en.rating, 0, 8) };
+    if (b.step === "posChoice" && en) v.grappleCheck = { type: "Board", dr: clamp(en.rating, 0, 8), extra: [{ label: "Closed on her", value: 1 }] };
     if (b.step === "repel") v.check = { type: "Board", dr: clamp(en.rating, 0, 8) };
     if (b.step === "chase" || b.step === "press") v.check = chaseCheck(state, b);
     if (b.step === "clash") v.actions = actions(state, b);
@@ -7600,6 +7864,44 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var hunter = force && force.kind === "hunter" ? force.flag || "Avalon" : G().rollHunter(state, game.waters, r);
     game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force };
     game.force = null;
+    // A vacant Quartermaster's post is filled at the next voyage event
+    // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
+    // save with the post empty is caught here too.
+    PC.officers.ensureQuartermaster(state);
+    if (PC.officers.votePending(state)) {
+      game.vote = { step: "pre", candidates: PC.officers.voteScores(state, null).map(function (x) { return { id: x.id, name: x.name }; }) };
+      game.phase = "vote";
+      M().say(state, game, L().votePre || "The crew want a Quartermaster of their own choosing. They'll vote before the day is out.");
+      return;
+    }
+    reveal(state, game);
+  }
+
+  // ---- The Vote (§25.9, the template §25.15) ------------------------------------
+  // The pre-vote beat: speak for a candidate (Order), or stay out of it.
+  function vote(state, game, speakFor) {
+    if (game.phase !== "vote" || !game.vote || game.vote.step !== "pre") throw new Error("Not the moment for that.");
+    var r = PC.officers.runVote(state, speakFor || null, M().key(state, game, "vote"));
+    game.vote.step = "result";
+    game.vote.winner = { id: r.winner.id, name: (r.winner.first + " " + (r.winner.last || "")).trim() };
+    game.vote.scores = r.scores;
+    game.vote.spokeFor = speakFor || null;
+    M().say(state, game, (L().voteResult || "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.").replace("[Officer]", game.vote.winner.name));
+    return r;
+  }
+
+  // The captain's reaction (§25.15): Congratulate (Honor), keep silent
+  // (Caution), sulk (Retreat), or loudly disagree (Defiance). The tags are
+  // recorded for the officers' approval; then the hunt goes on.
+  var VOTE_REACT = { congratulate: ["Congratulate the winner", "Honor"], silent: ["Observe and keep silent", "Caution"], sulk: ["Sulk in your cabin", "Retreat"], disagree: ["Loudly disagree with the crew's decision", "Defiance"] };
+  function voteReact(state, game, choice) {
+    if (game.phase !== "vote" || !game.vote || game.vote.step !== "result") throw new Error("Not the moment for that.");
+    var c = VOTE_REACT[choice] || VOTE_REACT.silent;
+    var w = game.vote.winner.name;
+    M().say(state, game, { congratulate: "PLACEHOLDER: You congratulate " + w + ". The crew made the right choice.", silent: "PLACEHOLDER: You watch, and keep your own counsel.",
+      sulk: "PLACEHOLDER: You retire to your cabin and sulk.", disagree: "PLACEHOLDER: You tell the crew, loudly, that they got it wrong." }[choice] || "");
+    game.lastApproval = { label: c[0], approval: [c[1]], at: game.log.length };
+    game.vote = null;
     reveal(state, game);
   }
 
@@ -7667,8 +7969,33 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- After the battle (§21.15, §22.7) -------------------------------------------
 
+  // The after-battle chips (A10 of the M5 playtest): chips with a merge key
+  // (k) and an amount (n) are totalled across every ship taken, one line
+  // per good or effect; tpl spells the line ({+n} signed, {n} plain;
+  // tpl1 when n is 1).
+  function mchip(icon, k, n, tpl, ink, tpl1) { return { icon: icon, k: k, n: n, tpl: tpl, tpl1: tpl1 || null, ink: ink || null, text: chipText({ n: n, tpl: tpl, tpl1: tpl1 }) }; }
+  function chipText(c) {
+    var t = c.n === 1 && c.tpl1 ? c.tpl1 : c.tpl;
+    return t.replace("{+n}", (c.n > 0 ? "+" : c.n < 0 ? "−" : "±") + Math.abs(c.n)).replace("{n}", Math.abs(c.n));
+  }
+  function mergeChips(list) {
+    var out = [], byKey = {};
+    (list || []).forEach(function (c) {
+      if (!c.k) { out.push(c); return; }
+      var m = byKey[c.k];
+      if (!m) { m = byKey[c.k] = Object.assign({}, c); out.push(m); return; }
+      m.n += c.n;
+    });
+    return out.filter(function (c) { return !c.k || c.n; }).map(function (c) {
+      if (!c.k) return c;
+      var x = Object.assign({}, c, { text: chipText(c) });
+      if (c.k === "morale") x.ink = c.n > 0 ? "good" : "bad";
+      return x;
+    });
+  }
+
   function afterBattle(state, game) {
-    var b = game.battle, chips = [];
+    var b = game.battle, chips = [], battleChips = [];
     // Hull points are whole numbers outside a battle (a part-point of
     // damage counts as a whole one).
     state.ship.hull = Math.max(0, Math.floor(state.ship.hull + 1e-9));
@@ -7678,10 +8005,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var killed = b.killed.flagship || 0;
     var start = b.startCrew.flagship || 1;
     var mloss = Math.floor(100 * killed / start / 2);
-    if (mloss) { PC.crew.addMorale(state, -mloss); chips.push({ icon: "morale", text: "Morale −" + mloss + " for the dead", ink: "bad" }); }
-    if (killed) chips.push({ icon: "cond", text: plural(killed, "hand") + " killed", ink: "bad" });
+    if (mloss) { PC.crew.addMorale(state, -mloss); battleChips.push({ icon: "morale", text: "Morale −" + mloss + " for the dead", ink: "bad" }); chips.push(mchip("morale", "morale", -mloss, "Crew morale {+n}")); }
+    if (killed) battleChips.push({ icon: "cond", text: plural(killed, "hand") + " killed", ink: "bad" });
     var w = Object.keys(b.woundedTiers).reduce(function (a, k) { return a + b.woundedTiers[k]; }, 0);
-    if (w) chips.push({ icon: "cond", text: plural(w, "hand") + " wounded (aboard until the next port)" });
+    if (w) battleChips.push({ icon: "cond", text: plural(w, "hand") + " wounded (aboard until the next port)" });
     // Track the wounded by tier for the arrival (§24.9).
     var wt = (state.crew.woundedTiers = state.crew.woundedTiers || {});
     Object.keys(b.woundedTiers).forEach(function (k) { wt[k] = (wt[k] || 0) + b.woundedTiers[k]; });
@@ -7694,7 +8021,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         var n = 0; for (var i = 0; i < (state.crew.tiers[x[0]] || 0); i++) if (sr() < x[2]) n++;
         if (n) { state.crew.tiers[x[0]] -= n; state.crew.tiers[x[1]] = (state.crew.tiers[x[1]] || 0) + n; up += n; }
       });
-      if (up) chips.push({ icon: "morale", text: plural(up, "hand") + " seasoned a step" });
+      if (up) battleChips.push({ icon: "morale", text: plural(up, "hand") + " seasoned a step", ink: "good" });
     }
     // Records: Prize Taker at 5 captures, Duelist at 3 duels won (§14.4).
     var rec = (state.records = state.records || { prizes: 0, duels: 0 });
@@ -7702,9 +8029,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     rec.prizes += captured.length;
     if (rec.prizes >= H().PRIZE_TAKER_AT && state.captain.tags.indexOf("Prize Taker") < 0) { state.captain.tags.push("Prize Taker"); chips.push({ icon: "tag", text: "New tag: Prize Taker", ink: "oxblood" }); }
     if (rec.duels >= H().DUELIST_AT && state.captain.tags.indexOf("Duelist") < 0) { state.captain.tags.push("Duelist"); chips.push({ icon: "tag", text: "New tag: Duelist", ink: "oxblood" }); }
-    if (b.over === "fled") chips.push({ icon: "morale", text: "Morale −15 for running", ink: "bad" });
+    if (b.over === "fled") { battleChips.push({ icon: "morale", text: "Morale −15 for running", ink: "bad" }); chips.push(mchip("morale", "morale", H().FLEE_MORALE, "Crew morale {+n}")); }
     var hpLost = Math.max(0, b.startHull.flagship - state.ship.hull);
-    game.after = { chips: chips, queue: captured.map(function (e) { return e.id; }), current: null, repairDone: hpLost <= 0, treatDone: false, hpLost: hpLost };
+    // battleChips show once, on the first screen after the battle; chips
+    // add up into the summary (A10).
+    game.after = { chips: chips, battleChips: battleChips, battleSeen: false, queue: captured.map(function (e) { return e.id; }), current: null, repairDone: hpLost <= 0, treatDone: false, hpLost: hpLost, taken: [] };
     game.phase = "after";
     // Fleet ships lost in the fight leave the fleet.
     state.fleet = fleet(state).filter(function (f) { return !f.out; });
@@ -7731,8 +8060,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
     var chip = { icon: "hull", text: hp ? "Repaired at sea: hull +" + hp : "No repairs at sea", ink: hp ? "good" : null };
-    a.chips.push(chip);
-    if (game.lastRoll) game.lastRoll.chips = [chip]; // shown in the roll's result box (G4)
+    a.battleSeen = true;
+    // Shown once, in the roll's result box (G4); not in the summary (A10).
+    if (game.lastRoll) game.lastRoll.chips = [chip];
   }
 
   // Treat Wounds (§21.15): a Cook aboard rolls on a Wounded captain. Clean
@@ -7831,13 +8161,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var ex = canExecute(state, e);
       PC.scenes.applyEffect(state, { dread: H().EXECUTE_DREAD });
       PC.scenes.applyEffect(state, { standing: { faction: "pirates", delta: 1 } });
-      chips.push({ icon: "dread", text: "Dread +" + H().EXECUTE_DREAD + " · dead men tell no tales", ink: "bad" });
-      if (!ex.legal) { PC.crew.addMorale(state, -20); state.crew.pressure = (state.crew.pressure || 0) + 2; chips.push({ icon: "pressure", text: "You broke the Articles: morale −20", ink: "bad" }); }
+      chips.push(mchip("dread", "dread", H().EXECUTE_DREAD, "Dread {+n}", "bad"));
+      chips.push(mchip("standing", "standing:pirates", 1, "Pirates Standing {+n}", "pirates"));
+      if (!ex.legal) { PC.crew.addMorale(state, -20); state.crew.pressure = (state.crew.pressure || 0) + 2; chips.push(mchip("morale", "morale", -20, "Crew morale {+n}")); chips.push(mchip("pressure", "pressure", 2, "Pressure {+n}: you broke the Articles", "bad")); }
       M().say(state, game, "PLACEHOLDER: Her crew go over the side. Nobody will report this one.");
     } else if (crewChoice === "recruit" && cur.volunteers) {
       var room = PC.crew.berths(state);
       var n = Math.min(cur.volunteers, room);
-      if (n) { PC.crew.addHands(state, cur.volTier, n); chips.push({ icon: "morale", text: plural(n, cur.volTier + " volunteer") + " sign on" }); }
+      if (n) { PC.crew.addHands(state, cur.volTier, n); chips.push(mchip("officer", "vol:" + cur.volTier, n, "{n} " + cur.volTier + " volunteers sign on", "good", "1 " + cur.volTier + " volunteer signs on")); }
       else chips.push({ icon: "cond", text: "No berths for her volunteers" });
     }
     // Standing and Heat (§28.3, §28.6): no letter, so every prize but a
@@ -7855,16 +8186,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // The ship's chest (§22.6): coin, always clean, by the Chest Article.
     var pot = state.articles && state.articles.terms.chest === "captains_chest" ? "purse" : "crew";
     state.money[pot] += loot.chest;
-    chips.push({ icon: "gold", text: "Ship's chest: " + loot.chest + " gold to " + (pot === "purse" ? "your purse" : "crew gold") });
-    // Her cargo into the pooled hold, the densest first (§22.7).
+    if (loot.chest) chips.push(mchip("gold", "chest:" + pot, loot.chest, "Ship's chest: {n} gold to " + (pot === "purse" ? "your purse" : "crew gold"), "mid"));
+    // Her cargo into the pooled hold: what the player picked (A7), or the
+    // densest first when nothing was picked (the sim, §22.7).
     var dirty = e.flag !== "Pirate";
-    var taken = loadCargo(state, loot, dirty);
-    taken.forEach(function (t) { chips.push({ icon: t.icon, text: t.text }); });
+    var taken = ch.cargo ? loadPicked(state, loot, dirty, ch.cargo) : loadCargo(state, loot, dirty);
+    // Goods leave the chip list (they were picked on the screen); provisions stay (A10).
+    taken.forEach(function (t) { if (t.prov) chips.push(mchip("prov", "prov", t.prov, "+{n} provisions")); });
+    game.after.taken = (game.after.taken || []).concat(taken.filter(function (t) { return !t.prov && t.n; }));
     if (loot.item) { state.captain.items.push(loot.item); chips.push({ icon: "item", text: "Found aboard: " + loot.item, ink: "oxblood" }); }
     // Captives (§22.7).
     if (loot.captives) {
       var cc = ch.captives || "free";
-      if (cc === "free") { state.captives = (state.captives || 0) + loot.captives; chips.push({ icon: "dgood", text: plural(loot.captives, "captive") + " aboard to be freed at a free port" }); }
+      if (cc === "free") { state.captives = (state.captives || 0) + loot.captives; chips.push(mchip("dgood", "captives", loot.captives, "{n} captives aboard, to be freed at a free port", null, "1 captive aboard, to be freed at a free port")); }
       else if (cc === "recruit") {
         var k = Math.min(Math.ceil(loot.captives / 2), PC.crew.berths(state));
         if (k) PC.crew.addHands(state, "Green", k);
@@ -7874,10 +8208,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     // Morale for a prize: +5, or +10 at Rich or Superior; at most +10 a hunt.
     var gain = Math.min(loot.level >= 3 ? H().PRIZE_MORALE.big : H().PRIZE_MORALE.small, H().PRIZE_MORALE.cap - game.prizeMorale);
-    if (gain > 0 && !e.hunter) { game.prizeMorale += gain; PC.crew.addMorale(state, gain); chips.push({ icon: "morale", text: "Morale +" + gain }); }
+    if (gain > 0 && !e.hunter) { game.prizeMorale += gain; PC.crew.addMorale(state, gain); chips.push(mchip("morale", "morale", gain, "Crew morale {+n}")); }
     game.prizesTaken += 1;
     PC.state.addLog(state, "Took " + name + " (" + e.flag + " " + e.cls + ").");
     game.after.chips = game.after.chips.concat(chips);
+    game.after.battleSeen = true;
+    game.after.names = (game.after.names || []).concat([name]);
     game.after.lastPrize = { name: name, chips: chips };
     game.after.current = null;
     return chips;
@@ -7887,7 +8223,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var out = [];
     if (e.hunter) {
       var hf = e.flag === "Avalon" ? "avalon" : e.flag === "Frisia" ? "frisia" : null;
-      if (hf && !executed) { PC.scenes.applyEffect(state, { heat: { faction: hf, delta: H().HUNTER_TAKEN_HEAT } }); out.push({ icon: "heat", text: e.flag + " Heat +" + H().HUNTER_TAKEN_HEAT, ink: hf }); }
+      if (hf && !executed) { PC.scenes.applyEffect(state, { heat: { faction: hf, delta: H().HUNTER_TAKEN_HEAT } }); out.push(mchip("heat", "heat:" + hf, H().HUNTER_TAKEN_HEAT, e.flag + " Heat {+n}", hf)); }
     } else {
       ["Avalon", "Frisia"].forEach(function (fac) {
         var side = H().SIDES[fac][e.flag];
@@ -7895,8 +8231,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         var kind = e.role === "War" ? "navy" : "merchant";
         var d = H().UNCOVERED[side + " " + kind], key = fac.toLowerCase();
         PC.scenes.applyEffect(state, { standing: { faction: key, delta: d[1] } });
-        out.push({ icon: "standing", text: fac + " Standing " + d[1], ink: key });
-        if (!executed) { PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } }); out.push({ icon: "heat", text: fac + " Heat +" + d[0], ink: key }); }
+        out.push(mchip("standing", "standing:" + key, d[1], fac + " Standing {+n}", key));
+        if (!executed) { PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } }); out.push(mchip("heat", "heat:" + key, d[0], fac + " Heat {+n}", key)); }
       });
     }
     // France and Sicily keep grudge counters (§22.5); Spain feeds France's.
@@ -7912,20 +8248,30 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // Load what fits: treasure first (5 to a slot), then precious, fine and
   // bulk goods, then provisions. The rest stays in her hold.
   function loadCargo(state, loot, dirty) {
+    var pick = { treasure: loot.treasure, goods: {}, provisions: loot.provisions };
+    Object.keys(loot.goods).forEach(function (g) { pick.goods[g] = loot.goods[g]; });
+    return loadPicked(state, loot, dirty, pick);
+  }
+
+  // Load what the player picked on the prize screen (A7), within what she
+  // carries and what fits: treasure, then goods densest first, then
+  // provisions. Returns [{ what, n, dirty, left, icon, text }].
+  function loadPicked(state, loot, dirty, pick) {
     var out = [];
     var k = dirty ? "dirty" : "clean";
-    var room = PC.crew.treasureRoom(state);
-    var t = Math.min(loot.treasure, room);
-    if (t > 0) { state.cargo.treasure[k] += t; out.push({ icon: "treasure", text: t + " " + (dirty ? "dirty " : "") + "treasure" + (t < loot.treasure ? " (" + (loot.treasure - t) + " left behind: the hold is full)" : "") }); }
-    else if (loot.treasure) out.push({ icon: "treasure", text: loot.treasure + " treasure left behind: the hold is full" });
+    var want = Math.max(0, Math.min(loot.treasure || 0, Math.floor(pick.treasure || 0)));
+    var t = Math.min(want, PC.crew.treasureRoom(state));
+    if (t > 0) state.cargo.treasure[k] += t;
+    if (loot.treasure) out.push({ what: "treasure", n: t, dirty: dirty, left: loot.treasure - t, icon: "treasure", text: t + " " + (dirty ? "dirty " : "") + "treasure" + (t < loot.treasure ? " (" + (loot.treasure - t) + " left behind)" : "") });
     var goods = Object.keys(loot.goods).sort(function (a, b) { return PC.data.goods[b].base - PC.data.goods[a].base; });
     goods.forEach(function (g) {
-      var n = Math.min(loot.goods[g], PC.crew.slotsFree(state));
-      if (n > 0) { PC.crew.addGood(state, g, n, dirty); out.push({ icon: "treasure", text: n + " " + (dirty ? "dirty " : "") + g + (n < loot.goods[g] ? " (" + (loot.goods[g] - n) + " left behind)" : "") }); }
-      else out.push({ icon: "treasure", text: loot.goods[g] + " " + g + " left behind: the hold is full" });
+      var w = Math.max(0, Math.min(loot.goods[g], Math.floor((pick.goods || {})[g] || 0)));
+      var n = Math.min(w, PC.crew.slotsFree(state));
+      if (n > 0) PC.crew.addGood(state, g, n, dirty);
+      out.push({ what: g, n: n, dirty: dirty, left: loot.goods[g] - n, icon: "treasure", text: n + " " + (dirty ? "dirty " : "") + g + (n < loot.goods[g] ? " (" + (loot.goods[g] - n) + " left behind)" : "") });
     });
-    var p = Math.min(loot.provisions, PC.crew.slotsFree(state));
-    if (p > 0) { state.provisions += p; out.push({ icon: "prov", text: "+" + p + " provisions" }); }
+    var p = Math.min(loot.provisions || 0, Math.max(0, Math.floor(pick.provisions || 0)), PC.crew.slotsFree(state));
+    if (p > 0) { state.provisions += p; out.push({ what: "provisions", prov: p, n: p, icon: "prov", text: "+" + p + " provisions" }); }
     return out;
   }
 
@@ -7951,7 +8297,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (!o) throw new Error("Needs an officer to captain her.");
       o.aboard = rec.id;
       rec.officer = o.id;
-      PC.officers.ensureQuartermaster(state);
+      // A fleet command vacates the Quartermaster's post (§25.9): the
+      // Acting Quartermaster holds the seat until the next vote (A4).
+      if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
+      else PC.officers.ensureQuartermaster(state);
     }
     fleet(state).push(rec);
     return rec;
@@ -8066,16 +8415,26 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var qm = PC.officers.quartermaster ? PC.officers.quartermaster(state) : null;
     return {
       phase: game.phase, apUsed: game.apUsed, apLeft: state.ap.left, maxAp: H().MAX_AP,
+      vote: game.vote || null, lastApproval: game.lastApproval || null,
       batch: game.batch ? { n: game.batch.n, next: game.batch.next } : null,
       waters: H().WATERS[game.waters].name, scout: sv, advice: advice(state, game, sv), qm: qm ? qm.first || qm.full : null,
       battle: game.battle && game.phase === "battle" ? C().view(state, game) : null,
       after: game.after ? {
-        chips: game.after.chips, repairDone: game.after.repairDone, hpLost: game.after.hpLost, repairCheck: repairCheck(state),
+        chips: game.after.chips, summary: mergeChips(game.after.chips), battleChips: game.after.battleSeen ? [] : (game.after.battleChips || []),
+        taken: mergeTaken(game.after.taken || []), names: game.after.names || [],
+        repairDone: game.after.repairDone, hpLost: game.after.hpLost, repairCheck: repairCheck(state),
         prize: cur ? prizeView(state, game, cur) : null, lastPrize: game.after.lastPrize || null, left: game.after.queue.length,
       } : null,
       canContinue: canContinue(state, game), prizesTaken: game.prizesTaken, gameOver: game.gameOver || null,
       holdFree: PC.crew.slotsFree(state), holdMax: PC.crew.holdCapacity(state),
     };
+  }
+
+  // Cargo taken across every ship, one line a good (A10): 50 + 25 tobacco = 75.
+  function mergeTaken(list) {
+    var by = {}, out = [];
+    list.forEach(function (t) { var key = t.what + (t.dirty ? "|d" : ""); if (!by[key]) { by[key] = { what: t.what, n: 0, dirty: t.dirty }; out.push(by[key]); } by[key].n += t.n; });
+    return out.filter(function (t) { return t.n; });
   }
 
   function prizeView(state, game, cur) {
@@ -8084,8 +8443,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       id: e.id, cls: e.cls, name: e.name, flag: e.flag, role: e.role, captain: e.captain, title: e.title, level: H().LEVELS[l.level],
       hull: Math.round(e.hull), hullMax: e.hullMax, guns: e.guns, crew: e.crew, crewMin: e.crewMin, cargo: e.cargo,
       treasure: l.treasure, goods: l.goods, provisions: l.provisions, chest: l.chest, captives: l.captives,
-      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), hullOptions: hullOptions(state, game),
+      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), hullOptions: hullOptions(state, game).map(function (o) {
+        // Keeping her hull adds her hold to the pool before her cargo comes across (A7).
+        o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
+        return o;
+      }),
       dirty: e.flag !== "Pirate",
+      // The hold as it stands, for the cargo picker's stacked bar (A7, B42).
+      hold: { cap: PC.crew.holdCapacity(state), provisions: state.provisions, goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), per: PC.data.economy.TREASURE_PER_SLOT },
     };
   }
 
@@ -8102,17 +8467,20 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     o.aboard = id; o.joined = { year: state.time.year, season: state.time.season };
     state.officers.push(o);
     var crew = Math.max(c.crewMin, Math.round(c.crewMax * 0.6));
-    fleet(state).push({ id: id, kind: "fleet", cls: cls, name: PC.huntGen && (PC.data.names.SHIPS.pirate[(state.world.shipSeq * 7) % PC.data.names.SHIPS.pirate.length]),
+    var pool = PC.data.names.SHIPS.pirate, taken = [state.ship.name].concat(fleet(state).map(function (f) { return f.name; }));
+    var nm = null;
+    for (var i = 0; i < pool.length && (!nm || taken.indexOf(nm) >= 0); i++) nm = pool[(state.world.shipSeq * 7 + i) % pool.length];
+    fleet(state).push({ id: id, kind: "fleet", cls: cls, name: nm,
       flag: "Pirate", role: c.role, size: c.size, hull: c.hull, hullMax: c.hull, guns: c.guns, gunsMax: c.guns, crew: crew, crewMin: c.crewMin,
       crewMax: c.crewMax, cargo: c.cargo, speed: c.speed, handling: c.handling, officer: o.id, dirty: false, crewTiers: { Able: crew }, wounded: 0, dev: true });
     return { ship: cls, officer: o.first + " " + (o.last || "") };
   }
 
   PC.hunt = {
-    canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter,
+    canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
-    loadCargo: loadCargo, currentPrize: currentPrize,
+    loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
   };
 })();
 </script>
@@ -13135,7 +13503,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     rally: { clean: "PLACEHOLDER: Your crew roars back at you.", partial: "PLACEHOLDER: The men steady at your shout.", setback: "PLACEHOLDER: Your shout is lost in the din." },
     hold: { clean: "PLACEHOLDER: Your crew locks shoulders and holds.", partial: "PLACEHOLDER: Your crew gives ground slowly.", setback: "PLACEHOLDER: The line buckles." },
     duel: { clean: "PLACEHOLDER: You beat their captain to his knees. His crew sees it.", partial: "PLACEHOLDER: You trade cuts with their captain until the melee pulls you apart.", setback: "PLACEHOLDER: Their captain's blade opens your arm, and his crew cheers." },
-    demand: { clean: "PLACEHOLDER: \"Throw down your arms!\" They do.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
+    // The Quartermaster's vote (§25.9, §25.15): the result is the S25 appendix's text.
+    votePre: "PLACEHOLDER: The crew want a Quartermaster of their own choosing. They'll vote before the day is out.",
+    voteResult: "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.",
+    demand: { clean: "Her crew throw down their arms. She's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
     shot: { clean: "PLACEHOLDER: Your pistol barks and a man drops.", partial: "PLACEHOLDER: Your shot goes wide.", setback: "PLACEHOLDER: Your pistol misfires." },
     strikeFirst: { clean: "You strike first: +1 on the first clash.", partial: "Neither side gets the jump.", setback: "They strike first: +1 to them on the first clash." },
     flee: "PLACEHOLDER: You break off and run.",
@@ -13694,6 +14065,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function med(k, ink) { return '<span class="med" style="color:' + (INK[ink] || INK.ink) + '">' + ic(k) + "</span>"; }
   function chip(c) { return '<li class="fx">' + med(c.icon, c.ink) + (c.html || esc(c.text)) + "</li>"; }
   function chips(list) { list = (list || []).filter(Boolean); return list.length ? '<ul class="effects">' + list.map(chip).join("") + "</ul>" : ""; }
+  // Dirty goods, hulls and prizes (B44 of the M5 playtest): the name in
+  // oxblood with a small black spot after it, never color alone; hover or
+  // tap says what it means. Clean ones are unmarked.
+  var DIRTY_TIP = "Dirty: only a fence will buy it.";
+  function dirtyName(name, dirty, raw) {
+    var n = raw ? name : esc(name);
+    return dirty ? '<span class="dirty" title="' + DIRTY_TIP + '" tabindex="0">' + n + '<span class="spot" aria-label="dirty"> ●</span></span>' : n;
+  }
   // Effect chips for the node's services (G4): gold, morale, hull.
   function goldChip(n, pot) { return n ? { icon: "gold", text: (n > 0 ? "+" : "−") + gold(Math.abs(n)) + " " + (pot === "purse" ? "your purse" : "crew gold"), ink: n > 0 ? "good" : "mid" } : null; }
   function moraleChip(n) { return n ? { icon: "morale", text: "Crew morale " + (n > 0 ? "+" : "−") + Math.abs(n), ink: n > 0 ? "good" : "bad" } : null; }
@@ -14420,17 +14799,25 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         (room <= 0 ? '<p class="note">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qstep("q-guns", 1, gunsMax) + '<button class="secondary" data-act="guns" data-for="q-guns">Buy guns</button> ' +
           totalSlot(function () { var n = val("q-guns"); return plural(n, "gun") + " · " + gold(n * N().gunPrice(state)) + " gold"; }) + "</div>" : '<p class="note">You can\'t pay for a gun right now.</p>') + "</div>";
     }
+    // The whole hold, clearly (A8 of the M5 playtest): what each ship adds,
+    // what's used and what's free.
+    var fl = (state.fleet || []).filter(function (f) { return !f.out; });
+    html += '<div class="svc"><h4>The hold</h4>' + holdBarHtml(holdNow()) + '<table class="grid"><tr><th>Ship</th><th>Adds</th></tr>' +
+      PC.crew.holdByShip(state).map(function (h) { return "<tr><td>" + (h.id === "flagship" ? "<i>" + esc(h.name) + "</i>, your flagship" : dirtyName(h.name, h.dirty) + ' <span class="note">' + esc(h.cls + " · " + (h.kind === "fleet" ? "fleet ship" : "prize ship")) + "</span>") + "</td><td>" + h.cargo + "</td></tr>"; }).join("") +
+      "<tr><th>Total</th><th>" + PC.crew.holdCapacity(state) + " · " + PC.crew.slotsUsed(state) + " used, " + PC.crew.slotsFree(state) + " free</th></tr></table></div>";
     // Your other ships: sell a prize hull, or strip her guns (§22.7, Milestone 5).
-    var fl = state.fleet || [];
     if (fl.length) {
       html += '<div class="svc"><h4>Your other ships</h4>' + fl.map(function (f) {
         var p = N().hullSalePrice(state, f);
         var room = state.ship.gunsMax - state.ship.guns;
-        return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + esc(f.name || f.cls) + '</b> <span class="note">' + esc(f.cls + " · " + (f.kind === "fleet" ? "fleet ship" : "prize ship") + (f.dirty ? " · dirty" : "") +
+        var hh = N().hullSaleHold(state, f.id);
+        return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(f.name || f.cls, f.dirty) + '</b> <span class="note">' + esc(f.cls + " · " + (f.kind === "fleet" ? "fleet ship" : "prize ship") +
           " · hull " + Math.round(f.hull) + "/" + f.hullMax + " · " + f.guns + " guns · " + f.crew + " aboard") + "</span></span> " +
           (p.ok ? '<button class="secondary" data-act="sellhull" data-ship="' + esc(f.id) + '">Sell her · ' + gold(p.total) + " gold</button>" : '<span class="note">' + esc(p.why) + "</span>") +
           (f.guns && room > 0 ? '<button class="secondary" data-act="stripguns" data-ship="' + esc(f.id) + '">Move ' + Math.min(f.guns, room) + " guns to your flagship</button>" : "") + "</div>" +
-          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off.</p>" : "");
+          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
+            // Her effect on the hold (A9).
+            " The hold goes from " + hh.capBefore + " to " + hh.capAfter + " (" + hh.used + " used)" + (hh.over ? '; <b style="color:#8f2a1c">' + hh.over + " slots won't fit and go over the side</b>" : "") + ".</p>" : "");
       }).join("") + "</div>";
     }
     html += "</div>" + DIVIDER;
@@ -14505,19 +14892,35 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- Merchant (§41.9) ----
 
+  // The hold as a stacked bar (§21.15; A6-A8 of the M5 playtest):
+  // provisions, goods, treasure (five units a slot), then whatever is being
+  // taken on (hatched), then the free space. extra: { slots, label } for
+  // the cargo picker; cap overrides the capacity (a hull being kept).
+  var HOLD_INK = { prov: "#8a6414", goods: "#5e4528", treasure: "#c99f45", dirtyT: "#7a2416", add: "#2f5a22", over: "#8f2a1c" };
+  function holdBarHtml(o) {
+    var per = PC.data.economy.TREASURE_PER_SLOT;
+    var cap = o.cap, tSlots = Math.ceil(o.treasure / per), used = o.prov + o.goods + tSlots + (o.add || 0);
+    var scale = Math.max(cap, used, 1);
+    var seg = function (n, color, label, cls) { return n > 0 ? '<i class="' + (cls || "") + '" title="' + esc(label + ": " + n) + '" style="width:' + (100 * n / scale) + "%;background:" + color + '"></i>' : ""; };
+    var tD = o.treasure ? tSlots * (o.treasureDirty || 0) / o.treasure : 0;
+    var over = used - cap;
+    return '<div class="holdbar">' + seg(o.prov, HOLD_INK.prov, "Provisions") + seg(o.goods, HOLD_INK.goods, "Goods") + seg(tSlots - tD, HOLD_INK.treasure, "Treasure") + seg(tD, HOLD_INK.dirtyT, "Dirty treasure") +
+      seg(Math.min(o.add || 0, Math.max(0, cap - (used - (o.add || 0)))), HOLD_INK.add, o.addLabel || "Taking on", "new") + seg(Math.max(0, over), HOLD_INK.over, "Over the hold", "new") + "</div>" +
+      '<div class="holdkey"><span><b style="background:' + HOLD_INK.prov + '"></b>Provisions ' + o.prov + "</span><span><b style=\"background:" + HOLD_INK.goods + '"></b>Goods ' + o.goods + "</span>" +
+      '<span><b style="background:' + HOLD_INK.treasure + '"></b>Treasure ' + o.treasure + (o.treasureDirty ? " (" + o.treasureDirty + " dirty)" : "") + "</span>" +
+      (o.add ? '<span><b class="new" style="background:' + HOLD_INK.add + '"></b>' + esc(o.addLabel || "Taking on") + " " + o.add + "</span>" : "") +
+      "<span>Hold " + used + " of " + cap + " · " + (over > 0 ? '<i class="over">' + over + " over</i>" : Math.max(0, cap - used) + " free") + "</span></div>";
+  }
+  function holdNow() {
+    return { cap: PC.crew.holdCapacity(state), prov: state.provisions, goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), treasureDirty: state.cargo.treasure.dirty || 0 };
+  }
   function holdBar() {
-    var p = state.provisions, goods = PC.crew.goodsUnits(state), tc = state.cargo.treasure.clean, td = state.cargo.treasure.dirty;
-    var per = PC.data.economy.TREASURE_PER_SLOT, cap = PC.crew.holdCapacity(state);
-    var tSlots = Math.ceil((tc + td) / per), tcS = tc + td ? tSlots * tc / (tc + td) : 0;
-    var seg = function (n, color, label) { return n > 0 ? '<i title="' + esc(label) + '" style="position:static;display:inline-block;height:100%;width:' + (100 * n / cap) + "%;background:" + color + '"></i>' : ""; };
-    var manifest = ["Provisions: " + p + " lots"].concat(Object.keys(state.cargo.goods).map(function (g) {
+    var manifest = [esc("Provisions: " + state.provisions + " lots")].concat(Object.keys(state.cargo.goods).map(function (g) {
       var e = state.cargo.goods[g];
-      return (e.clean ? g + ": " + e.clean : "") + (e.dirty ? (e.clean ? ", " : g + ": ") + e.dirty + " dirty" : "");
-    }).filter(Boolean), tc || td ? ["Treasure: " + (tc + td) + " units" + (td ? " (" + td + " dirty)" : "")] : []);
-    return '<details class="svc"><summary style="cursor:pointer;list-style:none"><div class="hbar" style="height:16px;display:flex;max-width:680px">' +
-      seg(p, "#8a6414", "Provisions") + seg(goods, "#5e4528", "Goods") + seg(tcS, "#c99f45", "Treasure") + seg(tSlots - tcS, "#7a2416", "Dirty treasure") + "</div>" +
-      '<span class="small">Hold ' + PC.crew.slotsUsed(state) + " of " + cap + " · Provisions " + p + " · Goods " + goods + " · Treasure " + (tc + td) + (td ? " (" + td + " dirty)" : "") +
-      ' <span class="note">· tap for the manifest</span></span></summary><ul class="small">' + manifest.map(function (m) { return "<li>" + esc(m) + "</li>"; }).join("") + "</ul></details>";
+      return [e.clean ? esc(g) + ": " + e.clean : null, e.dirty ? dirtyName(g, true) + ": " + e.dirty : null].filter(Boolean).join(" · ");
+    }).filter(Boolean), state.cargo.treasure.clean ? ["Treasure: " + state.cargo.treasure.clean] : [], state.cargo.treasure.dirty ? [dirtyName("Treasure", true) + ": " + state.cargo.treasure.dirty] : []);
+    return '<details class="svc"><summary style="cursor:pointer;list-style:none">' + holdBarHtml(holdNow()) +
+      ' <span class="note">tap for the manifest</span></summary><ul class="small">' + manifest.map(function (m) { return "<li>" + m + "</li>"; }).join("") + "</ul></details>";
   }
 
   // Provisions as time at sea, short form for the strip: "4½ actions".
@@ -14553,11 +14956,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var prov = N().slotNpc(id, "provisioner");
     var g = N().greeting(state, id, prov, "provisioner");
     var said = state.location.said || {};
-    var html = '<div class="block">' + nameCard(prov, "Provisioner");
+    // Every merchant here as a collapsed card; open one to trade (B46).
+    var html = '<p class="note" style="max-width:680px">Open a merchant to trade.</p>' + holdBar() + mcard("m:prov", prov, "Provisioner");
     html += state.location.say && state.location.say.to === prov ? sayFor(prov) : '<div class="say">' + inline(g.line) + "</div>";
     if (!g.refuse) {
       var free = PC.crew.slotsFree(state);
-      html += haggleBlock(prov) + holdBar();
+      html += haggleBlock(prov);
       var pp = N().provisionsPrice(state);
       var provMax = Math.min(free, afford(pp));
       html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
@@ -14579,12 +14983,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // Dialogue options are buttons, never links (G5).
       if (hasCargo("dirty") && !said.offerdirty) html += opts([opt({ act: "offerdirty", label: "Offer dirty goods", meta: "No action" })]);
     }
-    html += "</div>";
+    html += "</div></details>";
     if (N().fenceOpen(state)) {
       var f = N().nodeData(id).fence;
       var fg = N().greeting(state, id, f.npc, "fence");
-      html += DIVIDER + '<div class="block"><div class="person">' + castFrame(f.npc).replace('class="castframe"', 'class="castframe" style="flex:0 0 100px"').replace(/width:150px/g, "width:100px") +
-        '<div class="pmain">' + nameCard(f.npc, "Fence") +
+      html += mcard("m:fence", f.npc, "Fence") + '<div class="person">' + castFrame(f.npc).replace('class="castframe"', 'class="castframe" style="flex:0 0 100px"').replace(/width:150px/g, "width:100px") +
+        '<div class="pmain">' +
         (state.location.say && state.location.say.to === f.npc ? sayFor(f.npc) : '<div class="say">' + inline(fg.line) + "</div>") + "</div></div>";
       if (!fg.refuse) {
         html += haggleBlock(f.npc) + sellTable("fence", "Sell dirty goods", N().fenceCapLeft(state), f.cap, "dirty");
@@ -14593,9 +14997,17 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         if (hasCargo("clean") && !said.offerclean) talk.push(opt({ act: "offerclean", label: "Offer him clean goods", meta: "No action" }));
         if (talk.length) html += opts(talk);
       }
-      html += "</div>";
+      html += "</div></details>";
     }
     return html;
+  }
+
+  // A merchant's card: the name card as its handle; open when the player
+  // opened it, or when it holds the last thing said (B46).
+  function mcard(key, npc, role) {
+    var open = keepOpen[key] || (state.location.say && state.location.say.to === npc);
+    if (open) keepOpen[key] = true;
+    return '<details class="card2" data-keep="' + key + '"' + (open ? " open" : "") + '><summary>' + nameCard(npc, role).replace('class="namecard"', 'class="namecard" style="margin:0"') + CARET + '</summary><div class="inner">';
   }
 
   function hasCargo(kind) {
@@ -14607,10 +15019,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function sellTable(buyer, title, capLeft, cap, kind) {
     var rows = [];
-    if (state.cargo.treasure[kind]) rows.push({ what: "treasure", label: (kind === "dirty" ? "Dirty " : "") + "Treasure", have: state.cargo.treasure[kind] });
+    if (state.cargo.treasure[kind]) rows.push({ what: "treasure", html: dirtyName("Treasure", kind === "dirty"), have: state.cargo.treasure[kind] });
     Object.keys(state.cargo.goods).forEach(function (g) {
       var n = state.cargo.goods[g][kind];
-      if (n) rows.push({ what: g, label: (kind === "dirty" ? "Dirty " : "") + g, have: n });
+      if (n) rows.push({ what: g, html: dirtyName(g, kind === "dirty"), have: n });
     });
     var who_ = PC.npcs.get(state, buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : N().slotNpc(N().here(state), "provisioner"));
     var his = who_ && who_.gender === "f" ? "Her" : "His";
@@ -14620,7 +15032,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var id = "q-sell-" + buyer + "-" + slug(r.what);
       var price = N().unitPrice(state, buyer, r.what);
       var max = Math.max(1, Math.min(r.have, price > 0 ? Math.floor(capLeft / price + 1e-9) : r.have));
-      return "<tr><td>" + esc(r.label) + (r.what !== "treasure" ? demandTag(r.what) : "") + "</td><td>" + r.have + "</td><td>" + gold(price) + "</td><td>" +
+      return "<tr><td>" + r.html + (r.what !== "treasure" ? demandTag(r.what) : "") + "</td><td>" + r.have + "</td><td>" + gold(price) + "</td><td>" +
         '<div class="buyrow">' + qstep(id, max, max) + '<button class="secondary" data-act="sell" data-buyer="' + buyer + '" data-what="' + esc(r.what) + '" data-for="' + id + '"' + (capLeft < price ? " disabled" : "") + ">" +
         totalSlot(function () { return "Sell · " + gold(val(id) * price); }, "") + "</button></div></td></tr>";
     }).join("") + "</table></div>";
@@ -14835,9 +15247,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // The scouting card (§22.3): only what a lookout could see.
   function scoutCard(s, v) {
-    var rows = [["Flag", s.flag + (s.name ? " · the " + s.name : "")], ["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
+    var rows = [["Flag", s.flag], ["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
       ["Speed", s.speed + " · " + s.handling], ["Draft", s.draft], ["Carries", s.lootTypes.join(", ")], ["Loot", s.loot]];
-    return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + "A " + esc(s.cls) + ' <span class="note">· ' + esc(s.role === "War" ? "warship" : s.role === "Raider" ? "raider" : s.role === "Hybrid" ? "armed trader" : "merchant") + "</span></h4>" +
+    return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + dirtyName("A " + s.cls + (s.name ? ", the " + s.name : ""), s.flag !== "Pirate") + ' <span class="note">· ' + esc(s.role === "War" ? "warship" : s.role === "Raider" ? "raider" : s.role === "Hybrid" ? "armed trader" : "merchant") + "</span></h4>" +
       '<table class="ledger">' + rows.map(function (r) { return lrow(r[0], esc(r[1])); }).join("") + "</table>" +
       '<p class="small" style="margin:4px 0"><i>The lookout: ' + esc(PC.text.render(s.cue, state).replace(/^PLACEHOLDER: /, "")) + "</i></p>" +
       '<p class="small" style="margin:0">' + esc(s.legit) + "</p></div></div>";
@@ -14864,6 +15276,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       html += qmSays(H.advice, H);
       html += sv.hunter ? '<div class="actions"><button class="primary" data-act="hhunter">Face her</button></div>' :
         '<div class="actions"><button class="primary" data-act="hengage">Engage</button><button class="secondary" data-act="hnext">Let her pass</button>' + home + "</div>";
+    } else if (H.phase === "vote") {
+      html += votePanel(H.vote);
     } else if (H.phase === "battle") {
       html += battlePanel(H.battle, H);
     } else if (H.phase === "after") {
@@ -14876,15 +15290,33 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return html + mgLog(v.log);
   }
 
+  // The Quartermaster's vote (§25.9, §25.15; A4 of the M5 playtest).
+  function votePanel(vt) {
+    if (!vt) return "";
+    var aq = state.actingQM;
+    if (vt.step === "pre") {
+      var bonus = PC.officers.speakBonus(state);
+      return '<div class="svc"><h4>The crew vote for a Quartermaster</h4><p class="small">' + (aq ? esc(aq.full) + " has held the seat since the post fell vacant. " : "") +
+        "The officers aboard your flagship stand. You can speak for one of them (" + (bonus > 0 ? "+" + bonus : bonus) + " to their count with the crew " + esc(PC.crew.band(state.crew.morale)) + "), or stay out of it.</p></div>" +
+        opts(vt.candidates.map(function (c) { return opt({ act: "hvote", attrs: 'data-for-officer="' + esc(c.id) + '"', label: "Speak for " + c.name, meta: "Order · " + (bonus > 0 ? "+" + bonus : bonus) + " to the count" }); })
+          .concat([opt({ act: "hvote", attrs: 'data-for-officer=""', label: "Stay out of it", meta: "The crew decide alone" })]));
+    }
+    var R = PC.hunt.VOTE_REACT;
+    return '<div class="svc"><h4>' + esc(vt.winner.name) + ' is your Quartermaster</h4><p class="small">' + vt.scores.map(function (x) { return esc(x.name) + " " + x.score; }).join(" · ") + "</p></div>" +
+      opts(Object.keys(R).map(function (k) { return opt({ act: "hvotereact", attrs: 'data-react="' + k + '"', label: R[k][0] }); }));
+  }
+
   function shipRow(s, enemy, target) {
     var hp = s.hullMax ? Math.max(0, Math.round(100 * s.hull / s.hullMax)) : 0;
     var outWord = { struck: "struck", captured: "taken", sunk: "sunk", escaped: "escaped", taken: "taken", left: "left behind" }[s.out] || "";
     return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + '">' + shipArtHtml(s.cls, !!s.out) +
-      '<div><b>' + esc((s.mine && s.id === "flagship" ? "" : "") + (s.name ? s.name : "A " + s.cls)) + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
+      '<div><b>' + dirtyName(s.name ? s.name : "A " + s.cls, enemy && s.flag && s.flag !== "Pirate") + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
       (outWord ? ' <span class="badge-out">' + esc(outWord) + "</span>" : "") +
       '<div class="hbar" style="height:9px;max-width:200px;margin:3px 0"><i style="width:' + hp + "%;background:" + (hp < 50 ? "#8f2a1c" : "#5e4528") + '"></i></div>' +
-      '<span class="small">Hull ' + s.hull + "/" + s.hullMax + " · Guns " + s.guns + " · Crew " + s.crew + (s.speed != null ? " · Speed " + s.speed : "") +
-      (enemy && s.shaken ? ' · <span style="color:#8f2a1c">Shaken ' + s.shaken + "</span>" : "") + (enemy && s.leaderless ? ' · <span style="color:#8f2a1c">Leaderless</span>' : "") + "</span></div></div>";
+      // Her full stats sit in a drop-down (A12); hull and her state stay in view.
+      (enemy ? '<span class="small">Hull ' + s.hull + "/" + s.hullMax + (s.shaken ? ' · <span style="color:#8f2a1c">Shaken ' + s.shaken + "</span>" : "") + (s.leaderless ? ' · <span style="color:#8f2a1c">Leaderless</span>' : "") + "</span>" +
+        '<details class="stats" data-keep="en:' + esc(s.id) + '"' + (keepOpen["en:" + s.id] ? " open" : "") + '><summary>Her stats</summary>Guns ' + s.guns + " · Crew " + s.crew + (s.speed != null ? " · Speed " + s.speed : "") + "</details>" :
+        '<span class="small">Hull ' + s.hull + "/" + s.hullMax + " · Guns " + s.guns + " · Crew " + s.crew + (s.speed != null ? " · Speed " + s.speed : "") + "</span>") + "</div></div>";
   }
 
   function battleShips(b) {
@@ -14932,7 +15364,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       case "posChoice":
         html += '<p class="sc">You have the position. What now?</p>' + opts([
           O("choosePosition", "rake", "Rake her", null, "+2 on this round's Exchange."),
-          O("choosePosition", "close", "Close for boarding", null, "Skip the Exchange and grapple, +1 to the grapple."),
+          O("choosePosition", "close", "Close for boarding", chk(b.grappleCheck), "Skip the Exchange: the grapple rolls at once, +1."),
           O("choosePosition", "open", "Open the range", null, "Your next attempt to flee needs no roll.")]);
         break;
       case "exchange":
@@ -14946,7 +15378,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         var hurt = me.hull < 0.6 * me.hullMax;
         html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + opts([
           O("decide", "fire", "Fire again", null, "A new round, starting with Position."),
-          O("decide", "board", "Board her", null, "Grapple (Board), then up to three clashes."),
+          O("decide", "board", "Board her", chk(b.grappleCheck), "The grapple rolls at once. Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples. Then up to three clashes."),
           O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun.")),
           O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]);
         break;
@@ -14973,38 +15405,80 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return html;
   }
 
+  // After the battle (§21.15, §22.7; A7, A10, A11 of the M5 playtest).
+  // The battle's own chips (the dead, the wounded, seasoning) show once, on
+  // the first screen after it; repairs at sea show in their roll's box.
   function afterPanel(a, H) {
-    var html = a.chips.length ? chips(a.chips) : "";
+    var html = a.battleChips && a.battleChips.length ? '<div class="h4" style="max-width:680px">The battle</div>' + chips(a.battleChips) : "";
     if (!a.repairDone) {
       return html + opts([opt({ act: "hrepair", label: "Repairs at sea", check: chk(a.repairCheck), meta: "Repair & Refit on the " + Math.round(a.hpLost) + " hull lost. Clean restores a quarter of it, partial a tenth." })]);
     }
-    var p = a.prize;
-    if (p) {
-      var goods = Object.keys(p.goods).map(function (g) { return p.goods[g] + " " + g; });
-      html += '<div class="svc prize"><h4 style="margin:0">' + esc(p.name ? "The " + p.name : "A " + p.cls) + ' <span class="note">· ' + esc(p.flag + " " + p.cls + " · " + p.level) + "</span></h4>" +
-        (p.captain ? '<p class="small" style="margin:2px 0">' + esc((p.title ? p.title + " " : "") + p.captain) + " hands over her papers.</p>" : "") +
-        '<p class="small">In her hold: ' + esc([p.treasure ? p.treasure + " treasure" : null].concat(goods).concat(p.provisions ? [p.provisions + " provisions"] : []).filter(Boolean).join(", ") || "nothing much") +
-        " · her ship's chest " + p.chest + " gold" + (p.dirty ? " · <b>dirty</b>: only Bobby will buy it" : " · clean") + ".</p>";
-      var radio = function (name, val, label, note, lock, on) {
-        return '<label class="pick' + (lock ? " locked" : "") + '"><input type="radio" name="' + name + '" value="' + esc(val) + '"' + (on ? " checked" : "") + (lock ? " disabled" : "") + "> <b>" + esc(label) + "</b>" +
-          (note || lock ? '<span class="note"> · ' + esc(lock || note) + "</span>" : "") + "</label>";
-      };
-      html += '<div class="h4">Her hull</div>' + p.hullOptions.map(function (o, i) {
-        var off = o.id === "fleet" && !o.lock && o.officers.length ? ' <select class="hofficer">' + o.officers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name + " (" + x.type + ")") + "</option>"; }).join("") + "</select>" : "";
-        return radio("h-hull", o.id, o.label, o.note, o.lock, o.id === "release") + off;
-      }).join("");
-      html += '<div class="h4">Her crew (' + p.crew + ")</div>" +
-        radio("h-crew", "release", "Release them", "With their ship, or in her boats", null, true) +
-        radio("h-crew", "recruit", "Recruit the willing", p.volunteers ? p.volunteers + " " + p.volTier + " hands want to sign on" : "Nobody wants to", p.volunteers ? null : "Nobody wants to", false) +
-        radio("h-crew", "execute", "Execute them", "Dead men tell no tales: no Heat, Dread +3" + (p.execute.legal ? "" : ". " + p.execute.why), null, false);
-      if (p.captives) html += '<div class="h4">' + plural(p.captives, "captive") + " aboard her</div>" +
-        radio("h-cap", "free", "Take them aboard to free them", "Freed at Ocracoke for a reward", null, true) +
-        radio("h-cap", "recruit", "Recruit the willing", "Half join as Green hands", null, false) +
-        radio("h-cap", "leave", "Leave them with her", null, null, false);
-      html += '<div class="actions"><button class="primary" data-act="hprize">Settle her' + (a.left ? " (" + a.left + " more to go)" : "") + "</button></div></div>";
-      return html;
-    }
+    if (a.prize) return html + prizeCard(a.prize, a);
+    // The summary: every ship taken, one line a good or effect.
+    html += '<div class="h4" style="max-width:680px">' + (a.names.length ? "What you took" : "After the fight") + "</div>";
+    if (a.names.length) html += '<p class="small" style="margin:0 0 6px">' + esc(a.names.map(function (n) { return n.charAt(0).toUpperCase() + n.slice(1); }).join(", ")) + ".</p>";
+    if (a.taken.length) html += '<p class="small" style="margin:0 0 6px"><b>Into the hold:</b> ' + a.taken.map(function (t) { return t.n + " " + dirtyName(t.what, t.dirty); }).join(", ") + "</p>";
+    html += chips(a.summary) + holdBarHtml(holdNow());
     return html + '<div class="actions"><button class="primary" data-act="hcarry" data-top="1">Back to the hunt</button></div>';
+  }
+
+  // One struck ship, settled on one screen: her cargo (pick what to take,
+  // watching the hold fill), her hull, her crew, her captives (A7, A11).
+  var pickRows = [];
+  function prizeCard(p, a) {
+    pickRows = [];
+    var title = p.name ? "The " + p.name : "A " + p.cls;
+    var html = '<div class="svc prize"><h4 style="margin:0">' + dirtyName(title, p.dirty) + ' <span class="note">· ' + esc(p.flag + " " + p.cls + " · " + p.level) + "</span>" + (a.left ? ' <span class="note">· ' + a.left + " more to settle</span>" : "") + "</h4>" +
+      (p.captain ? '<p class="small" style="margin:2px 0 8px">' + esc((p.title ? p.title + " " : "") + p.captain) + " hands over her papers. Her ship's chest holds " + gold(p.chest) + " gold.</p>" : '<p class="small" style="margin:2px 0 8px">Her ship\'s chest holds ' + gold(p.chest) + " gold.</p>");
+    // Her cargo: what she carries, with steppers; defaults fill the free
+    // space densest first, as before.
+    var free = PC.crew.slotsFree(state), per = p.hold.per;
+    var tRoom = PC.crew.treasureRoom(state);
+    var rows = [];
+    if (p.treasure) { var t0 = Math.min(p.treasure, tRoom); rows.push({ what: "treasure", label: "Treasure", have: p.treasure, def: t0 }); free -= Math.ceil((p.hold.treasure + t0) / per) - Math.ceil(p.hold.treasure / per); }
+    Object.keys(p.goods).sort(function (x, y) { return PC.data.goods[y].base - PC.data.goods[x].base; }).forEach(function (g) {
+      var d = Math.max(0, Math.min(p.goods[g], free)); free -= d; rows.push({ what: g, label: g, have: p.goods[g], def: d });
+    });
+    if (p.provisions) { var d = Math.max(0, Math.min(p.provisions, free)); free -= d; rows.push({ what: "provisions", label: "Provisions", have: p.provisions, def: d }); }
+    if (rows.length) {
+      html += '<div class="h4">Her cargo</div><table class="grid pickrow"><tr><th>Cargo</th><th>She carries</th><th>Take</th></tr>' + rows.map(function (r, i) {
+        var id = "pk-" + i;
+        pickRows.push({ id: id, what: r.what });
+        return "<tr><td>" + dirtyName(r.label, p.dirty && r.what !== "provisions") + (r.what === "treasure" ? ' <span class="note">(five to a slot)</span>' : "") + "</td><td>" + r.have + "</td><td>" + qstep(id, r.def, r.have, 0, true) + "</td></tr>";
+      }).join("") + "</table>";
+      html += totalSlot(function () { return pickBar(p); }, "") + (p.dirty ? '<p class="note" style="margin:2px 0 6px">' + dirtyName("Dirty", true) + ": no letter covers her, so only a fence will buy her cargo.</p>" : "");
+    } else html += '<p class="small">Nothing in her hold worth taking.</p>';
+    var radio = function (name, val, label, note, lock, on) {
+      return '<label class="pick' + (lock ? " locked" : "") + '"><input type="radio" name="' + name + '" value="' + esc(val) + '"' + (on ? " checked" : "") + (lock ? " disabled" : "") + "> <b>" + esc(label) + "</b>" +
+        (note || lock ? '<span class="note"> · ' + esc(lock || note) + "</span>" : "") + "</label>";
+    };
+    html += '<div class="h4">Her hull</div>' + p.hullOptions.map(function (o) {
+      var off = o.id === "fleet" && !o.lock && o.officers.length ? ' <select class="hofficer">' + o.officers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name + " (" + x.type + ")") + "</option>"; }).join("") + "</select>" : "";
+      return radio("h-hull", o.id, o.label, o.addsHold && !o.lock ? "her hold adds " + o.addsHold + " · " + o.note : o.note, o.lock, o.id === "release") + off;
+    }).join("");
+    html += '<div class="h4">Her crew (' + p.crew + ")</div>" +
+      radio("h-crew", "release", "Release them", null, null, true) +
+      radio("h-crew", "recruit", "Recruit the willing", p.volunteers ? p.volunteers + " " + p.volTier + " hands want to sign on" : null, p.volunteers ? null : "Nobody wants to", false) +
+      radio("h-crew", "execute", "Execute them", "No Heat, Dread +3" + (p.execute.legal ? "" : ". " + p.execute.why), null, false);
+    if (p.captives) html += '<div class="h4">' + plural(p.captives, "captive") + " aboard her</div>" +
+      radio("h-cap", "free", "Take them aboard to free them", "Freed at a free port for a reward", null, true) +
+      radio("h-cap", "recruit", "Recruit the willing", "Half join as Green hands", null, false) +
+      radio("h-cap", "leave", "Leave them with her", null, null, false);
+    return html + '<div class="actions"><button class="primary" data-act="hprize">Settle her</button></div></div>';
+  }
+
+  // The stacked hold bar on the prize screen, live as the steppers and her
+  // hull choice move (A7, B42).
+  function pickBar(p) {
+    var h = p.hold, add = 0, tPick = 0;
+    pickRows.forEach(function (r) { var n = val(r.id); if (r.what === "treasure") tPick = n; else add += n; });
+    var tAdd = Math.ceil((h.treasure + tPick) / h.per) - Math.ceil(h.treasure / h.per);
+    var hullSel = document.querySelector('input[name="h-hull"]:checked');
+    var opt = hullSel ? p.hullOptions.filter(function (o) { return o.id === hullSel.value; })[0] : null;
+    var cap = h.cap + (opt ? opt.addsHold || 0 : 0);
+    var used = h.provisions + h.goods + Math.ceil(h.treasure / h.per) + add + tAdd;
+    return holdBarHtml({ cap: cap, prov: h.provisions, goods: h.goods, treasure: h.treasure, treasureDirty: state.cargo.treasure.dirty || 0, add: add + tAdd, addLabel: "Taking on" }) +
+      (used > cap ? '<p class="notice warn" style="margin:4px 0">That\'s ' + (used - cap) + " more than the hold takes: what doesn't fit stays in her hold." + (p.hullOptions.some(function (o) { return o.addsHold && !o.lock; }) ? " Keeping her hull adds her hold to yours." : "") + "</p>" : "");
   }
 
   function gameOverPanel(v) {
@@ -15069,7 +15543,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- The Ship (§41.11) ----
 
-  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["officers", "Officers"], ["cargo", "Cargo"], ["cabin", "Your Cabin"]];
+  var SHIP_TABS = [["articles", "Articles"], ["crew", "Crew"], ["fleet", "Fleet"], ["officers", "Officers"], ["cargo", "Cargo"], ["cabin", "Your Cabin"]];
 
   // The Ship as a menu over any screen (A1, B27). In a battle it can be
   // read but nothing changes; away from port (a scene, a minigame, the
@@ -15095,7 +15569,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var html = '<div class="tabs">' + SHIP_TABS.map(function (t) {
       return '<button data-act="shiptab" data-tab="' + t[0] + '" class="menubtn' + (t[0] === tab ? " on" : "") + '">' + t[1] + "</button>";
     }).join("") + "</div>" + barkHtml() + sayFor("ship");
-    return html + ({ articles: articlesTab, crew: crewTab, officers: officersTab, cargo: cargoTab, cabin: cabinTab })[tab]();
+    return html + ({ articles: articlesTab, crew: crewTab, fleet: fleetTab, officers: officersTab, cargo: cargoTab, cabin: cabinTab })[tab]();
   }
 
   // An officer's bark: a small card in the corner of the screen (§38.6).
@@ -15202,6 +15676,40 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return html;
   }
 
+  // The Fleet view (A2-A3 of the M5 playtest): every ship you hold, her
+  // captain, the hands aboard and what she adds to the pooled hold. Hands
+  // move between the flagship and fleet ships, free, outside a battle.
+  function fleetTab() {
+    var fl = (state.fleet || []).filter(function (f) { return !f.out; });
+    var cap = PC.crew.holdCapacity(state);
+    var html = '<div class="svc"><h4>The hold</h4>' + holdBarHtml(holdNow()) + '<p class="small">One shared hold: every ship adds her space to the total. ' +
+      PC.crew.holdByShip(state).map(function (h) { return (h.id === "flagship" ? "<i>" + esc(h.name) + "</i>" : dirtyName(h.name, h.dirty)) + " " + h.cargo; }).join(" + ") + " = " + cap + ".</p></div>";
+    html += sayFor("ship:fleet");
+    var sh = state.ship, c = state.crew;
+    var offsOn = function (id) { return aboard().filter(function (o) { return (o.aboard || "flagship") === id; }); };
+    html += '<div class="fleetship">' + shipArtHtml(sh.type) + '<div class="pmain"><b><i>' + esc(sh.name) + '</i></b> <span class="note">' + esc(sh.type) + " · your flagship</span>" +
+      '<p class="small" style="margin:2px 0">Crew ' + c.count + " of " + sh.crewMax + " (at least " + (sh.crewMin || 5) + ")" + (c.wounded ? " · " + c.wounded + " wounded" : "") +
+      " · hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + sh.guns + " guns · hold " + sh.cargo + "</p>" +
+      (offsOn("flagship").length ? '<p class="small" style="margin:0">Officers aboard: ' + offsOn("flagship").map(function (o) { return esc(o.first + " " + (o.last || "")) + (o.quartermaster ? " (Quartermaster)" : ""); }).join(", ") + "</p>" : "") + "</div></div>";
+    if (!fl.length) return html + '<p class="note">No other ships yet. After a battle you can keep a captured ship as a prize ship (her hold joins yours) or a fleet ship (an officer captains her and she fights beside you).</p>';
+    fl.forEach(function (f) {
+      var capt = f.officer ? (state.officers || []).filter(function (o) { return o.id === f.officer && !o.gone; })[0] : null;
+      html += '<div class="fleetship">' + shipArtHtml(f.cls) + '<div class="pmain"><b>' + dirtyName(f.name || f.cls, f.dirty) + '</b> <span class="note">' + esc(f.cls) + " · " + (f.kind === "fleet" ? "fleet ship" : "prize ship") + "</span>" +
+        '<p class="small" style="margin:2px 0">' + (f.kind === "fleet" ? "Captain: " + (capt ? esc(capt.first + " " + (capt.last || "")) + " (" + esc(capt.type) + ")" : "none") + " · " : "") +
+        "Crew " + f.crew + " of " + f.crewMax + " (at least " + f.crewMin + ")" + (f.wounded ? " · " + f.wounded + " wounded" : "") + " · hull " + Math.round(f.hull) + "/" + f.hullMax + " · " + f.guns + " guns · adds " + (f.cargo || 0) + " to the hold</p>";
+      if (f.kind === "fleet") {
+        var to = PC.crew.canMoveHands(state, "flagship", f.id), back = PC.crew.canMoveHands(state, f.id, "flagship");
+        html += '<div class="buyrow" style="margin:4px 0">' +
+          (to.ok ? qstep("q-mv-to-" + f.id, Math.min(to.max, 1), to.max, 1, true) + '<button class="secondary" data-act="movehands" data-from="flagship" data-to="' + esc(f.id) + '" data-for="q-mv-to-' + esc(f.id) + '">Send hands to her</button>' : '<span class="note">Send hands to her: ' + esc(to.why) + "</span>") + "</div>" +
+          '<div class="buyrow" style="margin:4px 0">' +
+          (back.ok ? qstep("q-mv-back-" + f.id, Math.min(back.max, 1), back.max, 1, true) + '<button class="secondary" data-act="movehands" data-from="' + esc(f.id) + '" data-to="flagship" data-for="q-mv-back-' + esc(f.id) + '">Bring hands to the flagship</button>' : '<span class="note">Bring hands to the flagship: ' + esc(back.why) + "</span>") +
+          "</div>" + '<p class="note" style="margin:4px 0 0">Free, outside a battle. The greenest hands move first.</p>';
+      } else html += '<p class="note" style="margin:2px 0 0">A prize ship keeps exactly her minimum crew until she\'s sold.</p>';
+      html += "</div></div>";
+    });
+    return html;
+  }
+
   function officerCard(o, full) {
     var t = PC.data.creator.OFFICER_TYPES.filter(function (x) { return x.id === o.type; })[0];
     var traits = [o.voice, o.secondary, o.third, o.unique && o.unique !== o.voice ? o.unique : null].filter(Boolean);
@@ -15223,15 +15731,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function cargoTab() {
-    var html = holdBar() + '<p class="small">Treasure packs five units to a slot.</p>';
+    var html = holdBar() + '<p class="small">Treasure packs five units to a slot. Every ship\'s hold adds to one total (see Fleet).</p>';
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
-    ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: (k === "dirty" ? "Dirty" : "Clean") + " treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
+    ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
-      ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: (k === "dirty" ? "Dirty " : "") + g, n: n, dirty: k === "dirty" }); });
+      ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
     });
     html += '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Jettison</th></tr>' + rows.map(function (r, i) {
       var info = PC.data.goods[r.what];
-      return "<tr><td>" + esc(r.label) + (info && info.stores ? " " + STORES : "") + "</td><td>" + r.n + "</td><td>" + (r.n ? '<div class="buyrow">' + qstep("q-jet-" + i, 1, r.n) +
+      return "<tr><td>" + dirtyName(r.label, r.dirty) + (info && info.stores ? " " + STORES : "") + "</td><td>" + r.n + "</td><td>" + (r.n ? '<div class="buyrow">' + qstep("q-jet-" + i, 1, r.n) +
         '<button class="secondary" data-act="jettison" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '" data-for="q-jet-' + i + '" data-big="' + (r.what === "treasure" ? 1 : 0) + '"' + lockAttr(shipLock(false)) + '>Over the side</button></div>' : "") + "</td></tr>";
     }).join("") + "</table>";
     var used = PC.crew.usedThisSeason(state, "stores");
@@ -15548,19 +16056,30 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       PC.hunt.battle(state, state.minigame, fn, a);
     },
     "hassign": function (el) { PC.hunt.battle(state, state.minigame, "assignFleetShip", el.dataset.ship, el.dataset.what); },
+    "hvote": function (el) { markLog(); PC.hunt.vote(state, state.minigame, el.dataset.forOfficer || null); },
+    "hvotereact": function (el) { markLog(); PC.hunt.voteReact(state, state.minigame, el.dataset.react); },
     "hrepair": function () { markLog(); PC.hunt.doRepair(state, state.minigame); },
     "hprize": function () {
       var pick = function (n, d) { var x = document.querySelector('input[name="' + n + '"]:checked'); return x ? x.value : d; };
       var off = document.querySelector(".hofficer");
-      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null });
+      // The cargo picked on the screen (A7).
+      var cargo = pickRows.length ? { treasure: 0, goods: {}, provisions: 0 } : null;
+      pickRows.forEach(function (r) { var n = val(r.id); if (r.what === "treasure") cargo.treasure = n; else if (r.what === "provisions") cargo.provisions = n; else cargo.goods[r.what] = n; });
+      markLog();
+      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null, cargo: cargo });
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
     "hhome": function () { PC.hunt.sailHome(state, state.minigame); PC.minigames.leave(state); },
     "sellhull": function (el) {
       var id = who("shipwright");
+      // A sale that leaves cargo with no room forces a jettison: warn first (A9, G7).
+      var hh = N().hullSaleHold(state, el.dataset.ship);
+      if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Selling her takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
       var r = N().sellHull(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths") : null] } : null);
+      say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths" + (r.paidFromPurse ? " (" + gold(r.paidFromPurse) + " from your purse)" : "")) : null]
+          .concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) } : null);
       if (r.gold) toast("Sold her · +" + gold(r.gold) + " crew gold");
     },
     "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
@@ -15690,7 +16209,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var id = el.dataset.buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : who("provisioner");
       if (r.units) toast("Sold " + r.units + " · +" + gold(r.gold) + " crew gold");
       say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
-        { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [textChip("treasure", "Sold " + r.units + " " + (el.dataset.what === "treasure" ? "treasure" : el.dataset.what)), goldChip(r.gold)] : null });
+        { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", html: "Sold " + r.units + " " + dirtyName(el.dataset.what === "treasure" ? "treasure" : el.dataset.what, el.dataset.buyer === "fence") }, goldChip(r.gold)] : null });
     },
     "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; state.location.bark = null; },
     "artpick": function (el) { articleDraft = articleDraft || PC.articles.defaults(); articleDraft[el.dataset.slot] = el.dataset.opt; },
@@ -15729,6 +16248,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
     "jetconfirm": function () { var j = jettisonOk; jettisonOk = null; state.location.popup = null; if (j) PC.crew.jettison(state, j.what, j.n, j.dirty); },
     "jetcancel": function () { jettisonOk = null; state.location.popup = null; },
+    "movehands": function (el) {
+      var r = PC.crew.moveHands(state, el.dataset.from, el.dataset.to, qty(el));
+      var f = (state.fleet || []).filter(function (x) { return x.id === (el.dataset.to === "flagship" ? el.dataset.from : el.dataset.to); })[0];
+      say("ship:fleet", null, plural(r.n, "hand") + (el.dataset.to === "flagship" ? " come back aboard the flagship from the " : " go across to the ") + (f ? f.name || f.cls : "ship") + ".", null, null,
+        { chips: [textChip("officer", Object.keys(r.tiers).map(function (t) { return r.tiers[t] + " " + t; }).join(", "))] });
+    },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship:stores", null, "The crew drink to your health.", null, null, { chips: [moraleChip(m)] }); },
     "closepopup": function () { state.location.popup = null; },
     "firstsigning": function () {
@@ -16560,8 +17085,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     });
     // Clicks inside a menu panel don't close it.
     root.querySelectorAll("[data-stop]").forEach(function (p) { p.addEventListener("click", function (ev) { ev.stopPropagation(); }); });
+    // The prize screen's hull choice moves the hold bar (A7).
+    root.querySelectorAll('input[type="radio"]').forEach(function (r) { r.addEventListener("change", refreshTotals); });
+    // Collapsed cards remember being open across redraws (A12, B46).
+    root.querySelectorAll("details[data-keep]").forEach(function (d) { d.addEventListener("toggle", function () { keepOpen[d.dataset.keep] = d.open; }); });
     refreshTotals();
   }
+  var keepOpen = {};
 
   function start(rootEl) {
     root = rootEl;

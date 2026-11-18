@@ -2130,5 +2130,129 @@ test("a minigame roll records its outcome and where the log stood, for the resul
   ok(v.log.length > before, "its line follows");
 });
 
+test("moving hands: flagship and fleet ships only, within berths and minimums, free outside a battle (A3)", function () {
+  var s = huntReady("move");
+  PC.hunt.devFleetShip(s, "Schooner");
+  var f = s.fleet[0], crew0 = s.crew.count, f0 = f.crew;
+  var r = PC.crew.moveHands(s, "flagship", f.id, 3);
+  eq(r.n, 3); eq(s.crew.count, crew0 - 3); eq(f.crew, f0 + 3);
+  r = PC.crew.moveHands(s, f.id, "flagship", 2);
+  eq(s.crew.count, crew0 - 1); eq(f.crew, f0 + 1);
+  s.fleet.push({ id: "pz", kind: "prize", cls: "Sloop", crew: 5, crewMin: 5, crewMax: 30, cargo: 50, crewTiers: { Green: 5 } });
+  ok(!PC.crew.canMoveHands(s, "flagship", "pz").ok, "prize ships keep their minimum crew");
+  var c = PC.crew.canMoveHands(s, f.id, "flagship");
+  ok(c.max <= f.crew - f.crewMin, "never below her minimum");
+});
+
+test("the harbor due and payouts: crew gold first, then the purse; only both short is a shortfall (B45)", function () {
+  var s = huntReady("due");
+  var fee = PC.node.portFee(s);
+  s.money.crew = 1; s.money.purse = 1000;
+  var r = PC.node.payPortFee(s);
+  eq(r.fromCrew, 1); eq(r.fromPurse, fee - 1); ok(!r.taken && !r.stocks, "nothing confiscated");
+  eq(s.money.purse, 1000 - (fee - 1));
+  s.money.crew = 0; s.money.purse = 0;
+  r = PC.node.payPortFee(s);
+  ok(r.paid === 0, "both empty: the shortfall rules apply");
+});
+
+test("the Quartermaster: a fleet command vacates the post; the Acting Quartermaster holds the seat until the vote at the next action at sea (A4, §25.9)", function () {
+  var s = huntReady("qm");
+  PC.hunt.devFleetShip(s, "Sloop");
+  var dev = s.officers.filter(function (o) { return o.aboard !== "flagship"; })[0];
+  dev.aboard = "flagship"; s.fleet[0].officer = null;
+  var qm = s.officers.filter(function (o) { return o.quartermaster && !o.gone; })[0];
+  ok(qm, "someone holds the post");
+  // Promote the Quartermaster to a fleet command.
+  qm.aboard = s.fleet[0].id; s.fleet[0].officer = qm.id; qm.quartermaster = false; PC.officers.vacate(s);
+  var speaker = PC.officers.quartermaster(s);
+  ok(speaker && speaker === s.actingQM, "the Acting Quartermaster speaks, with officers aboard");
+  ok(PC.officers.votePending(s), "a vote is due");
+  var g = PC.hunt.start(s);
+  eq(g.phase, "vote");
+  PC.hunt.vote(s, g, null);
+  ok(!s.actingQM.active, "the acting man goes back to the crew");
+  var winner = s.officers.filter(function (o) { return o.quartermaster && !o.gone; })[0];
+  ok(winner && (winner.aboard || "flagship") === "flagship", "a flagship officer won");
+  PC.hunt.voteReact(s, g, "congratulate");
+  ok(g.phase !== "vote", "the hunt goes on");
+});
+
+test("the vote's score: traits, Mentor +2, and a Schemer wins every tie (§25.9)", function () {
+  var s = huntReady("score");
+  s.officers = [
+    { id: "a", first: "A", voice: "Jovial", secondary: "Proud", aboard: "flagship", rung: 0, joined: { year: 1754, season: 0 } },
+    { id: "b", first: "B", voice: "Schemer", secondary: "Eager", aboard: "flagship", rung: 0, joined: { year: 1754, season: 0 } },
+  ];
+  var sc = PC.officers.voteScores(s, null);
+  eq(sc[0].score, 4); eq(sc[1].score, 3);
+  var r = PC.officers.runVote(s, "b");
+  ok(r.winner.id === "b" || PC.officers.speakBonus(s) < 1, "speaking for B ties or wins it, and a Schemer wins ties");
+});
+
+test("the cargo picker loads what was picked, within what fits (A7); goods leave the summary chips (A10)", function () {
+  var s = huntReady("pick");
+  var a = aShip(s, "Barque", "Trade", "Avalon");
+  var g = huntWith(s, { ships: [a], shape: "single", hunter: false });
+  withDice([6, 6], function () { PC.hunt.engage(s, g); });
+  eq(g.phase, "after");
+  var pr = PC.hunt.currentPrize(s, g);
+  var goods = Object.keys(pr.loot.goods);
+  var pick = { treasure: 0, goods: {}, provisions: 0 };
+  if (goods.length) pick.goods[goods[0]] = 1;
+  var before = goods.length ? ((s.cargo.goods[goods[0]] || {}).dirty || 0) : 0;
+  var t0 = s.cargo.treasure.dirty;
+  PC.hunt.settlePrize(s, g, { hull: "release", crew: "release", captives: "free", cargo: pick });
+  if (goods.length) eq(s.cargo.goods[goods[0]].dirty, before + 1);
+  eq(s.cargo.treasure.dirty, t0, "no treasure picked, none taken");
+  var v = PC.minigames.view(s).after;
+  ok(!v.summary.some(function (c) { return /treasure|whisky|rum|sugar|tobacco/i.test(c.text || ""); }), "goods leave the chip list");
+});
+
+test("after-battle chips total across every ship taken: one line a good or effect (A10)", function () {
+  var m = PC.hunt.mergeChips([
+    { icon: "heat", k: "heat:avalon", n: 6, tpl: "Avalon Heat {+n}" }, { icon: "heat", k: "heat:avalon", n: 6, tpl: "Avalon Heat {+n}" },
+    { icon: "gold", k: "chest:crew", n: 50, tpl: "Ship's chest: {n} gold to crew gold" }, { icon: "gold", k: "chest:crew", n: 25, tpl: "Ship's chest: {n} gold to crew gold" },
+    { icon: "ship", text: "Prize ship: Gull" }]);
+  eq(m.length, 3);
+  eq(m[0].text, "Avalon Heat +12"); eq(m[1].text, "Ship's chest: 75 gold to crew gold");
+});
+
+test("Board her rolls the grapple at once (B37)", function () {
+  var s = huntReady("board2");
+  var e = aShip(s, "Sloop", "Raider", "Pirate");
+  var g = huntWith(s, { ships: [e], shape: "single", hunter: false });
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  eq(g.phase, "battle");
+  g.battle.step = "decision";
+  withDice([6, 6], function () { PC.hunt.battle(s, g, "decide", "board"); });
+  ok(!g.battle || g.battle.step !== "grapple", "no separate grapple step after Board her");
+  ok(!g.battle || g.battle.step !== "decision", "something happened");
+});
+
+test("a sighting's ships never share a name with each other or your fleet (A13)", function () {
+  var s = huntReady("names");
+  for (var i = 0; i < 30; i++) {
+    var grp = PC.huntGen.sighting(s, "north", PC.rng.fromKey("n|" + i), { kind: "convoy" });
+    var names = grp.ships.map(function (x) { return x.name; }).filter(Boolean);
+    names.push(s.ship.name);
+    var seen = {};
+    names.forEach(function (n) { ok(!seen[n], "twin name " + n); seen[n] = true; });
+  }
+});
+
+test("selling a hull shows her effect on the hold, and throws the overflow over the side, cheapest first (A9)", function () {
+  var s = huntReady("sellhold");
+  s.fleet = [{ id: "p1", kind: "prize", cls: "Sloop", name: "Gull", flag: "Avalon", size: 1, hull: 20, hullMax: 20, guns: 0, gunsMax: 10, crew: 5, crewMin: 5, crewMax: 30, cargo: 50, dirty: true, crewTiers: { Green: 5 } }];
+  s.provisions = 10;
+  PC.crew.addGood(s, "Sugar", PC.crew.holdCapacity(s) - PC.crew.slotsUsed(s), false);
+  var hh = PC.node.hullSaleHold(s, "p1");
+  eq(hh.over, 50); ok(hh.plan.length && hh.plan[0].what === "Sugar", "cheapest goods first");
+  s.location.place = "docks";
+  var r = PC.node.sellHull(s, "p1");
+  ok(PC.crew.slotsUsed(s) <= PC.crew.holdCapacity(s), "it all fits after");
+  ok(r.jettisoned.length, "the overflow went over the side");
+});
+
 console.log("\n" + passed + " passed, " + failed + " failed");
 process.exit(failed ? 1 : 0);

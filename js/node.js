@@ -595,6 +595,16 @@
     return { ok: true, hull: hull, guns: guns, total: hull + guns, dirty: dirty, repair: repair };
   }
 
+  // What selling her does to the pooled hold (A9): the space she takes
+  // away, and what would go over the side if the rest no longer fits.
+  function hullSaleHold(state, fid) {
+    var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
+    if (!f) return null;
+    var cap = PC.crew.holdCapacity(state), used = PC.crew.slotsUsed(state), after = cap - (f.cargo || 0);
+    var over = Math.max(0, used - after);
+    return { capBefore: cap, capAfter: after, used: used, loses: f.cargo || 0, over: over, plan: PC.crew.jettisonPlan(state, over) };
+  }
+
   function sellHull(state, fid) {
     var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
     if (!f) throw new Error("No such ship.");
@@ -614,9 +624,11 @@
       if (k) { state.crew.tiers[t] = (state.crew.tiers[t] || 0) + k; state.crew.count += k; home += k; }
       if (n - k) { paid += n - k; }
     });
-    if (paid) state.money.crew = Math.max(0, state.money.crew - paid * each);
+    var paidOff = paid ? PC.crew.payFrom(state, paid * each, true) : { crew: 0, purse: 0 };
+    // What no longer fits in the smaller hold goes over the side (A9).
+    var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
-    return { gold: p.total, home: home, paid: paid, payEach: each, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
@@ -785,11 +797,12 @@
     if (n <= 0) throw new Error("Pay off at least one hand.");
     var each = PC.crew.payOffEach(state);
     var cost = each * n;
-    if (state.money.crew < cost) throw new Error("Needs " + cost + " crew gold (" + each + " a hand).");
+    // Crew gold first, then the purse (B45 of the M5 playtest).
+    if (!PC.crew.canPay(state, cost)) throw new Error("Needs " + cost + " gold (" + each + " a hand), and crew gold and your purse together fall short.");
     PC.crew.removeHands(state, tier, n);
-    state.money.crew -= cost;
-    PC.state.addLog(state, "Paid off " + n + " " + tier + " hand" + (n > 1 ? "s" : "") + " at " + each + " each (" + cost + " crew gold).");
-    return { n: n, cost: cost, each: each, line: L.paidOff.replace("[number]", n) };
+    var paid = PC.crew.payFrom(state, cost);
+    PC.state.addLog(state, "Paid off " + n + " " + tier + " hand" + (n > 1 ? "s" : "") + " at " + each + " each (" + cost + " gold" + (paid.purse ? ", " + paid.purse + " of it from your purse" : "") + ").");
+    return { n: n, cost: cost, each: each, fromCrew: paid.crew, fromPurse: paid.purse, line: L.paidOff.replace("[number]", n) };
   }
 
   // ---- The arrival and the port fee (§17.1, §20.4, §24.9) ---------------------
@@ -800,25 +813,25 @@
     return Math.round(nd.portFeeBase * state.ship.size * standingBand(state, nd.faction).fee);
   }
 
-  // The harbor due and its shortfall (§17.2). The crew gold on hand pays
-  // what it can; the rest is waived by a leader at Friend or better, or
-  // taken in kind at the provisioner's prices: clean treasure, dirty
-  // treasure, goods (clean before dirty), provisions. With nothing left: a
-  // night in the stocks, 1 AP lost (placeholder until jail exists).
-  // Taking the gold on hand first is this build's reading (flagged).
+  // The harbor due and its shortfall (§17.2). Crew gold pays first and
+  // the captain's purse covers any shortfall automatically (B45 of the M5
+  // playtest); only if both together fall short is the rest waived by a
+  // leader at Friend or better, or taken in kind at the provisioner's
+  // prices: clean treasure, dirty treasure, goods (clean before dirty),
+  // provisions. With nothing left: a night in the stocks, 1 AP lost
+  // (placeholder until jail exists).
   function payPortFee(state, id) {
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
     var fee = portFee(state, id);
-    if (state.money.crew >= fee) {
-      state.money.crew -= fee;
-      return { fee: fee, paid: fee, lines: [L.duePaid + " (" + fee + " gold)"] };
+    var pay = PC.crew.payFrom(state, fee, true);
+    if (!pay.short) {
+      return { fee: fee, paid: fee, fromCrew: pay.crew, fromPurse: pay.purse, lines: [L.duePaid + " (" + fee + " gold)"] };
     }
-    var paid = state.money.crew;
-    state.money.crew = 0;
-    var short = fee - paid;
+    var paid = pay.crew + pay.purse;
+    var short = pay.short;
     if (nd.dueWaivedBy && PC.npcs.rung(state, nd.dueWaivedBy) >= 2) {
-      return { fee: fee, paid: paid, waived: short, lines: [L.dueWaived] };
+      return { fee: fee, paid: paid, fromCrew: pay.crew, fromPurse: pay.purse, waived: short, lines: [L.dueWaived] };
     }
     var taken = [];
     function takeUnits(label, have, price, remove) {
@@ -845,7 +858,7 @@
       lines.push(L.stocks);
     }
     PC.state.addLog(state, "Couldn't pay the harbor due in full" + (taken.length ? "; they took " + taken.join(", ") : "") + (short > 0 ? "; a night in the stocks (1 action lost)" : "") + ".");
-    return { fee: fee, paid: paid, taken: taken, stocks: short > 0, lines: lines };
+    return { fee: fee, paid: paid, fromCrew: pay.crew, fromPurse: pay.purse, taken: taken, stocks: short > 0, lines: lines };
   }
 
   // Every arrival (a hunt's return counts): the wounded, the maimed, the
@@ -854,7 +867,7 @@
     opts = opts || {};
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
-    var lines = [];
+    var lines = [], payChips = [];
     if (opts.fromHunt) lines.push(L.back);
     var c = state.crew;
     if (c.wounded > 0) {
@@ -879,11 +892,15 @@
         var comp = PC.crew.articleOption(state, "compensation");
         var each = Math.max(comp.min, Math.round(PC.crew.oneShare(state) * comp.shares));
         var cost = each * maimed;
-        if (state.money.crew >= cost) {
-          state.money.crew -= cost;
+        // Crew gold first, then the purse (B45); only if both fall short
+        // is it a breach of the Articles.
+        if (PC.crew.canPay(state, cost)) {
+          var mp = PC.crew.payFrom(state, cost);
           lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + cost + " gold)");
+          payChips.push(payChip("The maimed paid off", cost, mp));
         } else {
-          state.money.crew = 0;
+          var part = PC.crew.payFrom(state, cost, true);
+          payChips.push(payChip("The maimed, part paid", part.crew + part.purse, part, true));
           PC.crew.addMorale(state, -20);
           c.pressure += 2;
           lines.push(L.maimed.replace(/\[number\]/i, maimed) + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
@@ -900,8 +917,19 @@
     // Holdings come after the prototype.
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
-    state.location.popup = { title: "Arrival at " + nd.name, lines: lines };
+    if (fee.paid) payChips.push(payChip("Harbor due", fee.paid, { crew: fee.fromCrew || 0, purse: fee.fromPurse || 0 }, fee.paid < fee.fee));
+    // The popup's chips say which pot paid (B45).
+    var chips = lines.map(function (l) { return { icon: "port", text: l }; }).concat(payChips);
+    state.location.popup = { title: "Arrival at " + nd.name, lines: lines, chips: chips };
     return state.location.popup;
+  }
+
+  // "Harbor due 40 gold: 30 crew gold, 10 from your purse"
+  function payChip(what, total, p, bad) {
+    var parts = [];
+    if (p.crew) parts.push(p.crew + " crew gold");
+    if (p.purse) parts.push(p.purse + " from your purse");
+    return { icon: "gold", text: what + " " + total + " gold" + (parts.length ? ": " + parts.join(", ") : ""), ink: bad || p.purse ? "bad" : "mid" };
   }
 
   PC.node = {
@@ -909,6 +937,7 @@
     keeperQuestions: keeperQuestions,
     hullSalePrice: hullSalePrice,
     sellHull: sellHull,
+    hullSaleHold: hullSaleHold,
     stripGuns: stripGuns,
     askKeeperQuestion: askKeeperQuestion,
     haggleCheck: haggleCheck,

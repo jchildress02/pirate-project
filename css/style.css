@@ -553,3 +553,25 @@ button.big { font-size: 22px; padding: 12px 30px; }
 .say .effects { margin-top: 8px; }
 /* Popups sit above the menus (the Ship menu's warnings, G7). */
 .modal.popup { z-index: 40; }
+/* Dirty goods and hulls (B44): oxblood name, a black spot after it. */
+.dirty { color: var(--oxblood); cursor: help; }
+.dirty .spot { color: #1a120b; font-size: .8em; }
+/* The stacked hold bar (A7, A8). */
+.holdbar { display: flex; height: 18px; max-width: 680px; border: 1px solid #6b5030; background: rgba(255,251,238,.6); margin: 6px 0 4px; overflow: hidden; }
+.holdbar i { display: block; height: 100%; }
+.holdbar i.new { background-image: repeating-linear-gradient(45deg, rgba(255,251,238,.55) 0 3px, transparent 3px 7px); }
+.holdkey { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 15.5px; color: var(--faded); }
+.holdkey b { display: inline-block; width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; border: 1px solid #6b5030; }
+.holdkey .over { color: var(--bad); font-style: normal; }
+/* Collapsed cards (merchants, B46; her full stats, A12). */
+details.card2 { border: 1px solid var(--rule); background: rgba(255,251,238,.5); margin: 10px 0; max-width: 760px; }
+details.card2 > summary { cursor: pointer; padding: 10px 14px; list-style: none; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+details.card2 > summary::-webkit-details-marker { display: none; }
+details.card2 > summary .caret { width: 12px; height: 12px; transition: transform .2s; }
+details.card2[open] > summary .caret { transform: rotate(180deg); }
+details.card2 > .inner { padding: 0 14px 12px; }
+details.stats { margin: 2px 0 0; font-size: 15.5px; }
+details.stats > summary { cursor: pointer; color: var(--faded); font-style: italic; }
+.fleetship { border: 1px solid var(--rule); background: rgba(255,251,238,.55); padding: 8px 12px; margin: 8px 0; max-width: 760px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.fleetship .pmain { flex: 1; min-width: 240px; }
+.pickrow td { vertical-align: middle; }

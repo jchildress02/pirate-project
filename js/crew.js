@@ -154,6 +154,106 @@
     PC.state.addLog(state, "Jettisoned " + n + " " + (what === "treasure" ? (dirty ? "dirty " : "clean ") + "treasure" : what) + ".");
   }
 
+  // What each ship adds to the pooled hold (A8 of the M5 playtest).
+  function holdByShip(state) {
+    var out = [{ id: "flagship", name: state.ship.name, cls: state.ship.type, kind: "flagship", cargo: state.ship.cargo }];
+    (state.fleet || []).forEach(function (f) { if (!f.out) out.push({ id: f.id, name: f.name || f.cls, cls: f.cls, kind: f.kind, cargo: f.cargo || 0, dirty: !!f.dirty }); });
+    return out;
+  }
+
+  // What would go over the side to free `slots` of hold space (A9). The
+  // cheapest goods go first, then provisions, then treasure (DEFAULT, the
+  // M5 playtest patch). Returns [{ what, n, dirty }]; changes nothing.
+  function jettisonPlan(state, slots) {
+    var plan = [];
+    if (slots <= 0) return plan;
+    var goods = [];
+    Object.keys(state.cargo.goods).forEach(function (g) {
+      var e = state.cargo.goods[g], base = (PC.data.goods[g] || {}).base || 0;
+      if (e.clean) goods.push({ what: g, n: e.clean, dirty: false, base: base });
+      if (e.dirty) goods.push({ what: g, n: e.dirty, dirty: true, base: base });
+    });
+    goods.sort(function (a, b) { return a.base - b.base || (a.dirty ? -1 : 1); });
+    goods.forEach(function (g) { if (slots <= 0) return; var k = Math.min(g.n, slots); plan.push({ what: g.what, n: k, dirty: g.dirty }); slots -= k; });
+    if (slots > 0 && state.provisions) { var p = Math.min(state.provisions, slots); plan.push({ what: "provisions", n: p, dirty: false }); slots -= p; }
+    if (slots > 0) {
+      var per = E().TREASURE_PER_SLOT, t = state.cargo.treasure;
+      // Treasure packs five to a slot: freeing a slot can take up to five units.
+      ["dirty", "clean"].forEach(function (k) {
+        if (slots <= 0 || !t[k]) return;
+        var units = Math.min(t[k], slots * per);
+        plan.push({ what: "treasure", n: units, dirty: k === "dirty" });
+        slots -= Math.ceil(units / per);
+      });
+    }
+    return plan;
+  }
+
+  // Throw what no longer fits over the side (after a hull is sold, A9).
+  function jettisonOverflow(state) {
+    var over = slotsUsed(state) - holdCapacity(state);
+    if (over <= 0) return [];
+    var plan = jettisonPlan(state, over);
+    plan.forEach(function (x) { jettison(state, x.what, x.n, x.dirty); });
+    return plan;
+  }
+
+  // Pay a sum the crew owes as a crew: crew gold first, any shortfall from
+  // the captain's purse automatically (B45 of the M5 playtest, replacing the
+  // optional purse gift of §24.9). Returns { crew, purse, short }: what each
+  // pot paid, and what neither could cover (nothing is taken then).
+  function payFrom(state, amount, partial) {
+    amount = Math.max(0, Math.round(amount));
+    var have = state.money.crew + state.money.purse;
+    if (have < amount && !partial) return { crew: 0, purse: 0, short: amount - have };
+    var fromCrew = Math.min(state.money.crew, amount);
+    var fromPurse = Math.min(state.money.purse, amount - fromCrew);
+    state.money.crew -= fromCrew;
+    state.money.purse -= fromPurse;
+    return { crew: fromCrew, purse: fromPurse, short: amount - fromCrew - fromPurse };
+  }
+  function canPay(state, amount) { return state.money.crew + state.money.purse >= amount; }
+
+  // ---- Moving hands between your own ships (A3 of the M5 playtest) ---------
+  // Between the flagship and fleet ships only: a prize ship keeps exactly
+  // her minimum crew until she's sold. Free (no action) whenever no battle
+  // is being fought. The greenest hands move first (DEFAULT).
+  function shipCrew(state, id) {
+    if (id === "flagship") return { id: id, crew: state.crew.count, wounded: state.crew.wounded || 0, min: state.ship.crewMin || 5, max: state.ship.crewMax, tiers: state.crew.tiers };
+    var f = (state.fleet || []).filter(function (x) { return x.id === id && !x.out; })[0];
+    if (!f) return null;
+    f.crewTiers = f.crewTiers || { Green: f.crew };
+    return { id: id, crew: f.crew, wounded: f.wounded || 0, min: f.crewMin, max: f.crewMax, tiers: f.crewTiers, kind: f.kind, rec: f };
+  }
+  function canMoveHands(state, from, to) {
+    var g = state.minigame;
+    if (g && g.kind === "hunt" && g.phase === "battle") return { ok: false, why: "Not during a battle", max: 0 };
+    var a = shipCrew(state, from), b = shipCrew(state, to);
+    if (!a || !b || from === to) return { ok: false, why: "No such ship", max: 0 };
+    if ((a.kind && a.kind !== "fleet") || (b.kind && b.kind !== "fleet")) return { ok: false, why: "A prize ship keeps her minimum crew until she's sold", max: 0 };
+    var max = Math.min(a.crew - a.min, b.max - b.crew - b.wounded);
+    if (max <= 0) return { ok: false, why: a.crew - a.min <= 0 ? "She can't spare a hand" : "No berths free", max: 0 };
+    return { ok: true, max: max };
+  }
+  function moveHands(state, from, to, n) {
+    n = Math.floor(n);
+    var c = canMoveHands(state, from, to);
+    if (!c.ok) throw new Error(c.why);
+    if (n <= 0) throw new Error("Move at least one hand.");
+    n = Math.min(n, c.max);
+    var a = shipCrew(state, from), b = shipCrew(state, to), moved = {};
+    E().TIER_ORDER.forEach(function (t) {
+      var k = Math.min(n, a.tiers[t] || 0);
+      if (!k) return;
+      a.tiers[t] -= k; b.tiers[t] = (b.tiers[t] || 0) + k; moved[t] = k; n -= k;
+    });
+    var total = Object.keys(moved).reduce(function (s, t) { return s + moved[t]; }, 0);
+    if (from === "flagship") state.crew.count -= total; else a.rec.crew -= total;
+    if (to === "flagship") state.crew.count += total; else b.rec.crew += total;
+    PC.state.addLog(state, "Moved " + total + " hand" + (total === 1 ? "" : "s") + " to " + (to === "flagship" ? "the flagship" : "the " + (b.rec.name || b.rec.cls)) + ".");
+    return { n: total, tiers: moved };
+  }
+
   // ---- Joining and leaving -------------------------------------------------
 
   // New hands join at the crew's morale or 50 + the floor, whichever is
@@ -327,6 +427,14 @@
     addGood: addGood,
     removeGood: removeGood,
     jettison: jettison,
+    holdByShip: holdByShip,
+    jettisonPlan: jettisonPlan,
+    jettisonOverflow: jettisonOverflow,
+    payFrom: payFrom,
+    canPay: canPay,
+    shipCrew: shipCrew,
+    canMoveHands: canMoveHands,
+    moveHands: moveHands,
     addHands: addHands,
     removeHands: removeHands,
     berths: berths,

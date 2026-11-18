@@ -267,10 +267,10 @@
 
   // An enemy leaves the fight: struck, captured (crew broken, knocked out),
   // sunk or escaped. Triggers the convoy and flagship strike rolls (§21.13).
-  function knockOut(state, game, b, e, how) {
+  function knockOut(state, game, b, e, how, quiet) {
     if (e.out) return;
     e.out = how;
-    if (how === "struck" || how === "captured") say(state, game, how === "struck" ? L().struck : L().crewBroken);
+    if (!quiet && (how === "struck" || how === "captured")) say(state, game, how === "struck" ? L().struck : L().crewBroken);
     if (how === "sunk") say(state, game, L().knockedOut.sunk);
     var taken = how === "struck" || how === "captured" || how === "sunk";
     if (!taken) return;
@@ -503,7 +503,8 @@
     if (b.step !== "posChoice") throw new Error("Not the moment for that.");
     if (what === "rake") b.exMod = 2;
     else if (what === "open") { b.exMod = 0; b.openRange = true; }
-    else if (what === "close") { b.closeBonus = 1; afterBeat(state, game); if (!b.over) b.step = "grapple"; return; }
+    // Closing for boarding rolls the grapple at once (B37 of the M5 playtest).
+    else if (what === "close") { b.closeBonus = 1; afterBeat(state, game); if (!b.over && b.step !== "retarget") { b.step = "grapple"; return doGrapple(state, game); } return; }
     afterBeat(state, game);
     if (!b.over && b.step !== "retarget") b.step = "exchange";
   }
@@ -642,7 +643,9 @@
       return toStrikeFirst(state, game);
     }
     if (intent === "board") { say(state, game, L().enemyBoards); b.step = "repel"; return; }
-    if (what === "board") { b.step = "grapple"; return; }
+    // Board her rolls the grapple directly: it's the only step after Board
+    // (§21.12; B37 of the M5 playtest).
+    if (what === "board") { b.step = "grapple"; return doGrapple(state, game); }
     startRound(state, game);
   }
 
@@ -871,8 +874,9 @@
       } else if (p.outcome === "partial") say(state, game, L().duel.partial);
       else { say(state, game, L().duel.setback); PC.scenes.applyEffect(state, { tag: "Wounded", untilSeasonEnd: true }); bd.enemyNext += 1; }
     } else if (id === "demand") {
+      // A clean demand shows only the surrender line (B40 of the M5 playtest).
       say(state, game, L().demand[p.outcome]);
-      if (p.outcome === "clean") { e.demanded = true; knockOut(state, game, b, e, "struck"); return afterBoardingOut(state, game); }
+      if (p.outcome === "clean") { e.demanded = true; knockOut(state, game, b, e, "struck", true); return afterBoardingOut(state, game); }
       e.refusedDemand = true; // the Quarter Asked Article's test (§22.7)
       if (p.outcome === "partial") shake(e, 1);
     }
@@ -1050,6 +1054,9 @@
     if (b.step === "position") v.check = positionCheck(state, b);
     if (b.step === "exchange") v.exchange = exchangeEdge(state, b);
     if (b.step === "grapple") v.check = { type: "Board", dr: clamp(en.rating, 0, 8), extra: b.closeBonus ? [{ label: "Closed on her", value: 1 }] : [] };
+    // The Decision's Board her shows the grapple's odds (B37).
+    if (b.step === "decision" && en) v.grappleCheck = { type: "Board", dr: clamp(en.rating, 0, 8) };
+    if (b.step === "posChoice" && en) v.grappleCheck = { type: "Board", dr: clamp(en.rating, 0, 8), extra: [{ label: "Closed on her", value: 1 }] };
     if (b.step === "repel") v.check = { type: "Board", dr: clamp(en.rating, 0, 8) };
     if (b.step === "chase" || b.step === "press") v.check = chaseCheck(state, b);
     if (b.step === "clash") v.actions = actions(state, b);
