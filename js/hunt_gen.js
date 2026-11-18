@@ -169,7 +169,16 @@
     return group(state, ships, shape, false, r);
   }
 
+  // Escorts, convoys and your own fleet never share a name with another
+  // ship in the same group (A13 of the M5 playtest): a clash rerolls.
   function group(state, ships, shape, hunter, r) {
+    var taken = {};
+    [state.ship && state.ship.name].concat((state.fleet || []).map(function (f) { return f.name; })).forEach(function (n) { if (n) taken[n] = true; });
+    ships.forEach(function (s) {
+      for (var i = 0; i < 12 && s.name && taken[s.name]; i++) s.name = shipName(state, s.flag, s.role, r);
+      if (s.name && taken[s.name]) s.name = null; // a nameless ship rather than a twin
+      if (s.name) taken[s.name] = true;
+    });
     return { ships: ships, shape: shape, hunter: hunter };
   }
 
