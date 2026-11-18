@@ -7865,7 +7865,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force };
     game.force = null;
     // A vacant Quartermaster's post is filled at the next voyage event
-    // (§25.9): in the prototype, the next action at sea (DEFAULT).
+    // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
+    // save with the post empty is caught here too.
+    PC.officers.ensureQuartermaster(state);
     if (PC.officers.votePending(state)) {
       game.vote = { step: "pre", candidates: PC.officers.voteScores(state, null).map(function (x) { return { id: x.id, name: x.name }; }) };
       game.phase = "vote";
