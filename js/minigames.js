@@ -78,7 +78,10 @@
     if (!game || !game.pending) throw new Error("Nothing to settle.");
     var p = game.pending;
     game.pending = null;
-    game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null };
+    // logAt: where the log stood, so the screen can show this roll's result
+    // box beside the lines it wrote (§41.1, G4 of the M5 playtest).
+    game.rollSeq = (game.rollSeq || 0) + 1;
+    game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null, logAt: game.log.length, seq: game.rollSeq, chips: [] };
     return engine(game).settle(state, game, p);
   }
 
@@ -126,6 +129,7 @@
     v.pending = pendingView(state);
     v.over = !!game.over;
     v.log = game.log.slice();
+    v.lastRoll = game.lastRoll || null;
     return v;
   }
 

@@ -206,7 +206,9 @@
     var hp = share ? Math.max(1, Math.round(a.hpLost * share)) : 0;
     if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
-    a.chips.push({ icon: "hull", text: hp ? "Repaired at sea: hull +" + hp : "No repairs at sea" });
+    var chip = { icon: "hull", text: hp ? "Repaired at sea: hull +" + hp : "No repairs at sea", ink: hp ? "good" : null };
+    a.chips.push(chip);
+    if (game.lastRoll) game.lastRoll.chips = [chip]; // shown in the roll's result box (G4)
   }
 
   // Treat Wounds (§21.15): a Cook aboard rolls on a Wounded captain. Clean
