@@ -245,6 +245,7 @@
     // Each walk into a place is one visit (one action covers every officer
     // hire on a Tavern visit, §25.7).
     state.location.visit = (state.location.visit || 0) + 1;
+    state.location.sales = {}; // this visit's sales by buyer (R6)
     var id = here(state);
     // The persistent Minors count as met once the captain walks into their place.
     var meet = { tavern: "keeper", docks: "shipwright", merchant: "provisioner" }[place];
@@ -482,6 +483,7 @@
     else { PC.crew.removeGood(state, what, units, dirty); s.sold[what] = (s.sold[what] || 0) + units; }
     state.money.crew += gold;
     markDealt(state, who);
+    noteSale(state, buyer, gold);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
     // Selling here slowly raises prosperity (§20.2; fence sales count, assumption).
     s.soldGold += gold;
@@ -499,6 +501,53 @@
       line = noteTrade(state, who, gold, L) || (units < n ? L.capReached : (what === "treasure" ? L.treasureSold : L.goodsSold));
     }
     return { units: units, gold: gold, line: line, partial: units < n };
+  }
+
+  // This visit's sales to a buyer, for the running total on his card (R6).
+  function noteSale(state, buyer, gold) {
+    var s = (state.location.sales = state.location.sales || {});
+    s[buyer] = (s[buyer] || 0) + gold;
+  }
+  function visitSales(state, buyer) { return ((state.location.sales || {})[buyer]) || 0; }
+
+  // Provisions sell back to the provisioner at half his price, out of his
+  // season's buying cap (ruled November 18, R7).
+  function provisionsSellPrice(state) { return money(provisionsPrice(state) * E().PROVISIONS_SELL_SHARE); }
+
+  function sellProvisions(state, n) {
+    n = Math.floor(n);
+    var id = here(state), who = slotNpc(id, "provisioner"), L = nodeData(id).lines.provisioner;
+    if (PC.npcs.serviceLevel(state, who) == null) return { line: L.refuse, units: 0, gold: 0 };
+    if (n <= 0 || state.provisions < n) throw new Error("You don't have that many.");
+    var each = provisionsSellPrice(state);
+    var units = Math.min(n, each > 0 ? Math.floor(provisionerCapLeft(state) / each + 1e-9) : 0);
+    if (units <= 0) return { line: L.capReached, units: 0, gold: 0 };
+    var gold = Math.round(each * units);
+    state.provisions -= units;
+    state.money.crew += gold;
+    season(state).provisionerPaid += gold;
+    noteSale(state, "provisioner", gold);
+    PC.state.addLog(state, "Sold " + units + " provisions lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
+    return { units: units, gold: gold, line: noteTrade(state, who, gold, L) || (units < n ? L.capReached : L.goodsSold), partial: units < n };
+  }
+
+  // Sell all he'll take (R6): every unit this buyer buys, the dearest first,
+  // until his coffers run dry. Provisions are left alone.
+  function sellAll(state, buyer) {
+    var k = buyer === "fence" ? "dirty" : "clean";
+    var rows = [];
+    if (state.cargo.treasure[k]) rows.push("treasure");
+    Object.keys(state.cargo.goods).forEach(function (g) { if ((state.cargo.goods[g] || {})[k]) rows.push(g); });
+    rows.sort(function (a, b) { return unitPrice(state, buyer, b) - unitPrice(state, buyer, a); });
+    var total = 0, units = 0, last = null, rumor = null;
+    rows.forEach(function (w) {
+      var have = w === "treasure" ? state.cargo.treasure[k] : ((state.cargo.goods[w] || {})[k] || 0);
+      if (!have) return;
+      var r = sell(state, buyer, w, have);
+      total += r.gold || 0; units += r.units || 0; last = r.line || last;
+      if (r.rumor) rumor = r.rumor;
+    });
+    return { units: units, gold: total, line: last, rumor: rumor };
   }
 
   // ---- The shipwright (§17.2, §21.6, §21.7) -----------------------------------
@@ -612,6 +661,7 @@
     var p = hullSalePrice(state, f);
     if (!p.ok) throw new Error(p.why);
     state.money.crew += p.total;
+    state.records.hullsSold = (state.records.hullsSold || 0) + 1; // the end screen (R5)
     state.fleet = state.fleet.filter(function (x) { return x !== f; });
     // Her captain-officer comes back aboard the flagship.
     (state.officers || []).forEach(function (o) { if (o.aboard === fid) o.aboard = "flagship"; });
@@ -931,6 +981,10 @@
   }
 
   PC.node = {
+    sellProvisions: sellProvisions,
+    provisionsSellPrice: provisionsSellPrice,
+    sellAll: sellAll,
+    visitSales: visitSales,
     FLAGS: F,
     keeperQuestions: keeperQuestions,
     hullSalePrice: hullSalePrice,

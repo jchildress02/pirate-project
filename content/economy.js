@@ -21,6 +21,7 @@
     TREASURE_UNIT: 100,       // gold a unit at a Modest port (§20.1)
     TREASURE_PER_SLOT: 5,     // treasure packs 5 units to a cargo slot (§22.6)
     PROVISIONS_LOT: 30,       // §20.6
+    PROVISIONS_SELL_SHARE: 0.5, // the provisioner buys lots back at half his price (ruled November 18, R7)
     SIGNING: { Green: 15, Able: 30, Seasoned: 45, Veteran: 75 }, // §24.7
     TIER_ORDER: ["Green", "Able", "Seasoned", "Veteran"],
     REPAIR_PER_HP: 8,         // Size 1 (§21.6)

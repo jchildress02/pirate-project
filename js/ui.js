@@ -297,11 +297,55 @@
     liveTotals = []; liveMax = {};
     expiryWarning();
     var screen = state.current.screen;
-    var content = screen === "hub" ? hubPanel() : screen === "node" ? nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
+    if (screen === "end") return drawEnd();
+    var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
     wire();
+  }
+
+  // ---- The end of the prototype (§37.1; the M6 chat's R5) ----
+  // One screen for stopping, being captured and dying (it absorbs the old
+  // game over screen).
+
+  function drawEnd() {
+    var v = PC.summary.summary(state);
+    var c = state.captain, pic = PC.creator.captainPortrait(c);
+    var L = PC.data.endLines;
+    var head = v.how === "stopped" ? L.title : L.overTitle;
+    var meter = function (n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n); };
+    var st = v.standing || {}, ht = v.heat || {};
+    var rows = [
+      ["Your purse", gold(v.purse) + " gold"], ["Crew gold", gold(v.crew) + " gold"],
+      ["Your worth", gold(v.worth) + " gold" + ' <span class="note">(your purse; no stash or holdings yet)</span>'],
+      ["Prizes taken", String(v.prizes)], ["Hulls sold", String(v.hullsSold)],
+      ["Standing", "Avalon " + meter(st.avalon || 0) + " · Frisia " + meter(st.frisia || 0) + " · Pirates " + meter(st.pirates || 0)],
+      ["Heat", "Avalon " + (ht.avalon || 0) + " · Frisia " + (ht.frisia || 0)],
+      ["Dread", String(v.dread)],
+      [v.tagsAreNew ? "Tags earned" : "Tags", v.tags.length ? esc(v.tags.join(", ")) : "None"],
+      ["Leads", "What Was Lost " + v.leads.loss + " of " + v.leads.lossNeeded + " · The Hidden Haven " + v.leads.haven + " of " + v.leads.havenNeeded],
+    ];
+    var how = v.how === "stopped" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[v.how === "died" ? "died" : "captured"]) + "</div>";
+    root.innerHTML = frame('<div class="endscreen" style="padding:18px 16px 32px;max-width:720px;margin:0 auto">' + '<p class="sc" style="margin:0">' + esc(v.season) + "</p>" +
+      '<h2 class="title">' + esc(head) + "</h2>" + how +
+      '<div class="person" style="margin:12px 0">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:96px;height:auto">' : sil(72, 108)) +
+      '<div class="pmain"><div class="namecard"><b>' + esc(v.captain) + '</b><span class="role">Captain of the ' + esc(v.ship.name) + " · " + esc(v.ship.type) + "</span></div>" +
+      (v.reputation ? '<p class="small"><i>' + esc(v.reputation) + "</i></p>" : "") + "</div></div>" +
+      '<table class="grid">' + rows.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</table>" +
+      '<p class="note">' + esc(v.how === "stopped" ? L.note : L.overNote) + "</p>" +
+      '<div class="actions"><button class="primary" data-act="quit">Return to title</button>' +
+      (settings.dev && v.how === "stopped" ? '<button class="secondary" data-act="keepplaying">Developer: keep playing (actions topped up)</button>' : "") + "</div></div>") +
+      popupHtml() + menuHtml();
+    wire();
+  }
+
+  // The banner when the season's actions are spent (R5): free actions like
+  // selling still work, and the player ends the prototype when ready.
+  function noActionsBanner() {
+    if (!state || state.ap.left > 0 || state.current.screen !== "node") return "";
+    return '<div class="notice" style="margin:0 0 10px"><b>No actions left.</b> You can still do anything that costs no action, like selling. ' +
+      '<button class="primary" data-act="endproto" style="margin-left:6px">End the prototype</button></div>';
   }
 
   // ---- Title screen (§41.2) ----
@@ -1037,7 +1081,15 @@
       html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
         (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="secondary" data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' +
           '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return gold(n * pp) + " gold · aboard after: " + (state.provisions + n) + " lots, " + timeAtSea(state.provisions + n); }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
-        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p></div>";
+        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+        // R7: provisions sell back at half his price, out of his coffers.
+        (state.provisions > 0 ? (function () {
+          var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
+          var smax = Math.max(1, Math.min(state.provisions, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
+          return '<p class="small" style="margin-top:8px">He buys provisions back at ' + gold(sp) + " gold a lot.</p>" +
+            '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
+            totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>";
+        })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
         Object.keys(stock).map(function (gname) {
@@ -1096,8 +1148,12 @@
     });
     var who_ = PC.npcs.get(state, buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : N().slotNpc(N().here(state), "provisioner"));
     var his = who_ && who_.gender === "f" ? "Her" : "His";
-    var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his);
+    // R6: this visit's running total, and Sell all he'll take.
+    var sold = N().visitSales(state, buyer);
+    var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his) +
+      (sold ? '<p class="small"><b>This visit: +' + gold(sold) + " crew gold</b></p>" : "");
     if (!rows.length) return html + '<p class="note">Nothing aboard ' + (buyer === "fence" ? "for him" : "to sell here") + ".</p></div>";
+    html += '<div class="actions" style="margin:4px 0 8px"><button class="secondary" data-act="sellall" data-buyer="' + buyer + '"' + (capLeft <= 0 ? " disabled" : "") + ">Sell all " + (his === "Her" ? "she" : "he") + "'ll take</button></div>";
     return html + '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Pays</th><th>Sell</th></tr>' + rows.map(function (r) {
       var id = "q-sell-" + buyer + "-" + slug(r.what);
       var price = N().unitPrice(state, buyer, r.what);
@@ -1577,8 +1633,7 @@
   function gameOverPanel(v) {
     var go = v.hunt.gameOver || {};
     return '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[go.how === "died" ? "died" : "captured"]) + "</div>" +
-      '<p class="note">This is the end of the run for the prototype. Imprisonment and heirs come in later milestones.</p>' +
-      '<div class="actions"><button class="primary" data-act="quit">Back to the title</button></div>';
+      '<div class="actions"><button class="primary" data-act="endgameover">See how it ended</button></div>';
   }
 
   // Liar's Dice (§41.6): drawn dice, cups, a bid stepper and tappable faces.
@@ -1882,6 +1937,7 @@
       '<button class="secondary" data-act="import">Load file</button>' +
       '<button class="secondary" data-act="openmenu" data-menu="settings">Settings</button>' +
       (state && settings.dev ? '<button class="secondary" data-act="openmenu" data-menu="dev">Developer</button>' : "") +
+      (state && state.current.screen === "node" ? '<button class="secondary" data-act="endproto">End the prototype</button>' : "") +
       (state ? '<button class="secondary" data-act="quit">Title</button>' : "") + "</div>" +
       (state ? '<p class="note">The game saves itself after every action.</p>' : "");
   }
@@ -2219,6 +2275,8 @@
       var r = PC.rumors.askKeeper(state);
       var L = N().nodeData(N().here(state)).lines.keeper;
       if (r.refuse) { say(id, firstName(id), r.line); return; }
+      // Asked again this season (the greyed button is still tappable).
+      if (r.again) { say(id, firstName(id), r.line); return; }
       var heard = r.rumors.map(function (x) { return x.text; });
       // One quote, running on: "I did hear one other thing... [rumor]" (the author, UI pass 1 review).
       if (r.extra) heard.push(joinQuotes(r.extraLine, r.extra.text));
@@ -2333,6 +2391,19 @@
       if (r.units) toast("Sold " + r.units + " · +" + gold(r.gold) + " crew gold");
       say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
         { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", html: "Sold " + r.units + " " + dirtyName(el.dataset.what === "treasure" ? "treasure" : el.dataset.what, el.dataset.buyer === "fence") }, goldChip(r.gold)] : null });
+    },
+    "sellprov": function (el) {
+      var r = N().sellProvisions(state, qty(el)), id = who("provisioner");
+      if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
+      say(id, firstName(id), r.line, null, null, { chips: r.units ? [{ icon: "treasure", text: "Sold " + plural(r.units, "provisions lot") }, goldChip(r.gold)] : [] });
+    },
+    "sellall": function (el) {
+      var buyer = el.dataset.buyer;
+      var r = N().sellAll(state, buyer);
+      var id = buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : who("provisioner");
+      if (r.units) toast("Sold " + r.units + " · +" + gold(r.gold) + " crew gold");
+      say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
+        { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", text: "Sold " + r.units + " units" }, goldChip(r.gold)] : [] });
     },
     "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; state.location.bark = null; },
     "artpick": function (el) { articleDraft = articleDraft || PC.articles.defaults(); articleDraft[el.dataset.slot] = el.dataset.opt; },
@@ -3011,6 +3082,14 @@
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; creating = false; menu = null; },
+    // The end of the prototype (R5).
+    "endproto": function (el) {
+      menu = null;
+      if (state.ap.left > 0 && confirmFirst(el, "End the prototype?", "You still have " + plural(state.ap.left, "action") + " this season. End the run here?")) return;
+      menu = null; PC.summary.end(state, "stopped");
+    },
+    "endgameover": function () { PC.minigames.leave(state); menu = null; PC.summary.end(state); },
+    "keepplaying": function () { PC.summary.keepPlaying(state); },
     "export": function () { dialog = "export"; },
     "import": function () { dialog = "import"; },
     "closedialog": function () { dialog = null; },

@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -2374,6 +2374,55 @@ test("the startup quests' journal entries open at the actual offer (B9)", functi
   ok(!PC.quests.journal(s).some(function (j) { return j.id === "underworld"; }), "not while Bobby only waves you over");
   PC.scenes.enterScene(s, "ocr_uw_2");
   ok(PC.quests.journal(s).some(function (j) { return j.id === "underworld"; }), "open once he asks for the coin");
+});
+
+console.log("Milestone 6 (§37.1, §37.4; the M6 chat)");
+
+test("R7: provisions sell back at half the provisioner's price, out of his coffers; the visit total counts it", function () {
+  var s = at(inTown(), "merchant"); PC.node.enter(s, "merchant");
+  s.provisions = 10; var crew = s.money.crew;
+  eq(PC.node.provisionsSellPrice(s), Math.round(PC.node.provisionsPrice(s) * 0.5 * 100) / 100);
+  var r = PC.node.sellProvisions(s, 4);
+  eq(r.units, 4); eq(s.provisions, 6);
+  eq(s.money.crew, crew + r.gold);
+  eq(PC.node.visitSales(s, "provisioner"), r.gold);
+  PC.node.enter(s, "merchant");
+  eq(PC.node.visitSales(s, "provisioner"), 0, "a new visit starts at zero");
+});
+
+test("R6: Sell all he'll take sells every clean unit the provisioner buys, up to his coffers", function () {
+  var s = at(inTown(), "merchant"); PC.node.enter(s, "merchant");
+  s.cargo.treasure.clean = 4; s.cargo.treasure.dirty = 3;
+  var r = PC.node.sellAll(s, "provisioner");
+  eq(r.units, 4); eq(s.cargo.treasure.clean, 0); eq(s.cargo.treasure.dirty, 3, "dirty stays for the fence");
+  eq(PC.node.visitSales(s, "provisioner"), r.gold);
+});
+
+test("R5: ending the prototype shows the summary; Keep playing tops up; a game over can't keep playing", function () {
+  var s = inTown(); s.ap.left = 0;
+  s.records.prizes = 2; s.records.hullsSold = 1;
+  s.captain.tags.push("Card Sharp");
+  PC.summary.end(s, "stopped");
+  eq(s.current.screen, "end");
+  var v = PC.summary.summary(s);
+  eq(v.how, "stopped"); eq(v.prizes, 2); eq(v.hullsSold, 1);
+  eq(v.purse, s.money.purse);
+  ok(v.leads.lossNeeded === 3);
+  PC.summary.keepPlaying(s);
+  eq(s.current.screen, "node"); eq(s.ap.left, s.ap.max);
+  s.gameOver = { how: "died" };
+  PC.summary.end(s);
+  eq(PC.summary.summary(s).how, "died");
+  var threw = false; try { PC.summary.keepPlaying(s); } catch (e) { threw = true; }
+  ok(threw);
+});
+
+test("R5: a new captain records the tags he started with, so the end screen lists only those earned", function () {
+  var s = ocr();
+  ok(Array.isArray(s.records.startTags));
+  s.captain.tags.push("Prize Taker");
+  PC.summary.end(s, "stopped");
+  eq(PC.summary.summary(s).tags.join(","), "Prize Taker");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

@@ -995,6 +995,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     state.fleet = state.fleet || [];          // fleet and prize ships (§21.8)
     state.captives = state.captives || 0;     // captives aboard, to free at a free port (§22.7)
     state.records = state.records || { prizes: 0, duels: 0 }; // Prize Taker, Duelist (§14.4)
+    // The end-of-prototype screen (R5): hulls sold, and the tags the captain
+    // started with, so it can show the ones earned. Older saves don't know
+    // their starting tags (null: the screen lists every tag).
+    if (state.records.hullsSold == null) state.records.hullsSold = 0;
+    if (state.records.startTags === undefined) state.records.startTags = state.log && state.log.length ? null : (state.captain.tags || []).slice();
     state.world.grudge = state.world.grudge || { France: 0, Sicily: 0 }; // §22.5
     state.gameOver = state.gameOver || null;
   }
@@ -2448,6 +2453,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Each walk into a place is one visit (one action covers every officer
     // hire on a Tavern visit, §25.7).
     state.location.visit = (state.location.visit || 0) + 1;
+    state.location.sales = {}; // this visit's sales by buyer (R6)
     var id = here(state);
     // The persistent Minors count as met once the captain walks into their place.
     var meet = { tavern: "keeper", docks: "shipwright", merchant: "provisioner" }[place];
@@ -2685,6 +2691,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     else { PC.crew.removeGood(state, what, units, dirty); s.sold[what] = (s.sold[what] || 0) + units; }
     state.money.crew += gold;
     markDealt(state, who);
+    noteSale(state, buyer, gold);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
     // Selling here slowly raises prosperity (§20.2; fence sales count, assumption).
     s.soldGold += gold;
@@ -2702,6 +2709,53 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       line = noteTrade(state, who, gold, L) || (units < n ? L.capReached : (what === "treasure" ? L.treasureSold : L.goodsSold));
     }
     return { units: units, gold: gold, line: line, partial: units < n };
+  }
+
+  // This visit's sales to a buyer, for the running total on his card (R6).
+  function noteSale(state, buyer, gold) {
+    var s = (state.location.sales = state.location.sales || {});
+    s[buyer] = (s[buyer] || 0) + gold;
+  }
+  function visitSales(state, buyer) { return ((state.location.sales || {})[buyer]) || 0; }
+
+  // Provisions sell back to the provisioner at half his price, out of his
+  // season's buying cap (ruled November 18, R7).
+  function provisionsSellPrice(state) { return money(provisionsPrice(state) * E().PROVISIONS_SELL_SHARE); }
+
+  function sellProvisions(state, n) {
+    n = Math.floor(n);
+    var id = here(state), who = slotNpc(id, "provisioner"), L = nodeData(id).lines.provisioner;
+    if (PC.npcs.serviceLevel(state, who) == null) return { line: L.refuse, units: 0, gold: 0 };
+    if (n <= 0 || state.provisions < n) throw new Error("You don't have that many.");
+    var each = provisionsSellPrice(state);
+    var units = Math.min(n, each > 0 ? Math.floor(provisionerCapLeft(state) / each + 1e-9) : 0);
+    if (units <= 0) return { line: L.capReached, units: 0, gold: 0 };
+    var gold = Math.round(each * units);
+    state.provisions -= units;
+    state.money.crew += gold;
+    season(state).provisionerPaid += gold;
+    noteSale(state, "provisioner", gold);
+    PC.state.addLog(state, "Sold " + units + " provisions lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
+    return { units: units, gold: gold, line: noteTrade(state, who, gold, L) || (units < n ? L.capReached : L.goodsSold), partial: units < n };
+  }
+
+  // Sell all he'll take (R6): every unit this buyer buys, the dearest first,
+  // until his coffers run dry. Provisions are left alone.
+  function sellAll(state, buyer) {
+    var k = buyer === "fence" ? "dirty" : "clean";
+    var rows = [];
+    if (state.cargo.treasure[k]) rows.push("treasure");
+    Object.keys(state.cargo.goods).forEach(function (g) { if ((state.cargo.goods[g] || {})[k]) rows.push(g); });
+    rows.sort(function (a, b) { return unitPrice(state, buyer, b) - unitPrice(state, buyer, a); });
+    var total = 0, units = 0, last = null, rumor = null;
+    rows.forEach(function (w) {
+      var have = w === "treasure" ? state.cargo.treasure[k] : ((state.cargo.goods[w] || {})[k] || 0);
+      if (!have) return;
+      var r = sell(state, buyer, w, have);
+      total += r.gold || 0; units += r.units || 0; last = r.line || last;
+      if (r.rumor) rumor = r.rumor;
+    });
+    return { units: units, gold: total, line: last, rumor: rumor };
   }
 
   // ---- The shipwright (§17.2, §21.6, §21.7) -----------------------------------
@@ -2815,6 +2869,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var p = hullSalePrice(state, f);
     if (!p.ok) throw new Error(p.why);
     state.money.crew += p.total;
+    state.records.hullsSold = (state.records.hullsSold || 0) + 1; // the end screen (R5)
     state.fleet = state.fleet.filter(function (x) { return x !== f; });
     // Her captain-officer comes back aboard the flagship.
     (state.officers || []).forEach(function (o) { if (o.aboard === fid) o.aboard = "flagship"; });
@@ -3134,6 +3189,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   PC.node = {
+    sellProvisions: sellProvisions,
+    provisionsSellPrice: provisionsSellPrice,
+    sellAll: sellAll,
+    visitSales: visitSales,
     FLAGS: F,
     keeperQuestions: keeperQuestions,
     hullSalePrice: hullSalePrice,
@@ -8670,6 +8729,70 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — the end-of-prototype summary (§37.1; ruled in the
+ * Milestone 6 chat, R5). The prototype ends here: when the player stops,
+ * or when the captain is captured or killed (the old game over screen,
+ * absorbed). No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  // End the run: how is "stopped", "captured" or "died".
+  function end(state, how) {
+    var go = state.gameOver || null;
+    state.ended = { how: how || (go ? (go.how === "died" ? "died" : "captured") : "stopped"), from: state.current, at: { year: state.time.year, season: state.time.season } };
+    state.current = { screen: "end" };
+    PC.state.addLog(state, state.ended.how === "stopped" ? "— The end of the prototype. —" : "— Your story ends here. —");
+    return state.ended;
+  }
+
+  // Developer mode's Keep playing: back to where the run stopped, with the
+  // season's actions topped up. A captured or dead captain can't go on.
+  function keepPlaying(state) {
+    if (!state.ended || state.ended.how !== "stopped") throw new Error("This captain's story is over.");
+    state.current = state.ended.from && state.ended.from.screen !== "end" ? state.ended.from : { screen: "node" };
+    state.ended = null;
+    state.ap.left = state.ap.max;
+  }
+
+  function leadCount(state, id) { var q = (state.quests || {})[id]; return q && q.leads ? q.leads.length : 0; }
+
+  // A Reputation-style line about the captain (R5): the first Reputation
+  // rumor that fits him, or a placeholder for a captain nobody talks about.
+  function reputationLine(state) {
+    var c = PC.rumors.candidatesOf(state, "Reputation").filter(function (x) { return !x.line.newcomer && x.line.id !== "rep_asking"; })[0];
+    if (c) return PC.rumors.render(state, c.line, c.ctx);
+    return PC.data.endLines ? PC.data.endLines.nobody : "";
+  }
+
+  function summary(state) {
+    var e = state.ended || { how: "stopped" };
+    var start = state.records.startTags;
+    var tags = state.captain.tags || [];
+    return {
+      how: e.how,
+      season: PC.state.seasonName ? PC.state.seasonName(state) + " " + state.time.year : String(state.time.year),
+      captain: (state.captain.first + " " + (state.captain.last || "")).trim(),
+      ship: { name: state.ship.name, type: state.ship.type },
+      purse: state.money.purse, crew: state.money.crew,
+      // The captain's worth (§27.9) is purse, stash and holdings; the
+      // prototype has only the purse.
+      worth: state.money.purse,
+      prizes: state.records.prizes || 0, hullsSold: state.records.hullsSold || 0,
+      dread: state.meters.dread,
+      standing: state.meters.standing, heat: state.meters.heat,
+      tags: start ? tags.filter(function (t) { return start.indexOf(t) < 0; }) : tags.slice(),
+      tagsAreNew: !!start,
+      leads: { loss: leadCount(state, "what_was_lost"), lossNeeded: PC.data.quests.what_was_lost.needed, haven: leadCount(state, "hidden_haven"), havenNeeded: PC.data.quests.hidden_haven.needed },
+      reputation: reputationLine(state),
+    };
+  }
+
+  PC.summary = { end: end, keepPlaying: keepPlaying, summary: summary };
+})();
+</script>
+  <script>
 /* Pirate Chronicle — Developer tools that change the game state (§41.12).
  *
  * Skip the mandatory quests: A Dying Pirate's Wish, Welcome to the
@@ -9527,6 +9650,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     TREASURE_UNIT: 100,       // gold a unit at a Modest port (§20.1)
     TREASURE_PER_SLOT: 5,     // treasure packs 5 units to a cargo slot (§22.6)
     PROVISIONS_LOT: 30,       // §20.6
+    PROVISIONS_SELL_SHARE: 0.5, // the provisioner buys lots back at half his price (ruled November 18, R7)
     SIGNING: { Green: 15, Able: 30, Seasoned: 45, Veteran: 75 }, // §24.7
     TIER_ORDER: ["Green", "Able", "Seasoned", "Veteran"],
     REPAIR_PER_HP: 8,         // Size 1 (§21.6)
@@ -13763,6 +13887,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       chain: "PLACEHOLDER: \"Chain will slow her down if she tries to run.\"",
     },
   };
+  // The end-of-prototype screen (§37.1; the M6 chat's R5). PLACEHOLDERs.
+  PC.data.endLines = {
+    title: "PLACEHOLDER: The end of the prototype",
+    overTitle: "PLACEHOLDER: Your story ends here",
+    note: "PLACEHOLDER: That's as far as the prototype goes. Thanks for playing. More of the Carolinas, and the seasons after Spring, come in later builds.",
+    overNote: "PLACEHOLDER: This is the end of the run for the prototype. Imprisonment and heirs come in later builds.",
+    nobody: "PLACEHOLDER: \"Nobody in Ocracoke is talking about you. Yet.\"",
+  };
 })();
 </script>
   <script>
@@ -14483,11 +14615,55 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     liveTotals = []; liveMax = {};
     expiryWarning();
     var screen = state.current.screen;
-    var content = screen === "hub" ? hubPanel() : screen === "node" ? nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
+    if (screen === "end") return drawEnd();
+    var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
     wire();
+  }
+
+  // ---- The end of the prototype (§37.1; the M6 chat's R5) ----
+  // One screen for stopping, being captured and dying (it absorbs the old
+  // game over screen).
+
+  function drawEnd() {
+    var v = PC.summary.summary(state);
+    var c = state.captain, pic = PC.creator.captainPortrait(c);
+    var L = PC.data.endLines;
+    var head = v.how === "stopped" ? L.title : L.overTitle;
+    var meter = function (n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n); };
+    var st = v.standing || {}, ht = v.heat || {};
+    var rows = [
+      ["Your purse", gold(v.purse) + " gold"], ["Crew gold", gold(v.crew) + " gold"],
+      ["Your worth", gold(v.worth) + " gold" + ' <span class="note">(your purse; no stash or holdings yet)</span>'],
+      ["Prizes taken", String(v.prizes)], ["Hulls sold", String(v.hullsSold)],
+      ["Standing", "Avalon " + meter(st.avalon || 0) + " · Frisia " + meter(st.frisia || 0) + " · Pirates " + meter(st.pirates || 0)],
+      ["Heat", "Avalon " + (ht.avalon || 0) + " · Frisia " + (ht.frisia || 0)],
+      ["Dread", String(v.dread)],
+      [v.tagsAreNew ? "Tags earned" : "Tags", v.tags.length ? esc(v.tags.join(", ")) : "None"],
+      ["Leads", "What Was Lost " + v.leads.loss + " of " + v.leads.lossNeeded + " · The Hidden Haven " + v.leads.haven + " of " + v.leads.havenNeeded],
+    ];
+    var how = v.how === "stopped" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[v.how === "died" ? "died" : "captured"]) + "</div>";
+    root.innerHTML = frame('<div class="endscreen" style="padding:18px 16px 32px;max-width:720px;margin:0 auto">' + '<p class="sc" style="margin:0">' + esc(v.season) + "</p>" +
+      '<h2 class="title">' + esc(head) + "</h2>" + how +
+      '<div class="person" style="margin:12px 0">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:96px;height:auto">' : sil(72, 108)) +
+      '<div class="pmain"><div class="namecard"><b>' + esc(v.captain) + '</b><span class="role">Captain of the ' + esc(v.ship.name) + " · " + esc(v.ship.type) + "</span></div>" +
+      (v.reputation ? '<p class="small"><i>' + esc(v.reputation) + "</i></p>" : "") + "</div></div>" +
+      '<table class="grid">' + rows.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</table>" +
+      '<p class="note">' + esc(v.how === "stopped" ? L.note : L.overNote) + "</p>" +
+      '<div class="actions"><button class="primary" data-act="quit">Return to title</button>' +
+      (settings.dev && v.how === "stopped" ? '<button class="secondary" data-act="keepplaying">Developer: keep playing (actions topped up)</button>' : "") + "</div></div>") +
+      popupHtml() + menuHtml();
+    wire();
+  }
+
+  // The banner when the season's actions are spent (R5): free actions like
+  // selling still work, and the player ends the prototype when ready.
+  function noActionsBanner() {
+    if (!state || state.ap.left > 0 || state.current.screen !== "node") return "";
+    return '<div class="notice" style="margin:0 0 10px"><b>No actions left.</b> You can still do anything that costs no action, like selling. ' +
+      '<button class="primary" data-act="endproto" style="margin-left:6px">End the prototype</button></div>';
   }
 
   // ---- Title screen (§41.2) ----
@@ -15223,7 +15399,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
         (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="secondary" data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' +
           '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return gold(n * pp) + " gold · aboard after: " + (state.provisions + n) + " lots, " + timeAtSea(state.provisions + n); }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
-        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p></div>";
+        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+        // R7: provisions sell back at half his price, out of his coffers.
+        (state.provisions > 0 ? (function () {
+          var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
+          var smax = Math.max(1, Math.min(state.provisions, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
+          return '<p class="small" style="margin-top:8px">He buys provisions back at ' + gold(sp) + " gold a lot.</p>" +
+            '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
+            totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>";
+        })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
         Object.keys(stock).map(function (gname) {
@@ -15282,8 +15466,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     });
     var who_ = PC.npcs.get(state, buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : N().slotNpc(N().here(state), "provisioner"));
     var his = who_ && who_.gender === "f" ? "Her" : "His";
-    var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his);
+    // R6: this visit's running total, and Sell all he'll take.
+    var sold = N().visitSales(state, buyer);
+    var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his) +
+      (sold ? '<p class="small"><b>This visit: +' + gold(sold) + " crew gold</b></p>" : "");
     if (!rows.length) return html + '<p class="note">Nothing aboard ' + (buyer === "fence" ? "for him" : "to sell here") + ".</p></div>";
+    html += '<div class="actions" style="margin:4px 0 8px"><button class="secondary" data-act="sellall" data-buyer="' + buyer + '"' + (capLeft <= 0 ? " disabled" : "") + ">Sell all " + (his === "Her" ? "she" : "he") + "'ll take</button></div>";
     return html + '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Pays</th><th>Sell</th></tr>' + rows.map(function (r) {
       var id = "q-sell-" + buyer + "-" + slug(r.what);
       var price = N().unitPrice(state, buyer, r.what);
@@ -15763,8 +15951,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function gameOverPanel(v) {
     var go = v.hunt.gameOver || {};
     return '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[go.how === "died" ? "died" : "captured"]) + "</div>" +
-      '<p class="note">This is the end of the run for the prototype. Imprisonment and heirs come in later milestones.</p>' +
-      '<div class="actions"><button class="primary" data-act="quit">Back to the title</button></div>';
+      '<div class="actions"><button class="primary" data-act="endgameover">See how it ended</button></div>';
   }
 
   // Liar's Dice (§41.6): drawn dice, cups, a bid stepper and tappable faces.
@@ -16068,6 +16255,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<button class="secondary" data-act="import">Load file</button>' +
       '<button class="secondary" data-act="openmenu" data-menu="settings">Settings</button>' +
       (state && settings.dev ? '<button class="secondary" data-act="openmenu" data-menu="dev">Developer</button>' : "") +
+      (state && state.current.screen === "node" ? '<button class="secondary" data-act="endproto">End the prototype</button>' : "") +
       (state ? '<button class="secondary" data-act="quit">Title</button>' : "") + "</div>" +
       (state ? '<p class="note">The game saves itself after every action.</p>' : "");
   }
@@ -16405,6 +16593,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var r = PC.rumors.askKeeper(state);
       var L = N().nodeData(N().here(state)).lines.keeper;
       if (r.refuse) { say(id, firstName(id), r.line); return; }
+      // Asked again this season (the greyed button is still tappable).
+      if (r.again) { say(id, firstName(id), r.line); return; }
       var heard = r.rumors.map(function (x) { return x.text; });
       // One quote, running on: "I did hear one other thing... [rumor]" (the author, UI pass 1 review).
       if (r.extra) heard.push(joinQuotes(r.extraLine, r.extra.text));
@@ -16519,6 +16709,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (r.units) toast("Sold " + r.units + " · +" + gold(r.gold) + " crew gold");
       say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
         { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", html: "Sold " + r.units + " " + dirtyName(el.dataset.what === "treasure" ? "treasure" : el.dataset.what, el.dataset.buyer === "fence") }, goldChip(r.gold)] : null });
+    },
+    "sellprov": function (el) {
+      var r = N().sellProvisions(state, qty(el)), id = who("provisioner");
+      if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
+      say(id, firstName(id), r.line, null, null, { chips: r.units ? [{ icon: "treasure", text: "Sold " + plural(r.units, "provisions lot") }, goldChip(r.gold)] : [] });
+    },
+    "sellall": function (el) {
+      var buyer = el.dataset.buyer;
+      var r = N().sellAll(state, buyer);
+      var id = buyer === "fence" ? N().nodeData(N().here(state)).fence.npc : who("provisioner");
+      if (r.units) toast("Sold " + r.units + " · +" + gold(r.gold) + " crew gold");
+      say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
+        { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", text: "Sold " + r.units + " units" }, goldChip(r.gold)] : [] });
     },
     "shiptab": function (el) { state.location.tab = el.dataset.tab; state.location.say = null; state.location.bark = null; },
     "artpick": function (el) { articleDraft = articleDraft || PC.articles.defaults(); articleDraft[el.dataset.slot] = el.dataset.opt; },
@@ -17197,6 +17400,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; creating = false; menu = null; },
+    // The end of the prototype (R5).
+    "endproto": function (el) {
+      menu = null;
+      if (state.ap.left > 0 && confirmFirst(el, "End the prototype?", "You still have " + plural(state.ap.left, "action") + " this season. End the run here?")) return;
+      menu = null; PC.summary.end(state, "stopped");
+    },
+    "endgameover": function () { PC.minigames.leave(state); menu = null; PC.summary.end(state); },
+    "keepplaying": function () { PC.summary.keepPlaying(state); },
     "export": function () { dialog = "export"; },
     "import": function () { dialog = "import"; },
     "closedialog": function () { dialog = null; },
