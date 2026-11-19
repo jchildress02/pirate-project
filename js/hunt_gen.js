@@ -82,7 +82,7 @@
     try {
       var rec = PC.npcs.generate(state, { id: null, role: flag === "Pirate" ? "Pirate Captain" : "Ship Captain", pool: POOL_BY_FLAG[flag] || "master",
         node: null, key: [state.world.seed, "captain", state.world.shipSeq || 0, Math.floor(r() * 1e9)].join("|"), persistent: false });
-      return rec.full;
+      return { full: rec.full, nick: !!rec.nickname };
     } catch (e) { return null; }
   }
 
@@ -107,15 +107,21 @@
     var c = H().CLASSES[opts.cls];
     var fit = opts.full ? { guns: c.guns, crew: c.crewMax, hull: c.hull } : fitout(opts.cls, opts.role, r);
     var res = opts.resolve != null ? opts.resolve : intBetween(r, H().RESOLVE[opts.role][0], H().RESOLVE[opts.role][1]);
+    // Same draw order as before (name, captain, cue) so seeded hunts don't shift.
+    var sid = "s" + (state.world.shipSeq = (state.world.shipSeq || 0) + 1);
+    var sName = shipName(state, opts.flag, opts.role, r);
+    var cap = captainName(state, opts.flag, opts.role, r);
     var s = {
-      id: "s" + (state.world.shipSeq = (state.world.shipSeq || 0) + 1),
+      id: sid,
       cls: opts.cls, role: opts.role, flag: opts.flag, size: c.size, draft: c.draft,
       hull: fit.hull, hullMax: c.hull, guns: fit.guns, gunsMax: c.guns, crew: fit.crew, crewMin: c.crewMin, crewMax: c.crewMax,
       cargo: c.cargo, speed: c.speed, handling: c.handling,
       rating: opts.rating != null ? opts.rating : H().RATING[opts.role],
       gunnery: opts.gunnery != null ? opts.gunnery : H().GUNNERY[opts.role],
       resolve: res, hunter: !!opts.hunter, shape: opts.shape || "single",
-      name: shipName(state, opts.flag, opts.role, r), captain: captainName(state, opts.flag, opts.role, r), title: CAPTAIN_TITLE[opts.role],
+      name: sName, captain: cap ? cap.full : null, captainNick: !!(cap && cap.nick),
+      // A nicknamed pirate shows with no title: "Black Sam Bellamy" (R3).
+      title: cap && cap.nick ? null : CAPTAIN_TITLE[opts.role],
       cue: pick(r, PC.data.huntLines.cue[clamp(res, 1, 5)]),
     };
     s.startCrew = s.crew;

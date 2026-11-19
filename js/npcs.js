@@ -95,23 +95,25 @@
     return 0;
   }
 
-  // "Black Tom", "Bobby Rats", "Robert the Mast" (§36.14).
-  function nickname(r, poolId) {
-    var K = N().NICKNAMES;
-    var form = one(r, ["prefix", "suffix", "the"]);
-    if (form === "the") {
-      var list = K.the.concat(K.theByPool[poolId] || []);
-      return { form: "the", word: one(r, list) };
-    }
-    return { form: form, word: one(r, K[form]) };
+  // Generated nicknames are prefix only ("Black Sam"), and a nicknamed pirate
+  // keeps a surname: "Black Sam Bellamy" (ruled November 18, M6 chat R3;
+  // reverses §36.14's "a nickname replaces the surname"). Suffix and "the"
+  // nicknames ("Bobby Rats") are the author's own, for Named NPCs only.
+  function nickname(r) {
+    return { form: "prefix", word: one(r, N().NICKNAMES.prefix) };
   }
 
+  // The menu name: "Black Sam Bellamy", "Hugh Napier" (R3).
   function displayName(rec) {
-    if (rec.nickname) {
-      if (rec.nickname.form === "prefix") return rec.nickname.word + " " + rec.first;
-      return rec.first + " " + rec.nickname.word;
-    }
-    return (rec.first + " " + (rec.last || "")).trim();
+    var base = (rec.first + " " + (rec.last || "")).trim();
+    return rec.nickname ? rec.nickname.word + " " + base : base;
+  }
+
+  // The name a menu or a game-written line shows (R3): a nicknamed pirate by
+  // nickname and full name with no title; anyone else with the title.
+  function menuName(rec) {
+    if (rec.nickname) return displayName(rec);
+    return ((rec.title ? rec.title + " " : "") + displayName(rec)).trim();
   }
 
   function titleFor(r, role, poolId, gender) {
@@ -190,9 +192,8 @@
       var first = givenName(r, poolId, gender, role);
       var rec = { id: spec.id, tier: "Minor", role: role, node: spec.node || null, pool: poolId,
         gender: gender, first: first, last: "", nickname: null, persistent: !!spec.persistent };
-      if (r() < nicknameRate(role, spec.node)) {
-        rec.nickname = nickname(r, poolId);
-      } else if (poolId === "bondsman") {
+      if (r() < nicknameRate(role, spec.node)) rec.nickname = nickname(r);
+      if (poolId === "bondsman") {
         if (spec.freed && r() < 0.5) rec.last = one(r, N().POOLS.bondsman.surnames);
       } else {
         var P = N().POOLS[poolId];
@@ -203,7 +204,6 @@
       var full = displayName(rec);
       if (res.given[first.toLowerCase()]) continue;
       if (rec.last && res.surnames[rec.last.toLowerCase()]) continue;
-      if (rec.nickname && res.surnames[rec.nickname.word.toLowerCase()]) continue; // no second "Rats"
       if (res.full[full.toLowerCase()]) continue;
       if (used[full.toLowerCase()]) continue;               // unique in the world
       if (spec.node && nodeGiven[first.toLowerCase()]) continue; // unique given name in the node
@@ -336,6 +336,7 @@
     generate: generate,
     fillSlot: fillSlot,
     displayName: displayName,
+    menuName: menuName,
     drawTraits: drawTraits,
     randomCaptainName: randomCaptainName,
     randomShipName: randomShipName,

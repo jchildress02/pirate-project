@@ -826,7 +826,7 @@
     var fee = portFee(state, id);
     var pay = PC.crew.payFrom(state, fee, true);
     if (!pay.short) {
-      return { fee: fee, paid: fee, fromCrew: pay.crew, fromPurse: pay.purse, lines: [L.duePaid + " (" + fee + " gold)"] };
+      return { fee: fee, paid: fee, fromCrew: pay.crew, fromPurse: pay.purse, lines: [L.duePaid + " (" + paidFrom(pay) + ")"] };
     }
     var paid = pay.crew + pay.purse;
     var short = pay.short;
@@ -867,7 +867,7 @@
     opts = opts || {};
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
-    var lines = [], payChips = [];
+    var lines = [];
     if (opts.fromHunt) lines.push(L.back);
     var c = state.crew;
     if (c.wounded > 0) {
@@ -896,14 +896,12 @@
         // is it a breach of the Articles.
         if (PC.crew.canPay(state, cost)) {
           var mp = PC.crew.payFrom(state, cost);
-          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + cost + " gold)");
-          payChips.push(payChip("The maimed paid off", cost, mp));
+          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + paidFrom(mp) + ")");
         } else {
           var part = PC.crew.payFrom(state, cost, true);
-          payChips.push(payChip("The maimed, part paid", part.crew + part.purse, part, true));
           PC.crew.addMorale(state, -20);
           c.pressure += 2;
-          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
+          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + (part.crew + part.purse ? paidFrom(part) + " of " + cost : "nothing paid of " + cost) + ")" + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
         }
       }
     }
@@ -917,19 +915,19 @@
     // Holdings come after the prototype.
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
-    if (fee.paid) payChips.push(payChip("Harbor due", fee.paid, { crew: fee.fromCrew || 0, purse: fee.fromPurse || 0 }, fee.paid < fee.fee));
-    // The popup's chips say which pot paid (B45).
-    var chips = lines.map(function (l) { return { icon: "port", text: l }; }).concat(payChips);
+    // P16: the lines carry which pot paid in brackets, so the old pay chips
+    // under them (which repeated the lines) are gone.
+    var chips = lines.map(function (l) { return { icon: "port", text: l }; });
     state.location.popup = { title: "Arrival at " + nd.name, lines: lines, chips: chips };
     return state.location.popup;
   }
 
-  // "Harbor due 40 gold: 30 crew gold, 10 from your purse"
-  function payChip(what, total, p, bad) {
+  // "40 crew gold", "30 crew gold, 10 purse gold" (P16).
+  function paidFrom(p) {
     var parts = [];
     if (p.crew) parts.push(p.crew + " crew gold");
-    if (p.purse) parts.push(p.purse + " from your purse");
-    return { icon: "gold", text: what + " " + total + " gold" + (parts.length ? ": " + parts.join(", ") : ""), ink: bad || p.purse ? "bad" : "mid" };
+    if (p.purse) parts.push(p.purse + " purse gold");
+    return parts.join(", ") || "0 gold";
   }
 
   PC.node = {

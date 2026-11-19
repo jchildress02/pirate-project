@@ -1369,23 +1369,25 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return 0;
   }
 
-  // "Black Tom", "Bobby Rats", "Robert the Mast" (§36.14).
-  function nickname(r, poolId) {
-    var K = N().NICKNAMES;
-    var form = one(r, ["prefix", "suffix", "the"]);
-    if (form === "the") {
-      var list = K.the.concat(K.theByPool[poolId] || []);
-      return { form: "the", word: one(r, list) };
-    }
-    return { form: form, word: one(r, K[form]) };
+  // Generated nicknames are prefix only ("Black Sam"), and a nicknamed pirate
+  // keeps a surname: "Black Sam Bellamy" (ruled November 18, M6 chat R3;
+  // reverses §36.14's "a nickname replaces the surname"). Suffix and "the"
+  // nicknames ("Bobby Rats") are the author's own, for Named NPCs only.
+  function nickname(r) {
+    return { form: "prefix", word: one(r, N().NICKNAMES.prefix) };
   }
 
+  // The menu name: "Black Sam Bellamy", "Hugh Napier" (R3).
   function displayName(rec) {
-    if (rec.nickname) {
-      if (rec.nickname.form === "prefix") return rec.nickname.word + " " + rec.first;
-      return rec.first + " " + rec.nickname.word;
-    }
-    return (rec.first + " " + (rec.last || "")).trim();
+    var base = (rec.first + " " + (rec.last || "")).trim();
+    return rec.nickname ? rec.nickname.word + " " + base : base;
+  }
+
+  // The name a menu or a game-written line shows (R3): a nicknamed pirate by
+  // nickname and full name with no title; anyone else with the title.
+  function menuName(rec) {
+    if (rec.nickname) return displayName(rec);
+    return ((rec.title ? rec.title + " " : "") + displayName(rec)).trim();
   }
 
   function titleFor(r, role, poolId, gender) {
@@ -1464,9 +1466,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var first = givenName(r, poolId, gender, role);
       var rec = { id: spec.id, tier: "Minor", role: role, node: spec.node || null, pool: poolId,
         gender: gender, first: first, last: "", nickname: null, persistent: !!spec.persistent };
-      if (r() < nicknameRate(role, spec.node)) {
-        rec.nickname = nickname(r, poolId);
-      } else if (poolId === "bondsman") {
+      if (r() < nicknameRate(role, spec.node)) rec.nickname = nickname(r);
+      if (poolId === "bondsman") {
         if (spec.freed && r() < 0.5) rec.last = one(r, N().POOLS.bondsman.surnames);
       } else {
         var P = N().POOLS[poolId];
@@ -1477,7 +1478,6 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var full = displayName(rec);
       if (res.given[first.toLowerCase()]) continue;
       if (rec.last && res.surnames[rec.last.toLowerCase()]) continue;
-      if (rec.nickname && res.surnames[rec.nickname.word.toLowerCase()]) continue; // no second "Rats"
       if (res.full[full.toLowerCase()]) continue;
       if (used[full.toLowerCase()]) continue;               // unique in the world
       if (spec.node && nodeGiven[first.toLowerCase()]) continue; // unique given name in the node
@@ -1610,6 +1610,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     generate: generate,
     fillSlot: fillSlot,
     displayName: displayName,
+    menuName: menuName,
     drawTraits: drawTraits,
     randomCaptainName: randomCaptainName,
     randomShipName: randomShipName,
@@ -3028,7 +3029,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var fee = portFee(state, id);
     var pay = PC.crew.payFrom(state, fee, true);
     if (!pay.short) {
-      return { fee: fee, paid: fee, fromCrew: pay.crew, fromPurse: pay.purse, lines: [L.duePaid + " (" + fee + " gold)"] };
+      return { fee: fee, paid: fee, fromCrew: pay.crew, fromPurse: pay.purse, lines: [L.duePaid + " (" + paidFrom(pay) + ")"] };
     }
     var paid = pay.crew + pay.purse;
     var short = pay.short;
@@ -3069,7 +3070,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     opts = opts || {};
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
-    var lines = [], payChips = [];
+    var lines = [];
     if (opts.fromHunt) lines.push(L.back);
     var c = state.crew;
     if (c.wounded > 0) {
@@ -3098,14 +3099,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         // is it a breach of the Articles.
         if (PC.crew.canPay(state, cost)) {
           var mp = PC.crew.payFrom(state, cost);
-          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + cost + " gold)");
-          payChips.push(payChip("The maimed paid off", cost, mp));
+          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + paidFrom(mp) + ")");
         } else {
           var part = PC.crew.payFrom(state, cost, true);
-          payChips.push(payChip("The maimed, part paid", part.crew + part.purse, part, true));
           PC.crew.addMorale(state, -20);
           c.pressure += 2;
-          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
+          lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + (part.crew + part.purse ? paidFrom(part) + " of " + cost : "nothing paid of " + cost) + ")" + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
         }
       }
     }
@@ -3119,19 +3118,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Holdings come after the prototype.
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
-    if (fee.paid) payChips.push(payChip("Harbor due", fee.paid, { crew: fee.fromCrew || 0, purse: fee.fromPurse || 0 }, fee.paid < fee.fee));
-    // The popup's chips say which pot paid (B45).
-    var chips = lines.map(function (l) { return { icon: "port", text: l }; }).concat(payChips);
+    // P16: the lines carry which pot paid in brackets, so the old pay chips
+    // under them (which repeated the lines) are gone.
+    var chips = lines.map(function (l) { return { icon: "port", text: l }; });
     state.location.popup = { title: "Arrival at " + nd.name, lines: lines, chips: chips };
     return state.location.popup;
   }
 
-  // "Harbor due 40 gold: 30 crew gold, 10 from your purse"
-  function payChip(what, total, p, bad) {
+  // "40 crew gold", "30 crew gold, 10 purse gold" (P16).
+  function paidFrom(p) {
     var parts = [];
     if (p.crew) parts.push(p.crew + " crew gold");
-    if (p.purse) parts.push(p.purse + " from your purse");
-    return { icon: "gold", text: what + " " + total + " gold" + (parts.length ? ": " + parts.join(", ") : ""), ink: bad || p.purse ? "bad" : "mid" };
+    if (p.purse) parts.push(p.purse + " purse gold");
+    return parts.join(", ") || "0 gold";
   }
 
   PC.node = {
@@ -3772,12 +3771,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return list;
   }
 
+  // The Trident's hunting waters (§30.6), seeded per world (ruled November
+  // 18): the Hatteras Banks or the Bahama Channel. She can be met on a hunt
+  // from any port on those waters (§22.1).
+  function tridentWaters(state) {
+    var W = PC.data.hunt.WATERS;
+    var k = PC.rng.fromKey(state.world.seed + "|trident-waters")() < 0.5 ? "north" : "south";
+    return { id: k, name: W[k].name };
+  }
+  function leadText(state, t) { return String(t || "").replace(/\[Trident Waters\]/g, tridentWaters(state).name); }
+
   function journal(state) {
     var out = ids(state).map(function (id) {
       var q = Q(id), r = (state.quests || {})[id] || { status: "open", leads: [] }, v = state.captain.loss;
       var entries = r.leads.map(function (l) {
         var e = q.leads[l].journal;
-        return typeof e === "string" ? e : (e[v] || e.any || "");
+        return leadText(state, typeof e === "string" ? e : (e[v] || e.any || ""));
       });
       var hereLeft = Object.keys(q.leads).filter(function (l) {
         var ld = q.leads[l];
@@ -3843,7 +3852,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }).map(function (id) { record(state, id).warned = now; return Q(id).name; });
   }
 
-  PC.quests = { record: record, addLead: addLead, hasLead: hasLead, journal: journal, expiringNow: expiringNow };
+  PC.quests = { tridentWaters: tridentWaters, leadText: leadText, record: record, addLead: addLead, hasLead: hasLead, journal: journal, expiringNow: expiringNow };
 })();
 </script>
   <script>
@@ -4275,6 +4284,17 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return (state.rumors || []).filter(function (r) { return r.expires == null || r.expires >= seasonIndex(state); });
   }
 
+  // ---- Tiers (ruled November 18, M6 chat R8) ---------------------------------
+
+  function tierOf(line) { return line.tier || (R().tiers || {})[line.type] || "C"; }
+  function aCount(state) { var m = state.world.aRumors || {}; return m[stamp(state)] || 0; }
+  function aCapped(state) { return aCount(state) >= (R().A_CAP == null ? 1 : R().A_CAP); }
+  function noteA(state) {
+    var st = stamp(state);
+    state.world.aRumors = {}; // only this season's count matters
+    state.world.aRumors[st] = aCount(state) + 1;
+  }
+
   // ---- Danger spots (§30.9) ----------------------------------------------------
   // One base spot a season. Faction spots by Heat band, Hunter's Waters and
   // the Frisian Sweep wait for Heat and the hunt (Milestone 5); at Heat 0
@@ -4345,8 +4365,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return out;
   }
 
-  // Candidates of one type, each { line, ctx, extra }.
-  function candidatesOf(state, type) {
+  // Candidates of one type, each { line, ctx, extra }. opts.noA leaves out
+  // A-tier lines (a picked type, R8); the season's A cap does the same.
+  function candidatesOf(state, type, opts) {
+    var all = candidatesAll(state, type);
+    var noA = (opts && opts.noA) || aCapped(state);
+    return noA ? all.filter(function (c) { return tierOf(c.line) !== "A"; }) : all;
+  }
+
+  function candidatesAll(state, type) {
     var out = [];
     var node = PC.node.here(state);
     if (type === "Node") {
@@ -4398,21 +4425,39 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return rec;
   }
 
-  // One rumor from a source's pool, by its type weights (§30.5).
-  function drawOne(state, weights, key, source, onlyType) {
+  // One rumor from a source's pool, by its type weights (§30.5). With a
+  // tier mix (opts.mix, R8) the tier is drawn first, among tiers that have
+  // something to tell, then the type within it. opts.noA: no A-tier lines
+  // (a type the player picked).
+  function drawOne(state, weights, key, source, onlyType, opts) {
+    opts = opts || {};
     var sc = scriptedFor(state);
     if (sc.length && !onlyType) return tell(state, { line: sc[0] }, source);
     var r = PC.rng.fromKey(key);
-    var w = {};
+    var w = {}, byTier = {};
     Object.keys(weights).forEach(function (t) {
       if (onlyType && t !== onlyType) return;
-      if (candidatesOf(state, t).length) w[t] = weights[t];
+      var cands = candidatesOf(state, t, opts);
+      if (!cands.length) return;
+      w[t] = weights[t];
+      cands.forEach(function (c) { var tr = tierOf(c.line); (byTier[tr] = byTier[tr] || {})[t] = weights[t]; });
     });
     if (!Object.keys(w).length) return null;
+    var tier = null;
+    if (opts.mix) {
+      var mw = {};
+      Object.keys(byTier).forEach(function (tr) { if (opts.mix[tr]) mw[tr] = opts.mix[tr]; });
+      if (Object.keys(mw).length) { tier = PC.npcs.weighted(r, mw); w = byTier[tier]; }
+    }
     var type = PC.npcs.weighted(r, w);
-    var cands = candidatesOf(state, type);
-    return tell(state, cands[Math.floor(r() * cands.length)], source);
+    var cands = candidatesOf(state, type, opts);
+    if (tier) cands = cands.filter(function (c) { return tierOf(c.line) === tier; });
+    var c = cands[Math.floor(r() * cands.length)];
+    if (tierOf(c.line) === "A") noteA(state);
+    return tell(state, c, source);
   }
+
+  function keeperMix() { return (R().tierMix || {}).keeper; }
 
   // ---- The tavern keeper (§30.4) ------------------------------------------------
 
@@ -4421,15 +4466,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // Tavern Talk: Medium by default (DR 2, this build's reading), one step
   // easier for a Gossipy or Jovial keeper, harder for Discreet or Taciturn
   // (within ±2), and one step harder this season if he's annoyed (§17.2).
+  // P3: the base stays DR 2, and each cause shows as its own line in the
+  // odds ("Keeper: Taciturn −1", "Keeper annoyed −1") instead of hiding in
+  // the Difficulty line.
   function talkCheck(state) {
     var k = PC.npcs.get(state, keeperId(state));
-    var dr = 2, t = k.traits || [];
-    var shift = 0;
-    if (t.indexOf("Gossipy") >= 0 || t.indexOf("Jovial") >= 0) shift -= 1;
-    if (t.indexOf("Discreet") >= 0 || t.indexOf("Taciturn") >= 0) shift += 1;
-    shift = Math.max(-2, Math.min(2, shift));
-    if (PC.scenes.test(state, { seasonFlag: "keeper_annoyed" })) shift += 1;
-    return { type: "Tavern Talk", dr: Math.max(0, Math.min(8, dr + shift)) };
+    var t = k.traits || [], extra = [];
+    var easy = t.filter(function (x) { return x === "Gossipy" || x === "Jovial"; });
+    var hard = t.filter(function (x) { return x === "Discreet" || x === "Taciturn"; });
+    var shift = Math.max(-2, Math.min(2, hard.length - easy.length));
+    if (shift) extra.push({ label: "Keeper: " + (shift > 0 ? hard : easy).join(", "), value: -shift });
+    if (PC.scenes.test(state, { seasonFlag: "keeper_annoyed" })) extra.push({ label: "Keeper annoyed", value: -1 });
+    return { type: "Tavern Talk", dr: 2, extra: extra };
   }
 
   function keeperAsked(state) {
@@ -4451,11 +4499,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var n = Math.max(1, 1 + sl);
     var key = [state.world.seed, stamp(state), node, "keeper-rumor"].join("|");
     var out = [];
-    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper"); if (r) out.push(r); }
+    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix() }); if (r) out.push(r); }
     var chk = talkCheck(state);
     var res = PC.checks.resolve(state, chk, key + "|talk", { conditions: ["Harbor"] });
     var extra = null;
-    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper");
+    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper", null, { mix: keeperMix() });
     PC.node.tavernActionDone(state);
     return { line: L.askRumors, rumors: out, talk: { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, dr: chk.dr }, extra: extra,
       extraLine: extra ? L.talkClean : null, out: L.outOfRumors };
@@ -4465,9 +4513,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function gatherCheck(state) { return { type: "Gather Intelligence", dr: 2 }; } // DR: this build's reading
 
+  // The types the player can pick: C and B only, never an A rumor (R8).
   function gatherTypes(state) {
     var w = PC.node.nodeData(PC.node.here(state)).rumorWeights;
-    return Object.keys(w).filter(function (t) { return candidatesOf(state, t).length; });
+    return Object.keys(w).filter(function (t) { return candidatesOf(state, t, { noA: true }).length; });
   }
 
   // The unheard loss-quest lead at this node that a clean result can give
@@ -4483,7 +4532,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     PC.crew.spendAP(state, 1);
     var key = [state.world.seed, stamp(state), PC.node.here(state), "gather", state.rolls.gather = (state.rolls.gather || 0) + 1].join("|");
     var res = PC.checks.resolve(state, gatherCheck(state), key, { conditions: ["Harbor"] });
-    var out = { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, rumor: null, pick: null, lead: null };
+    // Retuned November 18 (M6 chat R4): never empty. Clean: two rumors, the
+    // player picks both types. Partial: one, the player picks. Setback: one
+    // from the tavern keeper's pool, and the questions get noticed.
+    var out = { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, rumor: null, pick: null, picks: 0, lead: null };
     if (res.outcome === "clean") {
       var lead = fallbackLead(state);
       if (lead) {
@@ -4491,11 +4543,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         state.flags.lead_trident_heard = true;
         out.lead = PC.data.quests.what_was_lost.leads[lead].journal[state.captain.loss];
       }
+    }
+    if (res.outcome !== "setback") {
       out.pick = gatherTypes(state);
-      state.location.gatherPick = out.pick.length ? key : null;
-    } else if (res.outcome === "partial") {
-      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|partial", "gather intelligence");
+      out.picks = out.pick.length ? (res.outcome === "clean" ? 2 : 1) : 0;
+      state.location.gatherPick = out.picks ? { key: key, left: out.picks, n: 0 } : null;
     } else {
+      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|setback", "gather intelligence", null, { mix: keeperMix() });
       state.flags.gi_asked = stamp(state); // the next Reputation rumor here is about the questions
     }
     PC.node.tavernActionDone(state);
@@ -4505,10 +4559,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function gatherPick(state, type) {
-    var key = state.location.gatherPick;
-    if (!key) throw new Error("Nothing to pick.");
-    state.location.gatherPick = null;
-    return drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|pick", "gather intelligence", type);
+    var gp = state.location.gatherPick;
+    if (typeof gp === "string") gp = { key: gp, left: 1, n: 0 }; // an older save mid-pick
+    if (!gp) throw new Error("Nothing to pick.");
+    gp.left -= 1; gp.n += 1;
+    state.location.gatherPick = gp.left > 0 ? gp : null;
+    var rec = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, gp.key + "|pick" + (gp.n > 1 ? gp.n : ""), "gather intelligence", type, { noA: true });
+    // Nothing left to pick from: the second pick is dropped.
+    if (state.location.gatherPick && !gatherTypes(state).length) state.location.gatherPick = null;
+    return rec;
   }
 
   // ---- The fence (§30.4, §30.7) ------------------------------------------------------
@@ -4520,10 +4579,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var key = [state.world.seed, stamp(state), "fence-rumor", state.rolls.fenceRumor = (state.rolls.fenceRumor || 0) + 1].join("|");
     var r = PC.rng.fromKey(key);
     if (r() >= chance) return null;
-    var lines = U.lines.filter(function (l) { return !live(state, l.id); });
+    var lines = U.lines.filter(function (l) { return !live(state, l.id) && !(tierOf(l) === "A" && aCapped(state)); });
     if (!lines.length) return null;
     var l = lines[Math.floor(r() * lines.length)];
     var where = R().letterBuyerNodes[Math.floor(PC.rng.fromKey(state.world.seed + "|letter-buyer")() * R().letterBuyerNodes.length)];
+    if (tierOf(l) === "A") noteA(state);
     var rec = tell(state, { line: l, ctx: { node: where } }, "fence");
     return { leadIn: U.leadIn, rumor: rec };
   }
@@ -4538,6 +4598,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     dangerSpots: dangerSpots,
     liveRumors: liveRumors,
     candidatesOf: candidatesOf,
+    tierOf: tierOf,
+    aCapped: aCapped,
     talkCheck: talkCheck,
     keeperAsked: keeperAsked,
     askKeeper: askKeeper,
@@ -5629,7 +5691,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // The Hauler tag keeps the whole haul (§14.2).
       var hauler = (state.captain.tags || []).indexOf("Hauler") >= 0;
       kept = quest.concat(hauler ? rest : rest.slice(0, Math.floor(rest.length / 2)));
-      M().say(state, game, D().lines.blackout);
+      // P11: drop "only half of what you grabbed" when nothing was grabbed.
+      M().say(state, game, game.haul.length && !nothing ? D().lines.blackout : D().lines.blackoutEmpty);
       PC.scenes.applyEffect(state, { tag: "Waterlogged", untilSeasonEnd: true });
     } else {
       M().say(state, game, D().lines.surface);
@@ -5645,24 +5708,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // Bank what was kept. Gold takes the purse-or-crew choice (§33.1.4;
-  // DEFAULT for salvage). Whatever won't fit in the hold stays on the beach.
+  // ruled November 18). Everything comes ashore; if the hold is then over,
+  // the player picks what stays on the beach (ruled November 18) before
+  // leaving the dive (beachOver, leaveOnBeach).
   function bank(state, game, pot) {
     if (game.banked) return game.bankedReport;
     var report = [], left = [];
     game.kept.forEach(function (it) {
       if (it.tier === "treasure") {
-        var room = PC.crew.treasureRoom(state);
-        var n = Math.min(room, it.treasure);
-        state.cargo.treasure.clean += n;
-        if (n < it.treasure) left.push((it.treasure - n) + " treasure");
+        state.cargo.treasure.clean += it.treasure;
       } else if (it.tier === "supplies") {
-        var p = Math.min(PC.crew.slotsFree(state), it.provisions);
-        state.provisions += p;
-        if (p < it.provisions) left.push((it.provisions - p) + " provisions");
+        state.provisions += it.provisions;
       } else if (it.tier === "goods") {
-        var g = Math.min(PC.crew.slotsFree(state), it.n);
-        if (g) PC.crew.addGood(state, it.good, g, false);
-        if (g < it.n) left.push((it.n - g) + " " + it.good);
+        PC.crew.addGood(state, it.good, it.n, false);
       } else if (it.tier === "item") {
         state.captain.items.push(it.item);
       } else if (it.tier === "quest") {
@@ -5678,13 +5736,51 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     game.bankedReport = { got: report, left: left, gold: game.gold || 0, pot: pot || null };
     PC.state.addLog(state, "Salvage dive" + (game.wreck.name ? " on " + game.wreck.name : " (" + game.wreck.type + ")") + ": " +
       (report.length ? report.join(", ") : "nothing") + (game.blackout ? " (blacked out)" : "") + ".");
-    if (left.length) M().say(state, game, "No room in the hold for " + left.join(", ") + ". You leave it on the beach.");
+    game.beach = beachOver(state) > 0;
     return game.bankedReport;
+  }
+
+  // How many hold slots over capacity the captain stands (0 if it fits).
+  function beachOver(state) { return Math.max(0, PC.crew.slotsUsed(state) - PC.crew.holdCapacity(state)); }
+
+  // The slots in use if `picks` ([{ what, n, dirty }]) were left behind.
+  function usedAfter(state, picks) {
+    var prov = state.provisions, goods = 0, tr = { clean: state.cargo.treasure.clean || 0, dirty: state.cargo.treasure.dirty || 0 };
+    var g = {};
+    Object.keys(state.cargo.goods).forEach(function (k) { g[k] = { clean: state.cargo.goods[k].clean || 0, dirty: state.cargo.goods[k].dirty || 0 }; });
+    picks.forEach(function (x) {
+      var n = Math.max(0, Math.floor(x.n || 0)), k = x.dirty ? "dirty" : "clean";
+      if (x.what === "provisions") prov = Math.max(0, prov - n);
+      else if (x.what === "treasure") tr[k] = Math.max(0, tr[k] - n);
+      else if (g[x.what]) g[x.what][k] = Math.max(0, g[x.what][k] - n);
+    });
+    Object.keys(g).forEach(function (k) { goods += g[k].clean + g[k].dirty; });
+    return prov + goods + Math.ceil((tr.clean + tr.dirty) / PC.data.economy.TREASURE_PER_SLOT);
+  }
+
+  // The player's choice of what stays on the beach. Throws if it still
+  // doesn't fit, so nothing is lost by a short pick.
+  function leaveOnBeach(state, game, picks) {
+    if (!game.beach) return [];
+    picks = (picks || []).filter(function (x) { return x.n > 0; });
+    var over = usedAfter(state, picks) - PC.crew.holdCapacity(state);
+    if (over > 0) throw new Error("Still " + over + " slot" + (over === 1 ? "" : "s") + " over. Leave a little more on the beach.");
+    var said = [];
+    picks.forEach(function (x) {
+      PC.crew.jettison(state, x.what, x.n, x.dirty);
+      said.push(x.n + " " + (x.what === "provisions" ? "provisions" : x.what === "treasure" ? (x.dirty ? "dirty treasure" : "treasure") : x.what));
+    });
+    game.beach = false;
+    if (said.length) M().say(state, game, "You leave " + said.join(", ") + " on the beach.");
+    return picks;
   }
 
   // Where the player goes when he leaves the dive screen.
   function exit(state, game) {
     if (!game.banked) bank(state, game, "crew");
+    // Leaving without picking: the default plan goes (cheapest goods, then
+    // provisions, then treasure; the A9 order).
+    if (game.beach) { PC.crew.jettisonOverflow(state); game.beach = false; }
     if (game.miranda) {
       if (state.flags.dpw_mermaid) { state.flags.dpw_retry = false; return "ocr_dpw_shark"; }
       state.flags.dpw_retry = true; // Ollie waits on the beach; each retry is 1 AP
@@ -5711,6 +5807,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       haul: game.haul.map(describe), kept: game.kept ? game.kept.map(describe) : null,
       blackout: game.blackout, quick: game.quick, miranda: game.miranda, questFound: !!game.questFound,
       needsPot: game.over && !game.banked && game.gold > 0, gold: game.gold || 0,
+      beach: game.banked && game.beach ? { over: beachOver(state), plan: PC.crew.jettisonPlan(state, beachOver(state)) } : null,
       banked: game.bankedReport || null,
       canQuick: !game.miranda && !game.haul.length && !game.over && !game.quick,
     };
@@ -5729,6 +5826,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     act: act,
     quickDive: quickDive,
     bank: bank,
+    beachOver: beachOver,
+    leaveOnBeach: leaveOnBeach,
     describe: describe,
     worth: worth,
     breathMax: breathMax,
@@ -6035,7 +6134,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var r = game.result;
     if (lossQuestActive(state) && !PC.quests.hasLead(state, "what_was_lost", "drinking")) {
       PC.quests.addLead(state, "what_was_lost", "drinking");
-      r.lead = PC.data.quests.what_was_lost.leads.drinking.journal[state.captain.loss] || PC.data.quests.what_was_lost.leads.drinking.journal.any;
+      r.lead = PC.quests.leadText(state, PC.data.quests.what_was_lost.leads.drinking.journal[state.captain.loss] || PC.data.quests.what_was_lost.leads.drinking.journal.any);
       M().say(state, game, r.lead);
     } else {
       var rec = PC.rumors.draw(state, D().RUMORS[game.opp.role], M().key(state, game, "rumor"), "a drinking match");
@@ -6338,7 +6437,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (won) {
       state.money.purse += g.stake * 2;
       game.won += 1; game.net += g.stake;
-      // Card Sharp counts gross winnings, not net of losses (§18.3 proposal).
+      // Card Sharp: 500 gold net over the captain's life, wins less losses
+      // (ruled November 18). Once earned it's never taken away.
       state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) + g.stake;
       M().say(state, game, D().lines.win);
       if (state.minigames.diceWinnings >= D().CARD_SHARP_AT && state.captain.tags.indexOf("Card Sharp") < 0) {
@@ -6348,6 +6448,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       }
     } else {
       game.lost += 1; game.net -= g.stake;
+      state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) - g.stake; // net (Card Sharp)
       M().say(state, game, D().lines.lose);
     }
     return game;
@@ -6543,7 +6644,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     try {
       var rec = PC.npcs.generate(state, { id: null, role: flag === "Pirate" ? "Pirate Captain" : "Ship Captain", pool: POOL_BY_FLAG[flag] || "master",
         node: null, key: [state.world.seed, "captain", state.world.shipSeq || 0, Math.floor(r() * 1e9)].join("|"), persistent: false });
-      return rec.full;
+      return { full: rec.full, nick: !!rec.nickname };
     } catch (e) { return null; }
   }
 
@@ -6568,15 +6669,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var c = H().CLASSES[opts.cls];
     var fit = opts.full ? { guns: c.guns, crew: c.crewMax, hull: c.hull } : fitout(opts.cls, opts.role, r);
     var res = opts.resolve != null ? opts.resolve : intBetween(r, H().RESOLVE[opts.role][0], H().RESOLVE[opts.role][1]);
+    // Same draw order as before (name, captain, cue) so seeded hunts don't shift.
+    var sid = "s" + (state.world.shipSeq = (state.world.shipSeq || 0) + 1);
+    var sName = shipName(state, opts.flag, opts.role, r);
+    var cap = captainName(state, opts.flag, opts.role, r);
     var s = {
-      id: "s" + (state.world.shipSeq = (state.world.shipSeq || 0) + 1),
+      id: sid,
       cls: opts.cls, role: opts.role, flag: opts.flag, size: c.size, draft: c.draft,
       hull: fit.hull, hullMax: c.hull, guns: fit.guns, gunsMax: c.guns, crew: fit.crew, crewMin: c.crewMin, crewMax: c.crewMax,
       cargo: c.cargo, speed: c.speed, handling: c.handling,
       rating: opts.rating != null ? opts.rating : H().RATING[opts.role],
       gunnery: opts.gunnery != null ? opts.gunnery : H().GUNNERY[opts.role],
       resolve: res, hunter: !!opts.hunter, shape: opts.shape || "single",
-      name: shipName(state, opts.flag, opts.role, r), captain: captainName(state, opts.flag, opts.role, r), title: CAPTAIN_TITLE[opts.role],
+      name: sName, captain: cap ? cap.full : null, captainNick: !!(cap && cap.nick),
+      // A nicknamed pirate shows with no title: "Black Sam Bellamy" (R3).
+      title: cap && cap.nick ? null : CAPTAIN_TITLE[opts.role],
       cue: pick(r, PC.data.huntLines.cue[clamp(res, 1, 5)]),
     };
     s.startCrew = s.crew;
@@ -7265,6 +7372,24 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return { parts: parts, edge: clamp(edge, -4, 6) };
   }
 
+  // A ship's numbers before and after a hit (P14).
+  function sideSnap(state, b, id) {
+    var s = ship(state, b, id);
+    return { hull: s.hull, guns: s.guns, crew: s.crew, speed: s.speed };
+  }
+  // "Her hull −4 · 1 gun lost · 1 man down · Speed −1" as one chip. Her
+  // losses read good for you; your own read bad.
+  function exchangeChips(a, z, who, ink) {
+    var parts = [];
+    var dh = Math.round(z.hull - a.hull), dg = z.guns - a.guns, dc = z.crew - a.crew, ds = z.speed - a.speed;
+    if (dh) parts.push(who + " hull " + (dh > 0 ? "+" : "−") + Math.abs(dh));
+    if (dg) parts.push(Math.abs(dg) + " gun" + (Math.abs(dg) === 1 ? "" : "s") + " lost");
+    if (dc) parts.push(Math.abs(dc) + (Math.abs(dc) === 1 ? " man" : " men") + " down");
+    if (ds) parts.push("Speed " + (ds > 0 ? "+" : "−") + Math.abs(ds));
+    if (!parts.length) return [];
+    return [{ icon: "hull", text: parts.join(" · "), ink: ink }];
+  }
+
   function enemyShot(state, game, b, e) {
     var w = e.willBoard ? H().SHOT_WEIGHTS.boarding : e.flag === "Pirate" ? H().SHOT_WEIGHTS.Pirate :
       H().SHOT_WEIGHTS[e.hunter || e.role === "War" ? "War" : e.role] || H().SHOT_WEIGHTS.War;
@@ -7283,9 +7408,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     b.lastExchange = { outcome: r.outcome, dice: r.dice, edge: r.edge, mine: shot, theirs: theirs };
     markRoll(game, "The Exchange", r);
     say(state, game, L().exchange[r.outcome] + " (" + L().theirShot[theirs] + ")");
+    var before = { me: sideSnap(state, b, "flagship"), her: sideSnap(state, b, en.id) };
     if (r.outcome === "clean") hit(state, game, b, "flagship", en.id, true, shot);
     else if (r.outcome === "partial") { hit(state, game, b, "flagship", en.id, false, shot); hit(state, game, b, en.id, "flagship", false, theirs); }
     else hit(state, game, b, en.id, "flagship", true, theirs);
+    // P14: what the Exchange did, both sides, as chips under the result.
+    if (game.lastRoll) game.lastRoll.chips = exchangeChips(before.her, sideSnap(state, b, en.id), "Her", "good")
+      .concat(exchangeChips(before.me, sideSnap(state, b, "flagship"), "Your", "bad"));
     afterBeat(state, game);
     if (!b.over && b.step !== "retarget") b.step = "decision";
   }
@@ -7551,11 +7680,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var en = lead(b), bd = b.board, list = [];
     var dr = clamp(en.rating, 0, 8);
     var w = wounded(state);
-    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr }, lock: w ? "Not while you're Wounded" : null,
+    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : null,
       note: "Clean: +2 on this clash, partial +1. A setback means you're Wounded." });
     list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, note: "+1 on the next clash on a partial or better." });
     list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, note: "Halves your losses this clash on a partial or better." });
-    list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr },
+    list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
     list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8), extra: dreadBonus(state) ? [{ label: "Dread", value: dreadBonus(state) }] : [] },
@@ -7580,8 +7709,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return rollAction(state, game, a);
   }
 
+  // Duels and Lead the Charge carry their own condition, so items like the
+  // Rare swords (§32.8) can read it.
   function rollAction(state, game, a) {
-    return M().roll(state, game, a.check, "act_" + a.id, {}, ["Battle"]);
+    var cond = ["Battle"].concat(a.check && a.check.cond || []);
+    return M().roll(state, game, a.check, "act_" + a.id, {}, cond);
   }
 
   function settleShot(state, game, p) {
@@ -8413,7 +8545,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var ca = C().caBand(me / Math.max(1, them));
     var myGuns = state.ship.guns;
     return {
-      hunter: g.hunter, shape: g.shape, ca: ca, caName: C().caName(ca),
+      hunter: g.hunter, shape: g.shape, ca: ca, caName: C().caName(ca), driver: brDriver(state, g.ships),
       ships: g.ships.map(function (s) {
         var lt = G().lootTypes(s);
         return { id: s.id, cls: s.cls, role: s.role, flag: s.flag, name: s.name, escort: !!s.escort,
@@ -8425,6 +8557,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s) };
       }),
     };
+  }
+
+  // P12a: which part of Battle Rating puts her ahead (guns, hull or crew),
+  // so the Quartermaster names the real reason. The same sums as br().
+  function brDriver(state, ships) {
+    var mine = ["flagship"].concat(fleet(state).filter(function (f) { return f.kind === "fleet"; }).map(function (f) { return f.id; }))
+      .map(function (id) { return C().ship(state, null, id); });
+    function part(list, k) {
+      return list.reduce(function (a, s) { return a + (k === "guns" ? C().manned(s) : k === "hull" ? s.hull / 5 : s.crew / 5); }, 0);
+    }
+    var best = null, gap = 0;
+    ["guns", "hull", "crew"].forEach(function (k) {
+      var d = part(ships, k) - part(mine, k);
+      if (d > gap) { gap = d; best = k; }
+    });
+    return best;
   }
 
   function meterNote(s) {
@@ -8442,7 +8590,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (sv.ships.some(function (s) { return s.warship; }) && sv.ca < 2) return A.warship;
     if (sv.ca >= 1) return A.good;
     if (sv.ca === 0) return A.even;
-    return A.bad;
+    // P12a: name what puts her ahead.
+    return (sv.driver && A.badBy && A.badBy[sv.driver]) || A.bad;
   }
 
   function view(state, game) {
@@ -8813,6 +8962,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
   add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
   add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
+  add("Obsidian Amulet", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Parisian Rapier", { edge: plus(["Swordsmanship"], 1, { condition: "Duel" }) }); // §32.8
+  add("Abyssinian Scimitar", { edge: plus(["Swordsmanship"], 1, { condition: "Lead the Charge" }) }); // §32.8
   add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
   // Old ailments, rebalanced in the Creator chat (§12.4): one often-rolled
   // skill and one rarer one each.
@@ -8897,11 +9049,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- Old ailments (debuffs, §12.4) ------------------------------------
   var DEBUFFS = [
-    { id: "Bad Knee", text: "−2 Chase & Climb, −1 Board until cured", life: "Curable" },
-    { id: "Old Wound", text: "−2 Endure, −1 Swordsmanship until cured", life: "Curable" },
+    { id: "Bad Knee", text: "−2 Chase & Climb, −1 Board, until cured", life: "Curable" },
+    { id: "Old Wound", text: "−2 Endure, −1 Swordsmanship, until cured", life: "Curable" },
     { id: "Failing Eyes", text: "−1 Keep Watch, Appraise", life: "For life" },
     { id: "Weak Chest", text: "−2 Endure, −1 Dive and any check in the cold, until cured", life: "Curable" },
-    { id: "Bad Back", text: "−2 Hold Your Ground, −1 Brawling until cured", life: "Curable" },
+    { id: "Bad Back", text: "−2 Hold Your Ground, −1 Brawling, until cured", life: "Curable" },
     { id: "Rheumy Hands", text: "−1 Light Fingers, Repair & Refit", life: "For life" },
     { id: "Hard of Hearing", text: "−1 Notice Danger, and Leadership under fire or in a storm", life: "For life" },
     { id: "Marsh Fever", text: "Fever flares hit you more often and last two seasons", life: "For life" },
@@ -9262,7 +9414,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     ships: [], // special prize ships (§30.10) join with the prize hunt milestone
   };
 
-  // §36.14 Pirate nicknames. A nickname replaces the surname for good.
+  // §36.14 Pirate nicknames. Generated ones are prefix only and keep the
+  // surname ("Black Sam Bellamy"; ruled November 18, M6 chat R3). The suffix
+  // and "the" lists are for the author's own Named NPCs (Bobby Rats).
   var NICKNAMES = {
     prefix: L("Black, Red, Long, Short, Mad, Lucky, Gentleman, Dirty, Salty, Old, Pretty, Bloody, Honest, Sly, Lame, Deaf, Squinting, Sweet, Gin-Soaked, Handsome"),
     suffix: L("Rats, Bones, Barrels, Pickles, Teeth, Knuckles, Two-Toes, Nine-Fingers, Gristle, Tar, Biscuits, Sixpence, Buckets, Ribs, Splinters"),
@@ -11511,7 +11665,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       "choices": [
         {
           "id": "yarr",
-          "label": "Erm, *yarr*. I be Captain {captain.first}. Ye be wantin' a favor?",
+          "label": "Erm, *yarr*. I be Captain {captain.last}. Ye be wantin' a favor?",
           "approval": [
             "Revelry"
           ],
@@ -12783,10 +12937,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           B: "Bobby Rats sold your jewels to a tall, thin, bald man heading home to Edenton.",
         } },
         // The drinking lead (§30.6, lead 5): any drinking win at any Tavern.
+        // The author's lines (approved November 18). [Trident Waters] is her
+        // hunting ground, seeded per world. The birthmark is the brother's mark.
         drinking: { node: null, journal: {
-          A: "A pirate you drank under the table knows the *Trident*'s hunting waters.",
-          B: "A pirate you drank under the table bragged about a chest of jewels aboard the *Trident*.",
-          C: "A pirate you drank under the table knows the waters Gregoire's *Trident* works.",
+          A: "A pirate you drank under the table swears the *Trident* hunts [Trident Waters], with a carpenter with a birthmark chained at her pumps.",
+          B: "A pirate you drank under the table bragged about a chest of fine jewels aboard the *Trident*. They sound like yours.",
+          C: "A pirate you drank under the table says Gregoire's *Trident* hunts [Trident Waters].",
           any: "A lead won over drinks.",
         } },
       },
@@ -12888,7 +13044,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // Reputation (§30.11: a recent deed, then the Dread band, then the newcomer)
       { id: "rep_tp_humiliated", type: "Reputation", deed: true, when: { flag: "tp_humiliated" }, text: "\"Did you hear about the newcomer that pushed Twopenny over? Whole beach is still laughing about it.\"" },
       { id: "rep_tp_beat_you", type: "Reputation", deed: true, when: { flag: "tp_beat_you" }, text: "\"Twopenny's been telling everyone he whipped the new captain in a fight. It's a bit hard to believe.\"" },
-      { id: "rep_shark_killed", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain [Player] killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
+      { id: "rep_shark_killed", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain {captain.last} killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
       { id: "rep_asking", type: "Reputation", deed: true, when: { seasonFlag: "gi_asked" }, text: "PLACEHOLDER (line to write, §30.4): the next Reputation rumor here is about the captain asking questions." },
       { id: "rep_dread_20", type: "Reputation", dread: [20, 39], text: "\"[Player] is definitely not someone you want to cross.\"" },
       { id: "rep_dread_40", type: "Reputation", dread: [40, 69], text: "\"Merchants from here to Havana are terrified of the [Ship].\"" },
@@ -12934,7 +13090,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       leadIn: "\"Bobby's been hearing things lately.\"",
       lines: [
         { id: "uw_maelis_wants", type: "Underworld", text: "\"Bobby hears the pretty miss Maelis is paying double for anything old and strange. Bobby wishes he had something like that.\"" },
-        { id: "uw_letter_buyer", type: "Underworld", text: "\"Got a letter of marque you aren't using? Bobby knows a quiet house in [Node] that pays for papers. Bobby doesn't know what they do with them. Bobby doesn't want to know.\"" },
+        { id: "uw_letter_buyer", type: "Underworld", tier: "A", text: "\"Got a letter of marque you aren't using? Bobby knows a quiet house in [Node] that pays for papers. Bobby doesn't know what they do with them. Bobby doesn't want to know.\"" },
       ],
       chance: { "0": 0.10, "1": 0.20, "2": 0.35, "3": 0.50 },
       askFrench: "\"Bobby hears that those Frenchmen are still skulking about somewhere.\"",
@@ -12949,6 +13105,17 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
     // §30.3 Expiry by type.
     expires: { "Danger": 0, "Merchant": 0, "World State": 0, "Prize": 1 }, // seasons after this one; absent means never
+
+    // Rumor tiers (ruled November 18, M6 chat R8): C background, B actionable,
+    // A very valuable. A line's own "tier" overrides its type's default.
+    // Scripted rumors and leads ignore tiers.
+    tiers: { "Legend": "C", "Reputation": "C", "Node": "C", "World State": "C",
+      "Danger": "B", "Merchant": "B", "Quest": "B", "Underworld": "B", "Prize": "A" },
+    // Each source's tier mix (placeholders). The type weights then pick
+    // within the tier.
+    tierMix: { keeper: { C: 55, B: 42, A: 3 } },
+    // At most one A rumor from the pool a season, across all sources.
+    A_CAP: 1,
   };
 })();
 </script>
@@ -13132,14 +13299,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       cabin_brig: { goods: [["Ming porcelain", 2, 3, 80], ["Ambergris", 1, 2, 20]], treasure: [3, 5], gold: [75, 150], rare: 1 / 5 },
       cabin_frigate: { goods: [["Ming porcelain", 2, 3, 60], ["Silver bars", 1, 2, 30], ["Pearls", 1, 2, 10]], treasure: [4, 6], gold: [100, 200], rare: 1 / 3 },
     },
-    // Salvage-safe items (§32.15). DEFAULT: the catalog doesn't tier the
-    // Ivory Compass or the Obsidian Amulet, so they stand in as the Rares.
+    // Salvage-safe items (§32.15; ruled November 18). The Obsidian Amulet is
+    // Uncommon (§32); the Ivory Compass stays out (the Munin's signature
+    // item, §30.10); the Rares are the Rare swords (§32.8).
     ITEMS: {
-      uncommon: ["Shark-Tooth Necklace", "Tin Whistle", "Silver Pocket Watch", "Fancy Spyglass", "Navigator's Octant"],
-      rare: ["Ivory Compass", "Obsidian Amulet"],
+      uncommon: ["Shark-Tooth Necklace", "Tin Whistle", "Silver Pocket Watch", "Fancy Spyglass", "Navigator's Octant", "Obsidian Amulet"],
+      rare: ["Parisian Rapier", "Abyssinian Scimitar"],
     },
     // Rough worth, only to pick the better half of a haul on a blackout.
-    WORTH: { treasureUnit: 70, provisions: 30, uncommon: 500, rare: 2500 },
+    WORTH: { treasureUnit: 70, provisions: 30, uncommon: 500, rare: 3500 },
 
     sites: {
       ocracoke: { name: "Lilyhook's Graveyard", cryptid: "the giant shark", relic: "Giant Tooth", legend: ["legend_giant_shark"] },
@@ -13165,6 +13333,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       scout: "You take a moment to peer through the gloom.",
       surface: "You break the surface, gasping for air.",
       blackout: "Your vision grows black. You wake on the beach, coughing up seawater, with only half of what you grabbed.",
+      // P11: with nothing grabbed there's no half to keep.
+      blackoutEmpty: "Your vision grows black. You wake on the beach, coughing up seawater.",
       snag: "Your shirt catches on a splintered plank, and it takes precious seconds to tear yourself free.",
       current: "A fast current rolls through the wreck and pushes you out. Getting back in there won't be easy.",
       shark: { draw: "A grey shadow glides past the wreck.", clean: "You press yourself flat against the hull until it swims lazily away.",
@@ -13283,7 +13453,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     CHEAT_CHECK: { type: "Cards & Dice", dr: 3 },
     CAUGHT_STANDING: -5,      // with the node's faction; black Standing at Ocracoke (§18.3, §28.3)
     MARKS_TO_CATCH: 2,
-    CARD_SHARP_AT: 500,       // DEFAULT: gross winnings at Liar's Dice (threshold OPEN, §18.3)
+    CARD_SHARP_AT: 500,       // net Liar's Dice winnings over the captain's life (ruled November 18, §18.3)
     // How the opponent plays, by trait (§18.3): call when the bid is less
     // likely than this; bold players raise past the minimum. Loosened a
     // touch with five dice (November 14), so he doesn't play the exact odds.
@@ -13555,7 +13725,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // The Quartermaster's vote (§25.9, §25.15): the result is the S25 appendix's text.
     votePre: "PLACEHOLDER: The crew want a Quartermaster of their own choosing. They'll vote before the day is out.",
     voteResult: "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.",
-    demand: { clean: "Her crew throw down their arms. She's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
+    demand: { clean: "PLACEHOLDER: \"Throw down your arms!\" They do. Her colors come down, and she's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
     shot: { clean: "PLACEHOLDER: Your pistol barks and a man drops.", partial: "PLACEHOLDER: Your shot goes wide.", setback: "PLACEHOLDER: Your pistol misfires." },
     strikeFirst: { clean: "You strike first: +1 on the first clash.", partial: "Neither side gets the jump.", setback: "They strike first: +1 to them on the first clash." },
     flee: "PLACEHOLDER: You break off and run.",
@@ -13577,7 +13747,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       warship: "PLACEHOLDER: \"That's a warship, Captain. At these odds she'll tear us apart. Let her go.\"",
       good: "PLACEHOLDER: \"She's a fat one and she's no match for us. I say we take her.\"",
       even: "PLACEHOLDER: \"It'd be a fair fight. Your call, Captain.\"",
-      bad: "PLACEHOLDER: \"She outguns us, Captain. I'd think hard before taking her on.\"",
+      bad: "PLACEHOLDER: \"She's more than a match for us, Captain. I'd think hard before taking her on.\"",
+      // P12a: the bad-odds line names what puts her ahead (Battle Rating's
+      // guns, hull or crew).
+      badBy: {
+        guns: "PLACEHOLDER: \"She outguns us, Captain. I'd think hard before taking her on.\"",
+        hull: "PLACEHOLDER: \"She's built stout, Captain. Our guns will take a long while to hurt her. I'd think hard before taking her on.\"",
+        crew: "PLACEHOLDER: \"She's got more hands than we do, Captain. I'd think hard before taking her on.\"",
+      },
       hunter: "PLACEHOLDER: \"She's here for us, Captain. Fight or run, but decide quick.\"",
       board: "PLACEHOLDER: \"We've the numbers for it. Get us alongside and we'll take her deck.\"",
       fire: "PLACEHOLDER: \"Keep her at range and pound her. We don't have the men to board.\"",
@@ -14237,12 +14414,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var vh = globalThis.innerHeight || 800;
     if (top < off || top > vh * 0.5) { try { globalThis.scrollTo(0, Math.max(0, top + (globalThis.scrollY || 0) - off)); } catch (e) { /* ignore */ } }
   }
+  // P6 and P7: put an anchor (the dive's breath gauge, a scene's woodcut)
+  // at the top of the screen, under the sticky bar.
+  function scrollToAnchor(a) {
+    try { globalThis.scrollTo(0, Math.max(0, a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset())); } catch (e) { /* ignore */ }
+  }
   function land(before, keys, el, placeBefore, menuBefore, panelTop) {
     var modal = root.querySelector(".modal:not(.popup)");
     if (modal && menu && menu === menuBefore) modal.scrollTop = panelTop;
     var fresh = null;
     root.querySelectorAll("[data-result]").forEach(function (r) { if (!fresh && !keys[r.dataset.result]) fresh = r; });
     if (el && el.dataset && el.dataset.top) return scrollTop();
+    // P6 (the dive) and P7 (scenes): these screens land on their anchor,
+    // never the very top, whenever something changed.
+    var anchor = !menu && root.querySelector("[data-anchor]");
+    if (anchor && !anchor.closest(".modal") && (fresh || screenKey() !== before)) return scrollToAnchor(anchor);
     if (fresh && (!menu || fresh.closest(".modal"))) return scrollToEl(fresh);
     if (screenKey() === before) return;
     if (menu && menu !== menuBefore) return; // a menu opened over the screen: the page stays put
@@ -14378,10 +14564,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<table class="ledger">' + lrow("Your purse", gold(state.money.purse)) + lrow("Crew gold", gold(state.money.crew)) +
       lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
       lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
-      // Crew with the wounded (A16, §38.5); provisions as time at sea under morale (B35).
+      // Crew with the wounded (A16, §38.5); provisions as lots under morale (P8).
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
-      lrow("Provisions", '<span title="' + esc(state.provisions + " lots: " + timeAtSea(state.provisions)) + '">' + esc(seaTime(state.provisions)) + "</span>") + "</table>" +
+      // P8: provisions as lots, with time at sea in the tooltip.
+      lrow("Provisions", '<span title="' + esc(state.provisions + " lots: " + timeAtSea(state.provisions)) + '">' + esc(String(state.provisions)) + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
       meters(false) +
       '<div class="h4">Officers</div>' + offs.map(function (o) {
@@ -14402,7 +14589,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
       '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse " + gold(state.money.purse) + " · Crew " + gold(state.money.crew) +
-      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + esc(seaTime(state.provisions)) + '</span><span class="go">›</span></button>' +
+      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + state.provisions + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
       }).join("") + '<span class="note">Officers · tap for cards</span></div>' : "");
@@ -14491,7 +14678,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function scenePanel() {
     var v = PC.scenes.viewScene(state);
     var h = sceneHead(v);
-    var html = '<div class="where">' + esc(h.line) + "</div>" + (h.plate ? plate(h.plate) : banner(h.banner)) +
+    // P7: a scene step lands with its woodcut (or plate) at the top.
+    var html = '<div class="where">' + esc(h.line) + "</div>" + '<div data-anchor="scene">' + (h.plate ? plate(h.plate) : banner(h.banner)) + "</div>" +
       (h.quest ? '<div class="ribbon">' + esc(h.quest) + (h.ap ? '<span class="apnote">(' + plural(h.ap, "action") + ")</span>" : "") + "</div>" : "") +
       '<h2 class="title">' + esc(h.heading) + "</h2>";
     var body = "";
@@ -14618,7 +14806,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function npcName(id) {
     var n = PC.npcs.get(state, id);
-    return n ? ((n.title ? n.title + " " : "") + n.full) : id;
+    return n ? PC.npcs.menuName(n) : id;
   }
 
   // A person's name card (§41.5): name, role, relationship word, known traits.
@@ -14765,11 +14953,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
     list2.push(opt({ act: "dice", label: "Liar's Dice " + apText(1), ap: 1, meta: "As many games a sitting as your purse covers, " + st[0] + "-" + st[1] + " gold a game from your purse.", lock: lp.ok ? null : lp.why }));
     var gi = N().tavernServiceCheck(state, 1);
-    list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.",
+    list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: two rumors, you pick both kinds. Partial: one, you pick the kind. Setback: one rumor, and people notice you asking.",
       check: gi.ok ? PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] }) : null, lock: gi.ok ? null : gi.why }));
     html += opts(list2);
     if (state.location.gatherPick) {
-      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
+      var gpl = state.location.gatherPick.left || 1;
+      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?' + (gpl > 1 ? " (" + gpl + " picks)" : "") + '</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
         return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
       }).join("") + "</div></div>";
     }
@@ -14853,6 +15042,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var gunsMax = Math.min(room, afford(N().gunPrice(state)));
       html += '<div class="svc"><h4>Guns</h4><p class="small">' + sh.guns + " of " + sh.gunsMax + " guns · " + gold(N().gunPrice(state)) + " gold a gun.</p>" +
         (room <= 0 ? '<p class="note">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qstep("q-guns", 1, gunsMax) + '<button class="secondary" data-act="guns" data-for="q-guns">Buy guns</button> ' +
+          // P10: fill every port the purse can pay for.
+          (gunsMax > 1 ? '<button class="secondary" data-act="guns" data-qty-value="' + gunsMax + '">Buy max (' + gunsMax + ')</button> ' : "") +
           totalSlot(function () { var n = val("q-guns"); return plural(n, "gun") + " · " + gold(n * N().gunPrice(state)) + " gold"; }) + "</div>" : '<p class="note">You can\'t pay for a gun right now.</p>') + "</div>";
     }
     // The whole hold, clearly (A8 of the M5 playtest): what each ship adds,
@@ -15191,7 +15382,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function divePanel(v) {
     var html = mgHead("Ocracoke · Lilyhook's Graveyard", v.title) +
-      '<div class="gauges"><div class="gauge"><span class="lbl">Breath</span>' + gpips(v.breath, v.breathMax, "breath") + ' <span class="small">' + v.breath + " of " + v.breathMax + "</span></div></div>";
+      // P6: after a dive action the breath gauge lands at the top.
+      '<div class="gauges" data-anchor="dive"><div class="gauge"><span class="lbl">Breath</span>' + gpips(v.breath, v.breathMax, "breath") + ' <span class="small">' + v.breath + " of " + v.breathMax + "</span></div></div>";
     if (!v.over && v.haul && v.haul.length) html += '<p class="small" style="margin:0 0 6px"><b>In your arms:</b> ' + v.haul.map(esc).join(", ") + "</p>";
     html += mgLatest(v.log, v);
     if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
@@ -15221,10 +15413,29 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var lost = lostList.map(function (k) { return { icon: "item", html: "<s>" + esc(k) + "</s>" }; });
     html += kept.length || lost.length ? chips(kept.concat(lost)) : '<p class="note">Nothing.</p>';
     if (v.needsPot) {
-      return html + '<p style="font-size:20px;margin:16px 0 10px">Where does the ' + gold(v.gold) + ' gold go?</p><div class="actions"><button class="primary" data-top="1" data-act="mgbank" data-pot="purse">Into your purse · ' + gold(v.gold) + "</button>" +
-        '<button class="secondary" data-top="1" data-act="mgbank" data-pot="crew">Share it with the crew · ' + gold(v.gold) + "</button></div>";
+      return html + '<p style="font-size:20px;margin:16px 0 10px">Where does the ' + gold(v.gold) + ' gold go?</p><div class="actions"><button class="primary" data-act="mgbank" data-pot="purse">Into your purse · ' + gold(v.gold) + "</button>" +
+        '<button class="secondary" data-act="mgbank" data-pot="crew">Share it with the crew · ' + gold(v.gold) + "</button></div>";
     }
+    if (v.beach) return html + beachPicker(v.beach);
     return html + '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
+  }
+
+  // A full hold after a dive (ruled November 18): the player picks what
+  // stays on the beach. Filled in with the default (cheapest goods, then
+  // provisions, then treasure) to change as he likes.
+  function beachPicker(bch) {
+    var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
+    ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
+    Object.keys(state.cargo.goods).forEach(function (g) {
+      ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
+    });
+    var planned = function (r) { var p = bch.plan.filter(function (x) { return x.what === r.what && !!x.dirty === r.dirty; })[0]; return p ? p.n : 0; };
+    return '<div class="svc" data-result="beach"><h4>No room for it all</h4><p class="small">Your hold is ' + plural(bch.over, "slot") + " over. Choose what stays on the beach. Treasure packs five units to a slot.</p>" +
+      '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Leave on the beach</th></tr>' + rows.map(function (r, i) {
+        return "<tr><td>" + dirtyName(r.label, r.dirty) + "</td><td>" + r.n + "</td><td>" + (r.n ? qstep("q-beach-" + i, planned(r), r.n, 0) : "") +
+          '<span hidden data-beach-row="' + i + '" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '"></span></td></tr>';
+      }).join("") + "</table>" +
+      '<div class="actions"><button class="primary" data-act="beachleave">Leave these on the beach</button></div></div>';
   }
   var diveZone = null;
   var devForce = null; // the Developer panel's next sighting (Milestone 5)
@@ -15297,7 +15508,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function rawCheck(type, edge, parts) {
     return { type: type, tier: PC.checks.tier(edge), odds: PC.checks.odds(edge), parts: parts || [], edge: edge, rawEdge: edge };
   }
-  function chk(c) { return c ? PC.checks.assess(state, c, { conditions: ["Battle"] }) : null; }
+  function chk(c) { return c ? PC.checks.assess(state, c, { conditions: ["Battle"].concat(c.cond || []) }) : null; }
 
   function qmSays(line, v) {
     if (!line) return "";
@@ -16107,6 +16318,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     "divezone": function (el) { diveZone = el.dataset.zone; },
     "drinkspot": function (el) { drinkSpot = drinkSpot === el.dataset.spot ? null : el.dataset.spot; },
     "mgdive": function (el) { markLog(); PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
+    "beachleave": function () {
+      var picks = [];
+      root.querySelectorAll("[data-beach-row]").forEach(function (sp) {
+        picks.push({ what: sp.dataset.what, dirty: sp.dataset.dirty === "1", n: val("q-beach-" + sp.dataset.beachRow) });
+      });
+      markLog();
+      PC.salvage.leaveOnBeach(state, state.minigame, picks);
+    },
     "mgquick": function () { markLog(); PC.salvage.quickDive(state); },
     "mgbank": function (el) { PC.salvage.bank(state, state.minigame, el.dataset.pot); },
     "mgdrink": function (el) { markLog(); PC.drinking.act(state, el.dataset.op); drinkSpot = null; },
@@ -16217,8 +16436,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var heard = [];
       if (r.lead) heard.push(r.lead);
       if (r.rumor) heard.push(r.rumor.text);
-      say("around", null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town, but nobody tells you anything. They do notice you asking." }[r.outcome],
-        r.pick && r.pick.length ? "Pick what you want to hear about." : null, heard, { heardNote: heard.length ? "Added to your Rumors." : null, outcome: r.outcome, rollType: "Gather Intelligence",
+      say("around", null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town. You hear one thing, but people notice you asking." }[r.outcome],
+        r.picks ? (r.picks > 1 ? "Pick the two things you want to hear about." : "Pick what you want to hear about.") : null, heard, { heardNote: heard.length ? "Added to your Rumors." : null, outcome: r.outcome, rollType: "Gather Intelligence",
           chips: [{ icon: "ap", text: "1 action" }, heard.length ? { icon: "rumor", text: plural(heard.length, "rumor") + " heard" } : null] });
     },
     "gatherpick": function (el) {

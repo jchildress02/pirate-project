@@ -238,7 +238,7 @@
     // The Quartermaster's vote (§25.9, §25.15): the result is the S25 appendix's text.
     votePre: "PLACEHOLDER: The crew want a Quartermaster of their own choosing. They'll vote before the day is out.",
     voteResult: "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.",
-    demand: { clean: "Her crew throw down their arms. She's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
+    demand: { clean: "PLACEHOLDER: \"Throw down your arms!\" They do. Her colors come down, and she's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
     shot: { clean: "PLACEHOLDER: Your pistol barks and a man drops.", partial: "PLACEHOLDER: Your shot goes wide.", setback: "PLACEHOLDER: Your pistol misfires." },
     strikeFirst: { clean: "You strike first: +1 on the first clash.", partial: "Neither side gets the jump.", setback: "They strike first: +1 to them on the first clash." },
     flee: "PLACEHOLDER: You break off and run.",
@@ -260,7 +260,14 @@
       warship: "PLACEHOLDER: \"That's a warship, Captain. At these odds she'll tear us apart. Let her go.\"",
       good: "PLACEHOLDER: \"She's a fat one and she's no match for us. I say we take her.\"",
       even: "PLACEHOLDER: \"It'd be a fair fight. Your call, Captain.\"",
-      bad: "PLACEHOLDER: \"She outguns us, Captain. I'd think hard before taking her on.\"",
+      bad: "PLACEHOLDER: \"She's more than a match for us, Captain. I'd think hard before taking her on.\"",
+      // P12a: the bad-odds line names what puts her ahead (Battle Rating's
+      // guns, hull or crew).
+      badBy: {
+        guns: "PLACEHOLDER: \"She outguns us, Captain. I'd think hard before taking her on.\"",
+        hull: "PLACEHOLDER: \"She's built stout, Captain. Our guns will take a long while to hurt her. I'd think hard before taking her on.\"",
+        crew: "PLACEHOLDER: \"She's got more hands than we do, Captain. I'd think hard before taking her on.\"",
+      },
       hunter: "PLACEHOLDER: \"She's here for us, Captain. Fight or run, but decide quick.\"",
       board: "PLACEHOLDER: \"We've the numbers for it. Get us alongside and we'll take her deck.\"",
       fire: "PLACEHOLDER: \"Keep her at range and pound her. We don't have the men to board.\"",

@@ -35,10 +35,12 @@
           B: "Bobby Rats sold your jewels to a tall, thin, bald man heading home to Edenton.",
         } },
         // The drinking lead (§30.6, lead 5): any drinking win at any Tavern.
+        // The author's lines (approved November 18). [Trident Waters] is her
+        // hunting ground, seeded per world. The birthmark is the brother's mark.
         drinking: { node: null, journal: {
-          A: "A pirate you drank under the table knows the *Trident*'s hunting waters.",
-          B: "A pirate you drank under the table bragged about a chest of jewels aboard the *Trident*.",
-          C: "A pirate you drank under the table knows the waters Gregoire's *Trident* works.",
+          A: "A pirate you drank under the table swears the *Trident* hunts [Trident Waters], with a carpenter with a birthmark chained at her pumps.",
+          B: "A pirate you drank under the table bragged about a chest of fine jewels aboard the *Trident*. They sound like yours.",
+          C: "A pirate you drank under the table says Gregoire's *Trident* hunts [Trident Waters].",
           any: "A lead won over drinks.",
         } },
       },

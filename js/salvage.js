@@ -309,7 +309,8 @@
       // The Hauler tag keeps the whole haul (§14.2).
       var hauler = (state.captain.tags || []).indexOf("Hauler") >= 0;
       kept = quest.concat(hauler ? rest : rest.slice(0, Math.floor(rest.length / 2)));
-      M().say(state, game, D().lines.blackout);
+      // P11: drop "only half of what you grabbed" when nothing was grabbed.
+      M().say(state, game, game.haul.length && !nothing ? D().lines.blackout : D().lines.blackoutEmpty);
       PC.scenes.applyEffect(state, { tag: "Waterlogged", untilSeasonEnd: true });
     } else {
       M().say(state, game, D().lines.surface);
@@ -325,24 +326,19 @@
   }
 
   // Bank what was kept. Gold takes the purse-or-crew choice (§33.1.4;
-  // DEFAULT for salvage). Whatever won't fit in the hold stays on the beach.
+  // ruled November 18). Everything comes ashore; if the hold is then over,
+  // the player picks what stays on the beach (ruled November 18) before
+  // leaving the dive (beachOver, leaveOnBeach).
   function bank(state, game, pot) {
     if (game.banked) return game.bankedReport;
     var report = [], left = [];
     game.kept.forEach(function (it) {
       if (it.tier === "treasure") {
-        var room = PC.crew.treasureRoom(state);
-        var n = Math.min(room, it.treasure);
-        state.cargo.treasure.clean += n;
-        if (n < it.treasure) left.push((it.treasure - n) + " treasure");
+        state.cargo.treasure.clean += it.treasure;
       } else if (it.tier === "supplies") {
-        var p = Math.min(PC.crew.slotsFree(state), it.provisions);
-        state.provisions += p;
-        if (p < it.provisions) left.push((it.provisions - p) + " provisions");
+        state.provisions += it.provisions;
       } else if (it.tier === "goods") {
-        var g = Math.min(PC.crew.slotsFree(state), it.n);
-        if (g) PC.crew.addGood(state, it.good, g, false);
-        if (g < it.n) left.push((it.n - g) + " " + it.good);
+        PC.crew.addGood(state, it.good, it.n, false);
       } else if (it.tier === "item") {
         state.captain.items.push(it.item);
       } else if (it.tier === "quest") {
@@ -358,13 +354,51 @@
     game.bankedReport = { got: report, left: left, gold: game.gold || 0, pot: pot || null };
     PC.state.addLog(state, "Salvage dive" + (game.wreck.name ? " on " + game.wreck.name : " (" + game.wreck.type + ")") + ": " +
       (report.length ? report.join(", ") : "nothing") + (game.blackout ? " (blacked out)" : "") + ".");
-    if (left.length) M().say(state, game, "No room in the hold for " + left.join(", ") + ". You leave it on the beach.");
+    game.beach = beachOver(state) > 0;
     return game.bankedReport;
+  }
+
+  // How many hold slots over capacity the captain stands (0 if it fits).
+  function beachOver(state) { return Math.max(0, PC.crew.slotsUsed(state) - PC.crew.holdCapacity(state)); }
+
+  // The slots in use if `picks` ([{ what, n, dirty }]) were left behind.
+  function usedAfter(state, picks) {
+    var prov = state.provisions, goods = 0, tr = { clean: state.cargo.treasure.clean || 0, dirty: state.cargo.treasure.dirty || 0 };
+    var g = {};
+    Object.keys(state.cargo.goods).forEach(function (k) { g[k] = { clean: state.cargo.goods[k].clean || 0, dirty: state.cargo.goods[k].dirty || 0 }; });
+    picks.forEach(function (x) {
+      var n = Math.max(0, Math.floor(x.n || 0)), k = x.dirty ? "dirty" : "clean";
+      if (x.what === "provisions") prov = Math.max(0, prov - n);
+      else if (x.what === "treasure") tr[k] = Math.max(0, tr[k] - n);
+      else if (g[x.what]) g[x.what][k] = Math.max(0, g[x.what][k] - n);
+    });
+    Object.keys(g).forEach(function (k) { goods += g[k].clean + g[k].dirty; });
+    return prov + goods + Math.ceil((tr.clean + tr.dirty) / PC.data.economy.TREASURE_PER_SLOT);
+  }
+
+  // The player's choice of what stays on the beach. Throws if it still
+  // doesn't fit, so nothing is lost by a short pick.
+  function leaveOnBeach(state, game, picks) {
+    if (!game.beach) return [];
+    picks = (picks || []).filter(function (x) { return x.n > 0; });
+    var over = usedAfter(state, picks) - PC.crew.holdCapacity(state);
+    if (over > 0) throw new Error("Still " + over + " slot" + (over === 1 ? "" : "s") + " over. Leave a little more on the beach.");
+    var said = [];
+    picks.forEach(function (x) {
+      PC.crew.jettison(state, x.what, x.n, x.dirty);
+      said.push(x.n + " " + (x.what === "provisions" ? "provisions" : x.what === "treasure" ? (x.dirty ? "dirty treasure" : "treasure") : x.what));
+    });
+    game.beach = false;
+    if (said.length) M().say(state, game, "You leave " + said.join(", ") + " on the beach.");
+    return picks;
   }
 
   // Where the player goes when he leaves the dive screen.
   function exit(state, game) {
     if (!game.banked) bank(state, game, "crew");
+    // Leaving without picking: the default plan goes (cheapest goods, then
+    // provisions, then treasure; the A9 order).
+    if (game.beach) { PC.crew.jettisonOverflow(state); game.beach = false; }
     if (game.miranda) {
       if (state.flags.dpw_mermaid) { state.flags.dpw_retry = false; return "ocr_dpw_shark"; }
       state.flags.dpw_retry = true; // Ollie waits on the beach; each retry is 1 AP
@@ -391,6 +425,7 @@
       haul: game.haul.map(describe), kept: game.kept ? game.kept.map(describe) : null,
       blackout: game.blackout, quick: game.quick, miranda: game.miranda, questFound: !!game.questFound,
       needsPot: game.over && !game.banked && game.gold > 0, gold: game.gold || 0,
+      beach: game.banked && game.beach ? { over: beachOver(state), plan: PC.crew.jettisonPlan(state, beachOver(state)) } : null,
       banked: game.bankedReport || null,
       canQuick: !game.miranda && !game.haul.length && !game.over && !game.quick,
     };
@@ -409,6 +444,8 @@
     act: act,
     quickDive: quickDive,
     bank: bank,
+    beachOver: beachOver,
+    leaveOnBeach: leaveOnBeach,
     describe: describe,
     worth: worth,
     breathMax: breathMax,

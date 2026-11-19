@@ -46,7 +46,7 @@
       // Reputation (§30.11: a recent deed, then the Dread band, then the newcomer)
       { id: "rep_tp_humiliated", type: "Reputation", deed: true, when: { flag: "tp_humiliated" }, text: "\"Did you hear about the newcomer that pushed Twopenny over? Whole beach is still laughing about it.\"" },
       { id: "rep_tp_beat_you", type: "Reputation", deed: true, when: { flag: "tp_beat_you" }, text: "\"Twopenny's been telling everyone he whipped the new captain in a fight. It's a bit hard to believe.\"" },
-      { id: "rep_shark_killed", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain [Player] killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
+      { id: "rep_shark_killed", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain {captain.last} killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
       { id: "rep_asking", type: "Reputation", deed: true, when: { seasonFlag: "gi_asked" }, text: "PLACEHOLDER (line to write, §30.4): the next Reputation rumor here is about the captain asking questions." },
       { id: "rep_dread_20", type: "Reputation", dread: [20, 39], text: "\"[Player] is definitely not someone you want to cross.\"" },
       { id: "rep_dread_40", type: "Reputation", dread: [40, 69], text: "\"Merchants from here to Havana are terrified of the [Ship].\"" },
@@ -92,7 +92,7 @@
       leadIn: "\"Bobby's been hearing things lately.\"",
       lines: [
         { id: "uw_maelis_wants", type: "Underworld", text: "\"Bobby hears the pretty miss Maelis is paying double for anything old and strange. Bobby wishes he had something like that.\"" },
-        { id: "uw_letter_buyer", type: "Underworld", text: "\"Got a letter of marque you aren't using? Bobby knows a quiet house in [Node] that pays for papers. Bobby doesn't know what they do with them. Bobby doesn't want to know.\"" },
+        { id: "uw_letter_buyer", type: "Underworld", tier: "A", text: "\"Got a letter of marque you aren't using? Bobby knows a quiet house in [Node] that pays for papers. Bobby doesn't know what they do with them. Bobby doesn't want to know.\"" },
       ],
       chance: { "0": 0.10, "1": 0.20, "2": 0.35, "3": 0.50 },
       askFrench: "\"Bobby hears that those Frenchmen are still skulking about somewhere.\"",
@@ -107,5 +107,16 @@
 
     // §30.3 Expiry by type.
     expires: { "Danger": 0, "Merchant": 0, "World State": 0, "Prize": 1 }, // seasons after this one; absent means never
+
+    // Rumor tiers (ruled November 18, M6 chat R8): C background, B actionable,
+    // A very valuable. A line's own "tier" overrides its type's default.
+    // Scripted rumors and leads ignore tiers.
+    tiers: { "Legend": "C", "Reputation": "C", "Node": "C", "World State": "C",
+      "Danger": "B", "Merchant": "B", "Quest": "B", "Underworld": "B", "Prize": "A" },
+    // Each source's tier mix (placeholders). The type weights then pick
+    // within the tier.
+    tierMix: { keeper: { C: 55, B: 42, A: 3 } },
+    // At most one A rumor from the pool a season, across all sources.
+    A_CAP: 1,
   };
 })();

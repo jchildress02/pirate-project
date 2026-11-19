@@ -1538,7 +1538,7 @@
       "choices": [
         {
           "id": "yarr",
-          "label": "Erm, *yarr*. I be Captain {captain.first}. Ye be wantin' a favor?",
+          "label": "Erm, *yarr*. I be Captain {captain.last}. Ye be wantin' a favor?",
           "approval": [
             "Revelry"
           ],
