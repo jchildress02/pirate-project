@@ -609,7 +609,7 @@
     var mine = ["flagship"].concat(fleet(state).filter(function (f) { return f.kind === "fleet"; }).map(function (f) { return f.id; }))
       .map(function (id) { return C().ship(state, null, id); });
     function part(list, k) {
-      return list.reduce(function (a, s) { return a + (k === "guns" ? C().manned(s) : k === "hull" ? s.hull / 5 : s.crew / 5); }, 0);
+      return list.reduce(function (a, s) { return a + (k === "guns" ? C().manned(s) : k === "hull" ? s.hull / (PC.data.hunt.BR_HULL_DIV || 5) : s.crew / 5); }, 0);
     }
     var best = null, gap = 0;
     ["guns", "hull", "crew"].forEach(function (k) {

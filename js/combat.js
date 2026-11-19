@@ -101,7 +101,7 @@
   function enemyRec(b, id) { return b.enemies.filter(function (x) { return x.id === id; })[0] || null; }
 
   function manned(s) { return Math.min(s.guns, Math.floor(s.crew / 2)); }
-  function br(s) { return manned(s) + s.hull / 5 + s.crew / 5; }
+  function br(s) { return manned(s) + s.hull / (H().BR_HULL_DIV || 5) + s.crew / 5; }
   function hullLost(s) { return 1 - s.hull / s.hullMax; }
   function crewLost(s) { return s.startCrew ? 1 - s.crew / s.startCrew : 0; }
 
@@ -164,8 +164,9 @@
     if (!a || !t || a.guns <= 0) return 0;
     var dmg = (heavy ? H().HEAVY : H().LIGHT) * manned(a) * (H().SHOT_MULT[shot] || 1);
     setHull(state, b, tgtId, t.hull - dmg);
-    var cl = (heavy ? H().CREW_HIT.heavy : H().CREW_HIT.light) * (shot === "grape" ? 2 : 1);
+    var cl = (heavy ? H().CREW_HIT.heavy : H().CREW_HIT.light) * (shot === "grape" ? (H().GRAPE_MULT || 2) : 1);
     var lost = prnd(state, game, t.crew * cl);
+    if (shot === "grape" && H().GRAPE_BY_GUNS) lost = prnd(state, game, manned(a) * (heavy ? H().GRAPE_BY_GUNS.heavy : H().GRAPE_BY_GUNS.light));
     if (shot === "grape") lost = Math.max(1, lost);
     loseCrew(state, game, b, tgtId, lost);
     if (heavy) {

@@ -11,7 +11,7 @@
 
   var state = null;
   var root = null;
-  var BUILD = "Prototype build 0.6 · the M5 playtest patch";
+  var BUILD = "Prototype build 0.7 · Milestone 6";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {

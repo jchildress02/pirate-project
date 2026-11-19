@@ -7009,7 +7009,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function enemyRec(b, id) { return b.enemies.filter(function (x) { return x.id === id; })[0] || null; }
 
   function manned(s) { return Math.min(s.guns, Math.floor(s.crew / 2)); }
-  function br(s) { return manned(s) + s.hull / 5 + s.crew / 5; }
+  function br(s) { return manned(s) + s.hull / (H().BR_HULL_DIV || 5) + s.crew / 5; }
   function hullLost(s) { return 1 - s.hull / s.hullMax; }
   function crewLost(s) { return s.startCrew ? 1 - s.crew / s.startCrew : 0; }
 
@@ -7072,8 +7072,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (!a || !t || a.guns <= 0) return 0;
     var dmg = (heavy ? H().HEAVY : H().LIGHT) * manned(a) * (H().SHOT_MULT[shot] || 1);
     setHull(state, b, tgtId, t.hull - dmg);
-    var cl = (heavy ? H().CREW_HIT.heavy : H().CREW_HIT.light) * (shot === "grape" ? 2 : 1);
+    var cl = (heavy ? H().CREW_HIT.heavy : H().CREW_HIT.light) * (shot === "grape" ? (H().GRAPE_MULT || 2) : 1);
     var lost = prnd(state, game, t.crew * cl);
+    if (shot === "grape" && H().GRAPE_BY_GUNS) lost = prnd(state, game, manned(a) * (heavy ? H().GRAPE_BY_GUNS.heavy : H().GRAPE_BY_GUNS.light));
     if (shot === "grape") lost = Math.max(1, lost);
     loseCrew(state, game, b, tgtId, lost);
     if (heavy) {
@@ -8624,7 +8625,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var mine = ["flagship"].concat(fleet(state).filter(function (f) { return f.kind === "fleet"; }).map(function (f) { return f.id; }))
       .map(function (id) { return C().ship(state, null, id); });
     function part(list, k) {
-      return list.reduce(function (a, s) { return a + (k === "guns" ? C().manned(s) : k === "hull" ? s.hull / 5 : s.crew / 5); }, 0);
+      return list.reduce(function (a, s) { return a + (k === "guns" ? C().manned(s) : k === "hull" ? s.hull / (PC.data.hunt.BR_HULL_DIV || 5) : s.crew / 5); }, 0);
     }
     var best = null, gap = 0;
     ["guns", "hull", "crew"].forEach(function (k) {
@@ -13765,6 +13766,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     HEAVY: 0.5, LIGHT: 0.25,
     SHOT_MULT: { round: 1, chain: 0.5, grape: 0.25, rigging: 0.5, rudder: 0.5 },
     CREW_HIT: { heavy: 0.04, light: 0.02 },
+    // Balance-check knobs (Milestone 6; P12b, P13). The defaults keep the
+    // rules as built; tools/hunt_sim.js tries the proposals before a ruling.
+    BR_HULL_DIV: 5,           // Battle Rating counts hull ÷ this (P12b proposes 10)
+    GRAPE_MULT: 2,            // grapeshot multiplies crew losses (P13a proposes 4)
+    GRAPE_BY_GUNS: null,      // P13b: e.g. { heavy: 1/3, light: 1/6 } men per manned gun
     PORCELAIN_BREAK: 0.10,
     CREW_LINE: 0.25,
     FATE: [[1, "sunk"], [0.75, 0.5], [0.5, 0.25]],
@@ -14329,7 +14335,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   var state = null;
   var root = null;
-  var BUILD = "Prototype build 0.6 · the M5 playtest patch";
+  var BUILD = "Prototype build 0.7 · Milestone 6";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
