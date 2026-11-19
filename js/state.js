@@ -78,6 +78,11 @@
     state.fleet = state.fleet || [];          // fleet and prize ships (§21.8)
     state.captives = state.captives || 0;     // captives aboard, to free at a free port (§22.7)
     state.records = state.records || { prizes: 0, duels: 0 }; // Prize Taker, Duelist (§14.4)
+    // The end-of-prototype screen (R5): hulls sold, and the tags the captain
+    // started with, so it can show the ones earned. Older saves don't know
+    // their starting tags (null: the screen lists every tag).
+    if (state.records.hullsSold == null) state.records.hullsSold = 0;
+    if (state.records.startTags === undefined) state.records.startTags = state.log && state.log.length ? null : (state.captain.tags || []).slice();
     state.world.grudge = state.world.grudge || { France: 0, Sicily: 0 }; // §22.5
     state.gameOver = state.gameOver || null;
   }

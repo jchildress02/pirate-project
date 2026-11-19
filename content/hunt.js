@@ -276,4 +276,12 @@
       chain: "PLACEHOLDER: \"Chain will slow her down if she tries to run.\"",
     },
   };
+  // The end-of-prototype screen (§37.1; the M6 chat's R5). PLACEHOLDERs.
+  PC.data.endLines = {
+    title: "PLACEHOLDER: The end of the prototype",
+    overTitle: "PLACEHOLDER: Your story ends here",
+    note: "PLACEHOLDER: That's as far as the prototype goes. Thanks for playing. More of the Carolinas, and the seasons after Spring, come in later builds.",
+    overNote: "PLACEHOLDER: This is the end of the run for the prototype. Imprisonment and heirs come in later builds.",
+    nobody: "PLACEHOLDER: \"Nobody in Ocracoke is talking about you. Yet.\"",
+  };
 })();
