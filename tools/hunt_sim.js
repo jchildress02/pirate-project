@@ -2,7 +2,12 @@
  * Runs the real engine thousands of times with a simple captain's policy
  * and reports gold per action, prizes, losses and battle lengths.
  *
- *   node tools/hunt_sim.js [hunts] [--old]
+ *   node tools/hunt_sim.js [hunts] [--old] [--hull10] [--grape4] [--grapeguns] [--bands]
+ *
+ * Milestone 6's balance check: --hull10 counts hull ÷ 10 in Battle Rating
+ * (P12b); --grape4 doubles grapeshot again (P13a); --grapeguns takes
+ * grapeshot losses from the attacker's manned guns (P13b); --bands prints
+ * how often each odds band comes up when scouting.
  *
  * --old turns off the Milestone 5 planning rulings (Shaken and the
  * boarding-loss table) to compare before and after.
@@ -11,7 +16,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -19,6 +24,11 @@ var PC = globalThis.PC;
 
 var N = Number(process.argv[2]) || 1000;
 var OLD = process.argv.indexOf("--old") >= 0;
+var flag = function (f) { return process.argv.indexOf(f) >= 0; };
+if (flag("--hull10")) PC.data.hunt.BR_HULL_DIV = 10;
+if (flag("--grape4")) PC.data.hunt.GRAPE_MULT = 4;
+if (flag("--grapeguns")) PC.data.hunt.GRAPE_BY_GUNS = { heavy: 1 / 3, light: 1 / 6 };
+var BANDS = {}, BANDS_N = 0;
 if (OLD) {
   // Before the planning rulings: 15% (min 1) on a clean clash at any band;
   // no Shaken stacking (one pending step, used once): approximated by a cap of 1.
@@ -45,6 +55,7 @@ function caOf(view) { return view.scout ? view.scout.ca : 0; }
 
 function policyScout(s, g, v) {
   var sc = v.scout;
+  if (!sc.hunter) { BANDS[sc.ca] = (BANDS[sc.ca] || 0) + 1; BANDS_N++; }
   var war = sc.ships.some(function (x) { return x.warship; });
   if (sc.ships.length > 1 && sc.shape === "escort") return false;
   if (war) return sc.ca >= 2;
@@ -142,10 +153,12 @@ for (var i = 0; i < N; i++) {
 }
 perAp.sort(function (a, b) { return a - b; });
 function q(p) { return Math.round(perAp[Math.floor(p * (perAp.length - 1))]); }
-console.log((OLD ? "BEFORE the planning rulings" : "WITH the planning rulings") + " · " + N + " hunts from Ocracoke, a fitted Year 1 sloop, no letter");
+var knobs = ["BR hull ÷" + PC.data.hunt.BR_HULL_DIV, "grape ×" + PC.data.hunt.GRAPE_MULT + (PC.data.hunt.GRAPE_BY_GUNS ? " (by guns)" : "")].join(", ");
+console.log((OLD ? "BEFORE the planning rulings" : "WITH the planning rulings") + " · " + knobs + " · " + N + " hunts from Ocracoke, a fitted Year 1 sloop, no letter");
 console.log("  net gold per action: " + Math.round(res.gold / res.ap) + "   (median " + q(0.5) + ", 10th " + q(0.1) + ", 90th " + q(0.9) + "; target about 700, §22.11)");
 console.log("  actions per hunt:    " + (res.ap / N).toFixed(2));
 console.log("  prizes per hunt:     " + (res.prizes / N).toFixed(2));
 console.log("  boardings per hunt:  " + (res.boardings / N).toFixed(2) + ", clashes per boarding " + (res.clashes / Math.max(1, res.boardings)).toFixed(2));
 console.log("  flagship lost:       " + (100 * res.lost / N).toFixed(1) + "% (captain died " + (100 * res.died / N).toFixed(1) + "%)");
 if (process.argv.indexOf("--why") >= 0) console.log(LOSTTO);
+if (flag("--bands")) console.log("  odds bands scouted:  " + Object.keys(BANDS).sort(function (a, b) { return b - a; }).map(function (k) { return PC.data.hunt.CA_NAMES[k] + " " + Math.round(100 * BANDS[k] / BANDS_N) + "%"; }).join(", "));
