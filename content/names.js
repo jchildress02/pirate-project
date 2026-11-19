@@ -112,7 +112,9 @@
     ships: [], // special prize ships (§30.10) join with the prize hunt milestone
   };
 
-  // §36.14 Pirate nicknames. A nickname replaces the surname for good.
+  // §36.14 Pirate nicknames. Generated ones are prefix only and keep the
+  // surname ("Black Sam Bellamy"; ruled November 18, M6 chat R3). The suffix
+  // and "the" lists are for the author's own Named NPCs (Bobby Rats).
   var NICKNAMES = {
     prefix: L("Black, Red, Long, Short, Mad, Lucky, Gentleman, Dirty, Salty, Old, Pretty, Bloody, Honest, Sly, Lame, Deaf, Squinting, Sweet, Gin-Soaked, Handsome"),
     suffix: L("Rats, Bones, Barrels, Pickles, Teeth, Knuckles, Two-Toes, Nine-Fingers, Gristle, Tar, Biscuits, Sixpence, Buckets, Ribs, Splinters"),

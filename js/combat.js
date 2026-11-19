@@ -523,6 +523,24 @@
     return { parts: parts, edge: clamp(edge, -4, 6) };
   }
 
+  // A ship's numbers before and after a hit (P14).
+  function sideSnap(state, b, id) {
+    var s = ship(state, b, id);
+    return { hull: s.hull, guns: s.guns, crew: s.crew, speed: s.speed };
+  }
+  // "Her hull −4 · 1 gun lost · 1 man down · Speed −1" as one chip. Her
+  // losses read good for you; your own read bad.
+  function exchangeChips(a, z, who, ink) {
+    var parts = [];
+    var dh = Math.round(z.hull - a.hull), dg = z.guns - a.guns, dc = z.crew - a.crew, ds = z.speed - a.speed;
+    if (dh) parts.push(who + " hull " + (dh > 0 ? "+" : "−") + Math.abs(dh));
+    if (dg) parts.push(Math.abs(dg) + " gun" + (Math.abs(dg) === 1 ? "" : "s") + " lost");
+    if (dc) parts.push(Math.abs(dc) + (Math.abs(dc) === 1 ? " man" : " men") + " down");
+    if (ds) parts.push("Speed " + (ds > 0 ? "+" : "−") + Math.abs(ds));
+    if (!parts.length) return [];
+    return [{ icon: "hull", text: parts.join(" · "), ink: ink }];
+  }
+
   function enemyShot(state, game, b, e) {
     var w = e.willBoard ? H().SHOT_WEIGHTS.boarding : e.flag === "Pirate" ? H().SHOT_WEIGHTS.Pirate :
       H().SHOT_WEIGHTS[e.hunter || e.role === "War" ? "War" : e.role] || H().SHOT_WEIGHTS.War;
@@ -541,9 +559,13 @@
     b.lastExchange = { outcome: r.outcome, dice: r.dice, edge: r.edge, mine: shot, theirs: theirs };
     markRoll(game, "The Exchange", r);
     say(state, game, L().exchange[r.outcome] + " (" + L().theirShot[theirs] + ")");
+    var before = { me: sideSnap(state, b, "flagship"), her: sideSnap(state, b, en.id) };
     if (r.outcome === "clean") hit(state, game, b, "flagship", en.id, true, shot);
     else if (r.outcome === "partial") { hit(state, game, b, "flagship", en.id, false, shot); hit(state, game, b, en.id, "flagship", false, theirs); }
     else hit(state, game, b, en.id, "flagship", true, theirs);
+    // P14: what the Exchange did, both sides, as chips under the result.
+    if (game.lastRoll) game.lastRoll.chips = exchangeChips(before.her, sideSnap(state, b, en.id), "Her", "good")
+      .concat(exchangeChips(before.me, sideSnap(state, b, "flagship"), "Your", "bad"));
     afterBeat(state, game);
     if (!b.over && b.step !== "retarget") b.step = "decision";
   }
@@ -809,11 +831,11 @@
     var en = lead(b), bd = b.board, list = [];
     var dr = clamp(en.rating, 0, 8);
     var w = wounded(state);
-    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr }, lock: w ? "Not while you're Wounded" : null,
+    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : null,
       note: "Clean: +2 on this clash, partial +1. A setback means you're Wounded." });
     list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, note: "+1 on the next clash on a partial or better." });
     list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, note: "Halves your losses this clash on a partial or better." });
-    list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr },
+    list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
     list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8), extra: dreadBonus(state) ? [{ label: "Dread", value: dreadBonus(state) }] : [] },
@@ -838,8 +860,11 @@
     return rollAction(state, game, a);
   }
 
+  // Duels and Lead the Charge carry their own condition, so items like the
+  // Rare swords (§32.8) can read it.
   function rollAction(state, game, a) {
-    return M().roll(state, game, a.check, "act_" + a.id, {}, ["Battle"]);
+    var cond = ["Battle"].concat(a.check && a.check.cond || []);
+    return M().roll(state, game, a.check, "act_" + a.id, {}, cond);
   }
 
   function settleShot(state, game, p) {

@@ -130,6 +130,9 @@
   add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
   add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
   add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
+  add("Obsidian Amulet", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Parisian Rapier", { edge: plus(["Swordsmanship"], 1, { condition: "Duel" }) }); // §32.8
+  add("Abyssinian Scimitar", { edge: plus(["Swordsmanship"], 1, { condition: "Lead the Charge" }) }); // §32.8
   add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
   // Old ailments, rebalanced in the Creator chat (§12.4): one often-rolled
   // skill and one rarer one each.

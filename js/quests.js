@@ -53,12 +53,22 @@
     return list;
   }
 
+  // The Trident's hunting waters (§30.6), seeded per world (ruled November
+  // 18): the Hatteras Banks or the Bahama Channel. She can be met on a hunt
+  // from any port on those waters (§22.1).
+  function tridentWaters(state) {
+    var W = PC.data.hunt.WATERS;
+    var k = PC.rng.fromKey(state.world.seed + "|trident-waters")() < 0.5 ? "north" : "south";
+    return { id: k, name: W[k].name };
+  }
+  function leadText(state, t) { return String(t || "").replace(/\[Trident Waters\]/g, tridentWaters(state).name); }
+
   function journal(state) {
     var out = ids(state).map(function (id) {
       var q = Q(id), r = (state.quests || {})[id] || { status: "open", leads: [] }, v = state.captain.loss;
       var entries = r.leads.map(function (l) {
         var e = q.leads[l].journal;
-        return typeof e === "string" ? e : (e[v] || e.any || "");
+        return leadText(state, typeof e === "string" ? e : (e[v] || e.any || ""));
       });
       var hereLeft = Object.keys(q.leads).filter(function (l) {
         var ld = q.leads[l];
@@ -124,5 +134,5 @@
     }).map(function (id) { record(state, id).warned = now; return Q(id).name; });
   }
 
-  PC.quests = { record: record, addLead: addLead, hasLead: hasLead, journal: journal, expiringNow: expiringNow };
+  PC.quests = { tridentWaters: tridentWaters, leadText: leadText, record: record, addLead: addLead, hasLead: hasLead, journal: journal, expiringNow: expiringNow };
 })();

@@ -297,7 +297,7 @@
     var r = game.result;
     if (lossQuestActive(state) && !PC.quests.hasLead(state, "what_was_lost", "drinking")) {
       PC.quests.addLead(state, "what_was_lost", "drinking");
-      r.lead = PC.data.quests.what_was_lost.leads.drinking.journal[state.captain.loss] || PC.data.quests.what_was_lost.leads.drinking.journal.any;
+      r.lead = PC.quests.leadText(state, PC.data.quests.what_was_lost.leads.drinking.journal[state.captain.loss] || PC.data.quests.what_was_lost.leads.drinking.journal.any);
       M().say(state, game, r.lead);
     } else {
       var rec = PC.rumors.draw(state, D().RUMORS[game.opp.role], M().key(state, game, "rumor"), "a drinking match");

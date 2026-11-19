@@ -66,11 +66,11 @@
 
   // ---- Old ailments (debuffs, §12.4) ------------------------------------
   var DEBUFFS = [
-    { id: "Bad Knee", text: "−2 Chase & Climb, −1 Board until cured", life: "Curable" },
-    { id: "Old Wound", text: "−2 Endure, −1 Swordsmanship until cured", life: "Curable" },
+    { id: "Bad Knee", text: "−2 Chase & Climb, −1 Board, until cured", life: "Curable" },
+    { id: "Old Wound", text: "−2 Endure, −1 Swordsmanship, until cured", life: "Curable" },
     { id: "Failing Eyes", text: "−1 Keep Watch, Appraise", life: "For life" },
     { id: "Weak Chest", text: "−2 Endure, −1 Dive and any check in the cold, until cured", life: "Curable" },
-    { id: "Bad Back", text: "−2 Hold Your Ground, −1 Brawling until cured", life: "Curable" },
+    { id: "Bad Back", text: "−2 Hold Your Ground, −1 Brawling, until cured", life: "Curable" },
     { id: "Rheumy Hands", text: "−1 Light Fingers, Repair & Refit", life: "For life" },
     { id: "Hard of Hearing", text: "−1 Notice Danger, and Leadership under fire or in a storm", life: "For life" },
     { id: "Marsh Fever", text: "Fever flares hit you more often and last two seasons", life: "For life" },

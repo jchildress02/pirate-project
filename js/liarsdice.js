@@ -207,7 +207,8 @@
     if (won) {
       state.money.purse += g.stake * 2;
       game.won += 1; game.net += g.stake;
-      // Card Sharp counts gross winnings, not net of losses (§18.3 proposal).
+      // Card Sharp: 500 gold net over the captain's life, wins less losses
+      // (ruled November 18). Once earned it's never taken away.
       state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) + g.stake;
       M().say(state, game, D().lines.win);
       if (state.minigames.diceWinnings >= D().CARD_SHARP_AT && state.captain.tags.indexOf("Card Sharp") < 0) {
@@ -217,6 +218,7 @@
       }
     } else {
       game.lost += 1; game.net -= g.stake;
+      state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) - g.stake; // net (Card Sharp)
       M().say(state, game, D().lines.lose);
     }
     return game;

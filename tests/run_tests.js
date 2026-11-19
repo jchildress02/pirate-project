@@ -656,11 +656,19 @@ test("no generated NPC shares the captain's surname", function () {
   }
 });
 
-test("pirates take a nickname about half the time, and it replaces the surname", function () {
+test("pirates take a prefix nickname about half the time and keep a surname (R3)", function () {
   var s = fresh(), nick = 0, n = 1000;
   for (var i = 0; i < n; i++) {
-    var g = PC.npcs.generate(s, { id: "p", role: "Pirate", pool: "master", key: "nk|" + i });
-    if (g.nickname) { nick++; eq(g.last, ""); }
+    var g = PC.npcs.generate(s, { id: "p", role: "Pirate Captain", pool: "master", key: "nk|" + i });
+    if (g.nickname) {
+      nick++;
+      eq(g.nickname.form, "prefix");
+      ok(g.last, "a nicknamed pirate has a surname");
+      eq(g.full, g.nickname.word + " " + g.first + " " + g.last);
+      eq(PC.npcs.menuName(g), g.full); // no "Captain" in menus
+    } else {
+      eq(PC.npcs.menuName(g), ((g.title ? g.title + " " : "") + g.full).trim());
+    }
     s.world.names = [];
   }
   ok(Math.abs(nick / n - 0.5) < 0.05, "nickname rate " + nick / n);
@@ -925,6 +933,13 @@ test("the arrival popup: the wounded recover or are paid off, then the due", fun
   eq(s.crew.wounded, 0);
 });
 
+test("the arrival popup (P16): each paid line says which pot paid, with no repeat lines under it", function () {
+  var s = opened(); s.money.crew = 1000;
+  var pop = PC.node.arrive(s, "ocracoke", { fromHunt: true });
+  ok(pop.lines.some(function (l) { return /crew gold\)$/.test(l); }), pop.lines.join(" | "));
+  eq(pop.chips.length, pop.lines.length);
+});
+
 test("a Rival shipwright won't serve; Service Level cuts his prices", function () {
   var s = opened();
   s.npcs.ocr_shipwright.rung = 3;
@@ -1110,7 +1125,9 @@ test("Welcome to the Underworld: failed approaches grey out; Brawling repeats wi
   eq(s.money.purse, 385);
   ok(PC.quests.hasLead(s, "what_was_lost", "bald_man"));
   ok(PC.node.fenceOpen(s));
-  eq(PC.rumors.talkCheck(s).dr, PC.rumors.talkCheck(ocr()).dr + 1);
+  // P3: the base stays DR 2; the annoyed keeper is its own line in the odds.
+  eq(PC.rumors.talkCheck(s).dr, 2);
+  ok(PC.rumors.talkCheck(s).extra.some(function (x) { return x.label === "Keeper annoyed" && x.value === -1; }));
 });
 
 test("A Dying Pirate's Wish: the Miranda dive costs 1 action; a shark setback is Wounded until the season ends", function () {
@@ -1235,17 +1252,39 @@ test("Node rumors reveal a trait; [NPC] reads as the role until you've met them"
   ok(PC.rumors.render(s, bob.line, bob.ctx).indexOf("Bobby Rats, the fence") >= 0);
 });
 
-test("Gather Intelligence: 1 action; clean gives the one-armed pirate's lead (A) and a pick; setback marks the questions", function () {
+test("Gather Intelligence (R4): clean gives the lead and two picks; partial one pick; setback a rumor and the questions noticed", function () {
   var s = opened(); PC.node.enter(s, "tavern");
   var ap = s.ap.left;
   var r = forced("clean", function () { return PC.rumors.gather(s); });
   eq(s.ap.left, ap - 1);
   ok(r.lead && PC.quests.hasLead(s, "what_was_lost", "trident"));
-  ok(r.pick.length > 0);
+  eq(r.picks, 2);
+  ok(r.pick.indexOf("Prize") < 0, "an A-tier type can't be picked");
   var got = PC.rumors.gatherPick(s, "Legend");
   eq(got.type, "Legend");
-  forced("setback", function () { PC.rumors.gather(s); });
-  ok(PC.rumors.candidatesOf(s, "Reputation")[0].line.id === "rep_asking");
+  ok(s.location.gatherPick, "a second pick is waiting");
+  PC.rumors.gatherPick(s, "Legend");
+  ok(!s.location.gatherPick, "both picks used");
+  var p = forced("partial", function () { return PC.rumors.gather(s); });
+  eq(p.picks, 1);
+  PC.rumors.gatherPick(s, p.pick[0]);
+  ok(!s.location.gatherPick);
+  var b = forced("setback", function () { return PC.rumors.gather(s); });
+  ok(b.rumor, "a setback still hears one rumor");
+  ok(PC.rumors.candidatesOf(s, "Reputation").some(function (c) { return c.line.id === "rep_asking"; }));
+});
+
+test("Rumor tiers (R8): Prize is A; at most one A rumor a season from the pool; the letter buyer is A", function () {
+  var s = opened(); PC.node.enter(s, "tavern");
+  var D = PC.data.rumors;
+  eq(PC.rumors.tierOf({ type: "Prize" }), "A");
+  eq(PC.rumors.tierOf({ type: "Legend" }), "C");
+  eq(PC.rumors.tierOf(D.underworld.lines.filter(function (l) { return l.id === "uw_letter_buyer"; })[0]), "A");
+  var got = 0;
+  for (var i = 0; i < 6; i++) { var r = PC.rumors.draw(s, { "Prize": 1 }, "tier-test|" + i, "test", "Prize"); if (r) got++; }
+  eq(got, 1);
+  ok(PC.rumors.aCapped(s));
+  eq(PC.rumors.candidatesOf(s, "Prize").length, 0);
 });
 
 test("Bobby: Ask about the French records a Hidden Haven lead; selling to him can bring an Underworld rumor", function () {
@@ -1416,6 +1455,37 @@ test("a dive costs 1 action once a season; a clean grab costs 1 breath, a partia
   PC.minigames.leave(s);
   eq(s.current.screen, "node"); eq(s.location.place, "graveyard");
   ok(!PC.salvage.canDive(s).ok, "once a season");
+});
+
+test("a full hold after a dive: everything comes ashore and the player picks what stays on the beach", function () {
+  var s = at(inTown(), "graveyard");
+  PC.salvage.startGraveyardDive(s, PC.salvage.wrecksOnOffer(s, "ocracoke")[0].id, false);
+  var g = s.minigame;
+  s.provisions = PC.crew.holdCapacity(s) - PC.crew.slotsUsed(s) + s.provisions; // the hold exactly full
+  g.over = true; g.kept = [{ tier: "supplies", provisions: 3 }]; g.gold = 0;
+  PC.salvage.bank(s, g, null);
+  eq(PC.salvage.beachOver(s), 3);
+  ok(PC.minigames.view(s).beach, "the picker shows");
+  var threw = false;
+  try { PC.salvage.leaveOnBeach(s, g, [{ what: "provisions", n: 2, dirty: false }]); } catch (e) { threw = true; }
+  ok(threw, "a short pick is refused"); eq(PC.salvage.beachOver(s), 3);
+  PC.salvage.leaveOnBeach(s, g, [{ what: "provisions", n: 3, dirty: false }]);
+  eq(PC.salvage.beachOver(s), 0); ok(!g.beach);
+});
+
+test("salvage items (ruled): the Obsidian Amulet is Uncommon; the Ivory Compass is out; the Rares are the Rare swords", function () {
+  var I = PC.data.minigames.salvage.ITEMS;
+  ok(I.uncommon.indexOf("Obsidian Amulet") >= 0);
+  ok(I.uncommon.concat(I.rare).indexOf("Ivory Compass") < 0);
+  eq(I.rare.join(","), "Parisian Rapier,Abyssinian Scimitar");
+});
+
+test("the drinking lead names the Trident's waters, seeded per world; Variant A keeps the birthmark", function () {
+  var s = opened(); s.captain.loss = "A";
+  var w = PC.quests.tridentWaters(s);
+  ok(w.name === "the Hatteras Banks" || w.name === "the Bahama Channel");
+  var t = PC.quests.leadText(s, PC.data.quests.what_was_lost.leads.drinking.journal.A);
+  ok(t.indexOf(w.name) >= 0 && t.indexOf("birthmark") >= 0, t);
 });
 
 test("Scout: 1 breath, shows the next find, and the next grab there is one step easier", function () {
@@ -1759,7 +1829,15 @@ test("Liar's Dice: leaving mid-game forfeits the stake (B26); the caught line na
   ok(/he saw it/.test(t.minigame.log.join(" ")));
 });
 
-test("Card Sharp comes after 500 gold won at Liar's Dice", function () {
+test("Card Sharp comes at 500 gold net at Liar's Dice; losses count against it", function () {
+  var t = at(inTown(), "tavern"); t.money.purse = 500;
+  t.minigames.diceWinnings = 480;
+  PC.liarsdice.start(t); PC.liarsdice.newGame(t, 25);
+  var gl = t.minigame.round; gl.hisN = 1; gl.his = [6]; gl.myN = 1; gl.mine = [1]; gl.turn = "me"; gl.bid = { q: 1, f: 6, by: "him" };
+  PC.liarsdice.callLiar(t);
+  ok(!gl.won); eq(t.minigames.diceWinnings, 455);
+  ok(t.captain.tags.indexOf("Card Sharp") < 0);
+
   var s = at(inTown(), "tavern"); s.money.purse = 500;
   s.minigames.diceWinnings = 480;
   PC.liarsdice.start(s); PC.liarsdice.newGame(s, 25);
@@ -2063,6 +2141,18 @@ test("Gunner's Eye: +1 on the first Exchange only, and the called shot", functio
   eq(v.parts.filter(function (p) { return p.label === "Your Gunnery"; })[0].value, Math.min(4, PC.combat.playerGunnery(s) + 1));
   withDice([4, 4], function () { PC.hunt.battle(s, g, "doExchange", "rigging"); });
   ok(g.battle.firstExchange === false);
+});
+
+test("P14: an Exchange shows what it did as chips", function () {
+  var s = huntReady("chips");
+  var bq = aShip(s, "Merchantman", "Trade", "Avalon", { resolve: 5 });
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  g.battle.step = "exchange";
+  withDice([6, 6], function () { PC.hunt.battle(s, g, "doExchange", "round"); });
+  var c = g.lastRoll.chips;
+  ok(c.length && /^Her hull −\d+/.test(c[0].text), JSON.stringify(c));
+  eq(c[0].ink, "good");
 });
 
 test("a captured flagship ends the run: struck colors is a game over (Milestone 5 plan)", function () {

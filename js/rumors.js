@@ -35,6 +35,17 @@
     return (state.rumors || []).filter(function (r) { return r.expires == null || r.expires >= seasonIndex(state); });
   }
 
+  // ---- Tiers (ruled November 18, M6 chat R8) ---------------------------------
+
+  function tierOf(line) { return line.tier || (R().tiers || {})[line.type] || "C"; }
+  function aCount(state) { var m = state.world.aRumors || {}; return m[stamp(state)] || 0; }
+  function aCapped(state) { return aCount(state) >= (R().A_CAP == null ? 1 : R().A_CAP); }
+  function noteA(state) {
+    var st = stamp(state);
+    state.world.aRumors = {}; // only this season's count matters
+    state.world.aRumors[st] = aCount(state) + 1;
+  }
+
   // ---- Danger spots (§30.9) ----------------------------------------------------
   // One base spot a season. Faction spots by Heat band, Hunter's Waters and
   // the Frisian Sweep wait for Heat and the hunt (Milestone 5); at Heat 0
@@ -105,8 +116,15 @@
     return out;
   }
 
-  // Candidates of one type, each { line, ctx, extra }.
-  function candidatesOf(state, type) {
+  // Candidates of one type, each { line, ctx, extra }. opts.noA leaves out
+  // A-tier lines (a picked type, R8); the season's A cap does the same.
+  function candidatesOf(state, type, opts) {
+    var all = candidatesAll(state, type);
+    var noA = (opts && opts.noA) || aCapped(state);
+    return noA ? all.filter(function (c) { return tierOf(c.line) !== "A"; }) : all;
+  }
+
+  function candidatesAll(state, type) {
     var out = [];
     var node = PC.node.here(state);
     if (type === "Node") {
@@ -158,21 +176,39 @@
     return rec;
   }
 
-  // One rumor from a source's pool, by its type weights (§30.5).
-  function drawOne(state, weights, key, source, onlyType) {
+  // One rumor from a source's pool, by its type weights (§30.5). With a
+  // tier mix (opts.mix, R8) the tier is drawn first, among tiers that have
+  // something to tell, then the type within it. opts.noA: no A-tier lines
+  // (a type the player picked).
+  function drawOne(state, weights, key, source, onlyType, opts) {
+    opts = opts || {};
     var sc = scriptedFor(state);
     if (sc.length && !onlyType) return tell(state, { line: sc[0] }, source);
     var r = PC.rng.fromKey(key);
-    var w = {};
+    var w = {}, byTier = {};
     Object.keys(weights).forEach(function (t) {
       if (onlyType && t !== onlyType) return;
-      if (candidatesOf(state, t).length) w[t] = weights[t];
+      var cands = candidatesOf(state, t, opts);
+      if (!cands.length) return;
+      w[t] = weights[t];
+      cands.forEach(function (c) { var tr = tierOf(c.line); (byTier[tr] = byTier[tr] || {})[t] = weights[t]; });
     });
     if (!Object.keys(w).length) return null;
+    var tier = null;
+    if (opts.mix) {
+      var mw = {};
+      Object.keys(byTier).forEach(function (tr) { if (opts.mix[tr]) mw[tr] = opts.mix[tr]; });
+      if (Object.keys(mw).length) { tier = PC.npcs.weighted(r, mw); w = byTier[tier]; }
+    }
     var type = PC.npcs.weighted(r, w);
-    var cands = candidatesOf(state, type);
-    return tell(state, cands[Math.floor(r() * cands.length)], source);
+    var cands = candidatesOf(state, type, opts);
+    if (tier) cands = cands.filter(function (c) { return tierOf(c.line) === tier; });
+    var c = cands[Math.floor(r() * cands.length)];
+    if (tierOf(c.line) === "A") noteA(state);
+    return tell(state, c, source);
   }
+
+  function keeperMix() { return (R().tierMix || {}).keeper; }
 
   // ---- The tavern keeper (§30.4) ------------------------------------------------
 
@@ -181,15 +217,18 @@
   // Tavern Talk: Medium by default (DR 2, this build's reading), one step
   // easier for a Gossipy or Jovial keeper, harder for Discreet or Taciturn
   // (within ±2), and one step harder this season if he's annoyed (§17.2).
+  // P3: the base stays DR 2, and each cause shows as its own line in the
+  // odds ("Keeper: Taciturn −1", "Keeper annoyed −1") instead of hiding in
+  // the Difficulty line.
   function talkCheck(state) {
     var k = PC.npcs.get(state, keeperId(state));
-    var dr = 2, t = k.traits || [];
-    var shift = 0;
-    if (t.indexOf("Gossipy") >= 0 || t.indexOf("Jovial") >= 0) shift -= 1;
-    if (t.indexOf("Discreet") >= 0 || t.indexOf("Taciturn") >= 0) shift += 1;
-    shift = Math.max(-2, Math.min(2, shift));
-    if (PC.scenes.test(state, { seasonFlag: "keeper_annoyed" })) shift += 1;
-    return { type: "Tavern Talk", dr: Math.max(0, Math.min(8, dr + shift)) };
+    var t = k.traits || [], extra = [];
+    var easy = t.filter(function (x) { return x === "Gossipy" || x === "Jovial"; });
+    var hard = t.filter(function (x) { return x === "Discreet" || x === "Taciturn"; });
+    var shift = Math.max(-2, Math.min(2, hard.length - easy.length));
+    if (shift) extra.push({ label: "Keeper: " + (shift > 0 ? hard : easy).join(", "), value: -shift });
+    if (PC.scenes.test(state, { seasonFlag: "keeper_annoyed" })) extra.push({ label: "Keeper annoyed", value: -1 });
+    return { type: "Tavern Talk", dr: 2, extra: extra };
   }
 
   function keeperAsked(state) {
@@ -211,11 +250,11 @@
     var n = Math.max(1, 1 + sl);
     var key = [state.world.seed, stamp(state), node, "keeper-rumor"].join("|");
     var out = [];
-    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper"); if (r) out.push(r); }
+    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix() }); if (r) out.push(r); }
     var chk = talkCheck(state);
     var res = PC.checks.resolve(state, chk, key + "|talk", { conditions: ["Harbor"] });
     var extra = null;
-    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper");
+    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper", null, { mix: keeperMix() });
     PC.node.tavernActionDone(state);
     return { line: L.askRumors, rumors: out, talk: { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, dr: chk.dr }, extra: extra,
       extraLine: extra ? L.talkClean : null, out: L.outOfRumors };
@@ -225,9 +264,10 @@
 
   function gatherCheck(state) { return { type: "Gather Intelligence", dr: 2 }; } // DR: this build's reading
 
+  // The types the player can pick: C and B only, never an A rumor (R8).
   function gatherTypes(state) {
     var w = PC.node.nodeData(PC.node.here(state)).rumorWeights;
-    return Object.keys(w).filter(function (t) { return candidatesOf(state, t).length; });
+    return Object.keys(w).filter(function (t) { return candidatesOf(state, t, { noA: true }).length; });
   }
 
   // The unheard loss-quest lead at this node that a clean result can give
@@ -243,7 +283,10 @@
     PC.crew.spendAP(state, 1);
     var key = [state.world.seed, stamp(state), PC.node.here(state), "gather", state.rolls.gather = (state.rolls.gather || 0) + 1].join("|");
     var res = PC.checks.resolve(state, gatherCheck(state), key, { conditions: ["Harbor"] });
-    var out = { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, rumor: null, pick: null, lead: null };
+    // Retuned November 18 (M6 chat R4): never empty. Clean: two rumors, the
+    // player picks both types. Partial: one, the player picks. Setback: one
+    // from the tavern keeper's pool, and the questions get noticed.
+    var out = { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, rumor: null, pick: null, picks: 0, lead: null };
     if (res.outcome === "clean") {
       var lead = fallbackLead(state);
       if (lead) {
@@ -251,11 +294,13 @@
         state.flags.lead_trident_heard = true;
         out.lead = PC.data.quests.what_was_lost.leads[lead].journal[state.captain.loss];
       }
+    }
+    if (res.outcome !== "setback") {
       out.pick = gatherTypes(state);
-      state.location.gatherPick = out.pick.length ? key : null;
-    } else if (res.outcome === "partial") {
-      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|partial", "gather intelligence");
+      out.picks = out.pick.length ? (res.outcome === "clean" ? 2 : 1) : 0;
+      state.location.gatherPick = out.picks ? { key: key, left: out.picks, n: 0 } : null;
     } else {
+      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|setback", "gather intelligence", null, { mix: keeperMix() });
       state.flags.gi_asked = stamp(state); // the next Reputation rumor here is about the questions
     }
     PC.node.tavernActionDone(state);
@@ -265,10 +310,15 @@
   }
 
   function gatherPick(state, type) {
-    var key = state.location.gatherPick;
-    if (!key) throw new Error("Nothing to pick.");
-    state.location.gatherPick = null;
-    return drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|pick", "gather intelligence", type);
+    var gp = state.location.gatherPick;
+    if (typeof gp === "string") gp = { key: gp, left: 1, n: 0 }; // an older save mid-pick
+    if (!gp) throw new Error("Nothing to pick.");
+    gp.left -= 1; gp.n += 1;
+    state.location.gatherPick = gp.left > 0 ? gp : null;
+    var rec = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, gp.key + "|pick" + (gp.n > 1 ? gp.n : ""), "gather intelligence", type, { noA: true });
+    // Nothing left to pick from: the second pick is dropped.
+    if (state.location.gatherPick && !gatherTypes(state).length) state.location.gatherPick = null;
+    return rec;
   }
 
   // ---- The fence (§30.4, §30.7) ------------------------------------------------------
@@ -280,10 +330,11 @@
     var key = [state.world.seed, stamp(state), "fence-rumor", state.rolls.fenceRumor = (state.rolls.fenceRumor || 0) + 1].join("|");
     var r = PC.rng.fromKey(key);
     if (r() >= chance) return null;
-    var lines = U.lines.filter(function (l) { return !live(state, l.id); });
+    var lines = U.lines.filter(function (l) { return !live(state, l.id) && !(tierOf(l) === "A" && aCapped(state)); });
     if (!lines.length) return null;
     var l = lines[Math.floor(r() * lines.length)];
     var where = R().letterBuyerNodes[Math.floor(PC.rng.fromKey(state.world.seed + "|letter-buyer")() * R().letterBuyerNodes.length)];
+    if (tierOf(l) === "A") noteA(state);
     var rec = tell(state, { line: l, ctx: { node: where } }, "fence");
     return { leadIn: U.leadIn, rumor: rec };
   }
@@ -298,6 +349,8 @@
     dangerSpots: dangerSpots,
     liveRumors: liveRumors,
     candidatesOf: candidatesOf,
+    tierOf: tierOf,
+    aCapped: aCapped,
     talkCheck: talkCheck,
     keeperAsked: keeperAsked,
     askKeeper: askKeeper,

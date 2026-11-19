@@ -48,14 +48,15 @@
       cabin_brig: { goods: [["Ming porcelain", 2, 3, 80], ["Ambergris", 1, 2, 20]], treasure: [3, 5], gold: [75, 150], rare: 1 / 5 },
       cabin_frigate: { goods: [["Ming porcelain", 2, 3, 60], ["Silver bars", 1, 2, 30], ["Pearls", 1, 2, 10]], treasure: [4, 6], gold: [100, 200], rare: 1 / 3 },
     },
-    // Salvage-safe items (§32.15). DEFAULT: the catalog doesn't tier the
-    // Ivory Compass or the Obsidian Amulet, so they stand in as the Rares.
+    // Salvage-safe items (§32.15; ruled November 18). The Obsidian Amulet is
+    // Uncommon (§32); the Ivory Compass stays out (the Munin's signature
+    // item, §30.10); the Rares are the Rare swords (§32.8).
     ITEMS: {
-      uncommon: ["Shark-Tooth Necklace", "Tin Whistle", "Silver Pocket Watch", "Fancy Spyglass", "Navigator's Octant"],
-      rare: ["Ivory Compass", "Obsidian Amulet"],
+      uncommon: ["Shark-Tooth Necklace", "Tin Whistle", "Silver Pocket Watch", "Fancy Spyglass", "Navigator's Octant", "Obsidian Amulet"],
+      rare: ["Parisian Rapier", "Abyssinian Scimitar"],
     },
     // Rough worth, only to pick the better half of a haul on a blackout.
-    WORTH: { treasureUnit: 70, provisions: 30, uncommon: 500, rare: 2500 },
+    WORTH: { treasureUnit: 70, provisions: 30, uncommon: 500, rare: 3500 },
 
     sites: {
       ocracoke: { name: "Lilyhook's Graveyard", cryptid: "the giant shark", relic: "Giant Tooth", legend: ["legend_giant_shark"] },
@@ -81,6 +82,8 @@
       scout: "You take a moment to peer through the gloom.",
       surface: "You break the surface, gasping for air.",
       blackout: "Your vision grows black. You wake on the beach, coughing up seawater, with only half of what you grabbed.",
+      // P11: with nothing grabbed there's no half to keep.
+      blackoutEmpty: "Your vision grows black. You wake on the beach, coughing up seawater.",
       snag: "Your shirt catches on a splintered plank, and it takes precious seconds to tear yourself free.",
       current: "A fast current rolls through the wreck and pushes you out. Getting back in there won't be easy.",
       shark: { draw: "A grey shadow glides past the wreck.", clean: "You press yourself flat against the hull until it swims lazily away.",
@@ -199,7 +202,7 @@
     CHEAT_CHECK: { type: "Cards & Dice", dr: 3 },
     CAUGHT_STANDING: -5,      // with the node's faction; black Standing at Ocracoke (§18.3, §28.3)
     MARKS_TO_CATCH: 2,
-    CARD_SHARP_AT: 500,       // DEFAULT: gross winnings at Liar's Dice (threshold OPEN, §18.3)
+    CARD_SHARP_AT: 500,       // net Liar's Dice winnings over the captain's life (ruled November 18, §18.3)
     // How the opponent plays, by trait (§18.3): call when the bid is less
     // likely than this; bold players raise past the minimum. Loosened a
     // touch with five dice (November 14), so he doesn't play the exact odds.

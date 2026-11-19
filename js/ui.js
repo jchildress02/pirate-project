@@ -228,12 +228,21 @@
     var vh = globalThis.innerHeight || 800;
     if (top < off || top > vh * 0.5) { try { globalThis.scrollTo(0, Math.max(0, top + (globalThis.scrollY || 0) - off)); } catch (e) { /* ignore */ } }
   }
+  // P6 and P7: put an anchor (the dive's breath gauge, a scene's woodcut)
+  // at the top of the screen, under the sticky bar.
+  function scrollToAnchor(a) {
+    try { globalThis.scrollTo(0, Math.max(0, a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset())); } catch (e) { /* ignore */ }
+  }
   function land(before, keys, el, placeBefore, menuBefore, panelTop) {
     var modal = root.querySelector(".modal:not(.popup)");
     if (modal && menu && menu === menuBefore) modal.scrollTop = panelTop;
     var fresh = null;
     root.querySelectorAll("[data-result]").forEach(function (r) { if (!fresh && !keys[r.dataset.result]) fresh = r; });
     if (el && el.dataset && el.dataset.top) return scrollTop();
+    // P6 (the dive) and P7 (scenes): these screens land on their anchor,
+    // never the very top, whenever something changed.
+    var anchor = !menu && root.querySelector("[data-anchor]");
+    if (anchor && !anchor.closest(".modal") && (fresh || screenKey() !== before)) return scrollToAnchor(anchor);
     if (fresh && (!menu || fresh.closest(".modal"))) return scrollToEl(fresh);
     if (screenKey() === before) return;
     if (menu && menu !== menuBefore) return; // a menu opened over the screen: the page stays put
@@ -369,10 +378,11 @@
       '<table class="ledger">' + lrow("Your purse", gold(state.money.purse)) + lrow("Crew gold", gold(state.money.crew)) +
       lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
       lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
-      // Crew with the wounded (A16, §38.5); provisions as time at sea under morale (B35).
+      // Crew with the wounded (A16, §38.5); provisions as lots under morale (P8).
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
-      lrow("Provisions", '<span title="' + esc(state.provisions + " lots: " + timeAtSea(state.provisions)) + '">' + esc(seaTime(state.provisions)) + "</span>") + "</table>" +
+      // P8: provisions as lots, with time at sea in the tooltip.
+      lrow("Provisions", '<span title="' + esc(state.provisions + " lots: " + timeAtSea(state.provisions)) + '">' + esc(String(state.provisions)) + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
       meters(false) +
       '<div class="h4">Officers</div>' + offs.map(function (o) {
@@ -393,7 +403,7 @@
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
       '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse " + gold(state.money.purse) + " · Crew " + gold(state.money.crew) +
-      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + esc(seaTime(state.provisions)) + '</span><span class="go">›</span></button>' +
+      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + state.provisions + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
       }).join("") + '<span class="note">Officers · tap for cards</span></div>' : "");
@@ -482,7 +492,8 @@
   function scenePanel() {
     var v = PC.scenes.viewScene(state);
     var h = sceneHead(v);
-    var html = '<div class="where">' + esc(h.line) + "</div>" + (h.plate ? plate(h.plate) : banner(h.banner)) +
+    // P7: a scene step lands with its woodcut (or plate) at the top.
+    var html = '<div class="where">' + esc(h.line) + "</div>" + '<div data-anchor="scene">' + (h.plate ? plate(h.plate) : banner(h.banner)) + "</div>" +
       (h.quest ? '<div class="ribbon">' + esc(h.quest) + (h.ap ? '<span class="apnote">(' + plural(h.ap, "action") + ")</span>" : "") + "</div>" : "") +
       '<h2 class="title">' + esc(h.heading) + "</h2>";
     var body = "";
@@ -609,7 +620,7 @@
 
   function npcName(id) {
     var n = PC.npcs.get(state, id);
-    return n ? ((n.title ? n.title + " " : "") + n.full) : id;
+    return n ? PC.npcs.menuName(n) : id;
   }
 
   // A person's name card (§41.5): name, role, relationship word, known traits.
@@ -756,11 +767,12 @@
     var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
     list2.push(opt({ act: "dice", label: "Liar's Dice " + apText(1), ap: 1, meta: "As many games a sitting as your purse covers, " + st[0] + "-" + st[1] + " gold a game from your purse.", lock: lp.ok ? null : lp.why }));
     var gi = N().tavernServiceCheck(state, 1);
-    list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: you pick what kind of rumor. Partial: one rumor.",
+    list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: two rumors, you pick both kinds. Partial: one, you pick the kind. Setback: one rumor, and people notice you asking.",
       check: gi.ok ? PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] }) : null, lock: gi.ok ? null : gi.why }));
     html += opts(list2);
     if (state.location.gatherPick) {
-      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
+      var gpl = state.location.gatherPick.left || 1;
+      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?' + (gpl > 1 ? " (" + gpl + " picks)" : "") + '</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
         return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
       }).join("") + "</div></div>";
     }
@@ -844,6 +856,8 @@
       var gunsMax = Math.min(room, afford(N().gunPrice(state)));
       html += '<div class="svc"><h4>Guns</h4><p class="small">' + sh.guns + " of " + sh.gunsMax + " guns · " + gold(N().gunPrice(state)) + " gold a gun.</p>" +
         (room <= 0 ? '<p class="note">Every gun port is full.</p>' : gunsMax > 0 ? '<div class="buyrow">' + qstep("q-guns", 1, gunsMax) + '<button class="secondary" data-act="guns" data-for="q-guns">Buy guns</button> ' +
+          // P10: fill every port the purse can pay for.
+          (gunsMax > 1 ? '<button class="secondary" data-act="guns" data-qty-value="' + gunsMax + '">Buy max (' + gunsMax + ')</button> ' : "") +
           totalSlot(function () { var n = val("q-guns"); return plural(n, "gun") + " · " + gold(n * N().gunPrice(state)) + " gold"; }) + "</div>" : '<p class="note">You can\'t pay for a gun right now.</p>') + "</div>";
     }
     // The whole hold, clearly (A8 of the M5 playtest): what each ship adds,
@@ -1182,7 +1196,8 @@
 
   function divePanel(v) {
     var html = mgHead("Ocracoke · Lilyhook's Graveyard", v.title) +
-      '<div class="gauges"><div class="gauge"><span class="lbl">Breath</span>' + gpips(v.breath, v.breathMax, "breath") + ' <span class="small">' + v.breath + " of " + v.breathMax + "</span></div></div>";
+      // P6: after a dive action the breath gauge lands at the top.
+      '<div class="gauges" data-anchor="dive"><div class="gauge"><span class="lbl">Breath</span>' + gpips(v.breath, v.breathMax, "breath") + ' <span class="small">' + v.breath + " of " + v.breathMax + "</span></div></div>";
     if (!v.over && v.haul && v.haul.length) html += '<p class="small" style="margin:0 0 6px"><b>In your arms:</b> ' + v.haul.map(esc).join(", ") + "</p>";
     html += mgLatest(v.log, v);
     if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
@@ -1212,10 +1227,29 @@
     var lost = lostList.map(function (k) { return { icon: "item", html: "<s>" + esc(k) + "</s>" }; });
     html += kept.length || lost.length ? chips(kept.concat(lost)) : '<p class="note">Nothing.</p>';
     if (v.needsPot) {
-      return html + '<p style="font-size:20px;margin:16px 0 10px">Where does the ' + gold(v.gold) + ' gold go?</p><div class="actions"><button class="primary" data-top="1" data-act="mgbank" data-pot="purse">Into your purse · ' + gold(v.gold) + "</button>" +
-        '<button class="secondary" data-top="1" data-act="mgbank" data-pot="crew">Share it with the crew · ' + gold(v.gold) + "</button></div>";
+      return html + '<p style="font-size:20px;margin:16px 0 10px">Where does the ' + gold(v.gold) + ' gold go?</p><div class="actions"><button class="primary" data-act="mgbank" data-pot="purse">Into your purse · ' + gold(v.gold) + "</button>" +
+        '<button class="secondary" data-act="mgbank" data-pot="crew">Share it with the crew · ' + gold(v.gold) + "</button></div>";
     }
+    if (v.beach) return html + beachPicker(v.beach);
     return html + '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
+  }
+
+  // A full hold after a dive (ruled November 18): the player picks what
+  // stays on the beach. Filled in with the default (cheapest goods, then
+  // provisions, then treasure) to change as he likes.
+  function beachPicker(bch) {
+    var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
+    ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
+    Object.keys(state.cargo.goods).forEach(function (g) {
+      ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
+    });
+    var planned = function (r) { var p = bch.plan.filter(function (x) { return x.what === r.what && !!x.dirty === r.dirty; })[0]; return p ? p.n : 0; };
+    return '<div class="svc" data-result="beach"><h4>No room for it all</h4><p class="small">Your hold is ' + plural(bch.over, "slot") + " over. Choose what stays on the beach. Treasure packs five units to a slot.</p>" +
+      '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Leave on the beach</th></tr>' + rows.map(function (r, i) {
+        return "<tr><td>" + dirtyName(r.label, r.dirty) + "</td><td>" + r.n + "</td><td>" + (r.n ? qstep("q-beach-" + i, planned(r), r.n, 0) : "") +
+          '<span hidden data-beach-row="' + i + '" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '"></span></td></tr>';
+      }).join("") + "</table>" +
+      '<div class="actions"><button class="primary" data-act="beachleave">Leave these on the beach</button></div></div>';
   }
   var diveZone = null;
   var devForce = null; // the Developer panel's next sighting (Milestone 5)
@@ -1288,7 +1322,7 @@
   function rawCheck(type, edge, parts) {
     return { type: type, tier: PC.checks.tier(edge), odds: PC.checks.odds(edge), parts: parts || [], edge: edge, rawEdge: edge };
   }
-  function chk(c) { return c ? PC.checks.assess(state, c, { conditions: ["Battle"] }) : null; }
+  function chk(c) { return c ? PC.checks.assess(state, c, { conditions: ["Battle"].concat(c.cond || []) }) : null; }
 
   function qmSays(line, v) {
     if (!line) return "";
@@ -2098,6 +2132,14 @@
     "divezone": function (el) { diveZone = el.dataset.zone; },
     "drinkspot": function (el) { drinkSpot = drinkSpot === el.dataset.spot ? null : el.dataset.spot; },
     "mgdive": function (el) { markLog(); PC.salvage.act(state, el.dataset.op, el.dataset.zone); },
+    "beachleave": function () {
+      var picks = [];
+      root.querySelectorAll("[data-beach-row]").forEach(function (sp) {
+        picks.push({ what: sp.dataset.what, dirty: sp.dataset.dirty === "1", n: val("q-beach-" + sp.dataset.beachRow) });
+      });
+      markLog();
+      PC.salvage.leaveOnBeach(state, state.minigame, picks);
+    },
     "mgquick": function () { markLog(); PC.salvage.quickDive(state); },
     "mgbank": function (el) { PC.salvage.bank(state, state.minigame, el.dataset.pot); },
     "mgdrink": function (el) { markLog(); PC.drinking.act(state, el.dataset.op); drinkSpot = null; },
@@ -2208,8 +2250,8 @@
       var heard = [];
       if (r.lead) heard.push(r.lead);
       if (r.rumor) heard.push(r.rumor.text);
-      say("around", null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town, but nobody tells you anything. They do notice you asking." }[r.outcome],
-        r.pick && r.pick.length ? "Pick what you want to hear about." : null, heard, { heardNote: heard.length ? "Added to your Rumors." : null, outcome: r.outcome, rollType: "Gather Intelligence",
+      say("around", null, { clean: "You ask around town, and people talk.", partial: "You ask around town and pick up a rumor.", setback: "You ask around town. You hear one thing, but people notice you asking." }[r.outcome],
+        r.picks ? (r.picks > 1 ? "Pick the two things you want to hear about." : "Pick what you want to hear about.") : null, heard, { heardNote: heard.length ? "Added to your Rumors." : null, outcome: r.outcome, rollType: "Gather Intelligence",
           chips: [{ icon: "ap", text: "1 action" }, heard.length ? { icon: "rumor", text: plural(heard.length, "rumor") + " heard" } : null] });
     },
     "gatherpick": function (el) {

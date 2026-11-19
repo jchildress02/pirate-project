@@ -589,7 +589,7 @@
     var ca = C().caBand(me / Math.max(1, them));
     var myGuns = state.ship.guns;
     return {
-      hunter: g.hunter, shape: g.shape, ca: ca, caName: C().caName(ca),
+      hunter: g.hunter, shape: g.shape, ca: ca, caName: C().caName(ca), driver: brDriver(state, g.ships),
       ships: g.ships.map(function (s) {
         var lt = G().lootTypes(s);
         return { id: s.id, cls: s.cls, role: s.role, flag: s.flag, name: s.name, escort: !!s.escort,
@@ -601,6 +601,22 @@
           legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s) };
       }),
     };
+  }
+
+  // P12a: which part of Battle Rating puts her ahead (guns, hull or crew),
+  // so the Quartermaster names the real reason. The same sums as br().
+  function brDriver(state, ships) {
+    var mine = ["flagship"].concat(fleet(state).filter(function (f) { return f.kind === "fleet"; }).map(function (f) { return f.id; }))
+      .map(function (id) { return C().ship(state, null, id); });
+    function part(list, k) {
+      return list.reduce(function (a, s) { return a + (k === "guns" ? C().manned(s) : k === "hull" ? s.hull / 5 : s.crew / 5); }, 0);
+    }
+    var best = null, gap = 0;
+    ["guns", "hull", "crew"].forEach(function (k) {
+      var d = part(ships, k) - part(mine, k);
+      if (d > gap) { gap = d; best = k; }
+    });
+    return best;
   }
 
   function meterNote(s) {
@@ -618,7 +634,8 @@
     if (sv.ships.some(function (s) { return s.warship; }) && sv.ca < 2) return A.warship;
     if (sv.ca >= 1) return A.good;
     if (sv.ca === 0) return A.even;
-    return A.bad;
+    // P12a: name what puts her ahead.
+    return (sv.driver && A.badBy && A.badBy[sv.driver]) || A.bad;
   }
 
   function view(state, game) {
