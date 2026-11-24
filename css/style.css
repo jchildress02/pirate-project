@@ -60,6 +60,7 @@ button:disabled { cursor: not-allowed; }
 .secondary:hover:not(:disabled), .btn:hover:not(:disabled) { background: rgba(201,159,69,.2); }
 .primary:disabled, .secondary:disabled, .btn:disabled { opacity: .5; }
 .secondary.outline { background: transparent; border: 2px solid var(--oxblood); color: var(--oxblood); } /* Sell (Playtest Pins 0.8, #8) */
+.svc h5 { margin: 12px 0 0; } .svc h5 + p.small { margin-top: 2px; } /* Buy and Sell sub-headings (Playtest Pins 0.8, #8) */
 .menubtn { display: inline-flex; align-items: center; gap: 6px; font-size: 18px; background: rgba(255,250,235,.45); border: 1px solid var(--rule); padding: 5px 11px; min-height: 40px; }
 .menubtn:hover { background: rgba(201,159,69,.2); }
 .menubtn svg { width: 18px; height: 18px; }
