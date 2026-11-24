@@ -156,9 +156,9 @@
     CREW_HIT: { heavy: 0.04, light: 0.02 },
     // Balance-check knobs (Milestone 6; P12b, P13). The defaults keep the
     // rules as built; tools/hunt_sim.js tries the proposals before a ruling.
-    BR_HULL_DIV: 5,           // Battle Rating counts hull ÷ this (P12b proposes 10)
+    BR_HULL_DIV: 10,          // Battle Rating counts hull ÷ this (N1, §21.3; built at 5)
     GRAPE_MULT: 2,            // grapeshot multiplies crew losses (P13a proposes 4)
-    GRAPE_BY_GUNS: null,      // P13b: e.g. { heavy: 1/3, light: 1/6 } men per manned gun
+    GRAPE_BY_GUNS: { heavy: 1 / 3, light: 1 / 6 }, // N2 (§21.11): grapeshot kills 1 man per 3 manned guns on a heavy hit, 1 per 6 on a light one
     PORCELAIN_BREAK: 0.10,
     CREW_LINE: 0.25,
     FATE: [[1, "sunk"], [0.75, 0.5], [0.5, 0.25]],

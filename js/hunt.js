@@ -683,7 +683,13 @@
     };
   }
 
-  M().register("hunt", { settle: settle, view: view, exit: exit });
+  // The roll list's "what it did" for a checked roll (N4).
+  function rollEffect(state, game, op, outcome) {
+    if (op === "repair") return { clean: "a quarter of the damage patched", partial: "a tenth of the damage patched", setback: "nothing to show for it" }[outcome];
+    return C().rollEffect(state, game, op, outcome);
+  }
+
+  M().register("hunt", { settle: settle, view: view, exit: exit, rollEffect: rollEffect });
 
   // ---- Developer tools (§37.2) ------------------------------------------------------
 

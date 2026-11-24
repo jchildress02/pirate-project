@@ -32,7 +32,11 @@
   function markRoll(game, type, r) {
     game.rollSeq = (game.rollSeq || 0) + 1;
     game.lastRoll = { type: type, outcome: r.outcome, roll: { dice: r.dice, edge: r.edge, total: r.total }, logAt: game.log.length, seq: game.rollSeq, chips: [], op: type === "The Exchange" ? "exchange" : "clash" };
+    M().noteRoll(game, { seq: game.rollSeq, label: type, outcome: r.outcome, op: game.lastRoll.op, mine: true });
   }
+  // A roll the player doesn't make (a strike roll, a fleet ship's fight):
+  // listed with its outcome and what it did (N4).
+  function noteRaw(game, label, r, effect) { M().noteRoll(game, { label: label, outcome: r.outcome, effect: effect }); }
   function chance(state, game, what, p) { return M().rand(state, game, what)() < p; }
   // Probabilistic rounding (§21.11): 4% of 12 men is 0 or 1, averaging right.
   function prnd(state, game, x) { var f = Math.floor(x); return f + (chance(state, game, "prnd", x - f) ? 1 : 0); }
@@ -261,6 +265,8 @@
   function strikeRoll(state, game, b, e, edge, why) {
     var r = rawRoll(state, game, "strike", dreadBonus(state) + edge - effResolve(e));
     b.lastStrike = { ship: e.id, outcome: r.outcome, why: why, dice: r.dice, edge: r.edge };
+    noteRaw(game, (why === "consort" ? "Strike roll, " : "Strike roll, ") + (e.name || e.cls), r,
+      { clean: "she strikes her colors", partial: "she wavers but fights on (Shaken)", setback: "she fights on" }[r.outcome]);
     if (r.outcome === "clean") { knockOut(state, game, b, e, "struck"); return true; }
     if (r.outcome === "partial") { shake(e, 1); say(state, game, L().wavers); }
     return false;
@@ -420,6 +426,7 @@
     var resolve = Math.max.apply(null, fightingEnemies(b).map(effResolve));
     var r = rawRoll(state, game, "strikePre", dreadBonus(state) + fleetCA(state, b) + bonus - resolve);
     b.preStrike = { outcome: r.outcome, dice: r.dice, edge: r.edge };
+    noteRaw(game, "Call on her to strike", r, { clean: "she strikes without a fight", partial: "she won't strike, but she's shaken", setback: "she won't strike" }[r.outcome]);
     if (r.outcome === "clean") {
       say(state, game, L().struckPre);
       fightingEnemies(b).forEach(function (x) { x.out = "struck"; x.noFight = true; });
@@ -559,6 +566,7 @@
     b.firstExchange = false;
     b.lastExchange = { outcome: r.outcome, dice: r.dice, edge: r.edge, mine: shot, theirs: theirs };
     markRoll(game, "The Exchange", r);
+    M().setRollEffect(game, { clean: "your heavy hit lands", partial: "light hits both ways", setback: "her heavy hit lands" }[r.outcome]);
     say(state, game, L().exchange[r.outcome] + " (" + L().theirShot[theirs] + ")");
     var before = { me: sideSnap(state, b, "flagship"), her: sideSnap(state, b, en.id) };
     if (r.outcome === "clean") hit(state, game, b, "flagship", en.id, true, shot);
@@ -600,6 +608,7 @@
       var sc = H().SUPPORT.supportCaptain[(off && off.level) || 1] || 0;
       var r = rawRoll(state, game, "background", pairCA(state, b, myId, enId) + sc);
       var map = { ship: f.name || f.cls, enemy: e.name || e.cls };
+      noteRaw(game, map.ship + " against the " + map.enemy, r, { clean: "a heavy hit on her", partial: "light hits both ways", setback: "a heavy hit on your ship" }[r.outcome]);
       if (r.outcome === "clean") { hit(state, game, b, myId, enId, true, "round"); say(state, game, fill(L().backgroundYou, map)); }
       else if (r.outcome === "partial") { hit(state, game, b, myId, enId, false, "round"); hit(state, game, b, enId, myId, false, "round"); say(state, game, fill(L().backgroundBoth, map)); }
       else { hit(state, game, b, enId, myId, true, "round"); say(state, game, fill(L().backgroundThem, map)); }
@@ -926,6 +935,7 @@
     var r = rawRoll(state, game, "clash", edge);
     b.lastClash = { outcome: r.outcome, dice: r.dice, edge: r.edge, parts: parts };
     markRoll(game, "The clash", r);
+    M().setRollEffect(game, { clean: "your boarders cut hers down", partial: "men fall on both sides", setback: "her crew drive yours back" }[r.outcome]);
     say(state, game, L().clash[r.outcome]);
     var me = ship(state, b, "flagship"), them = ship(state, b, e.id);
     var lossFor = function (winnerAdv, loserCrew) {
@@ -1042,6 +1052,26 @@
     var res = Math.max.apply(null, fightingEnemies(b).map(effResolve));
     return M().roll(state, game, { type: "Intimidate", dr: clamp(res, 0, 8) }, "show", {}, []);
   }
+  // What a checked battle roll did, for the roll list (N4). The words
+  // follow each option's own note on the screen.
+  var ROLL_EFFECT = {
+    position: { clean: "you have the position", partial: "+1 on this round's Exchange", setback: "−1 on this round's Exchange" },
+    chase: { clean: "you catch her, +1 on your first Position", partial: "you catch her", setback: "she gets away" },
+    flee: { clean: "you get away", partial: "you get away, with a parting hit", setback: "she catches you, +1 to her Position" },
+    grapple: { clean: "you're aboard", partial: "you're aboard, but she sweeps your deck with grape", setback: "they cut your grapples" },
+    repel: { clean: "you cut her grapples and rake her", partial: "they're aboard, but pay for it", setback: "they're aboard" },
+    strikeFirst: { clean: "you get the jump: +1 on the first clash", partial: "neither side gets the jump", setback: "they get the jump: −1 on the first clash" },
+    shot: { clean: "the shot finds its mark", partial: "a glancing hit", setback: "the shot goes wide" },
+    endure: { clean: "you hold on", partial: "you hold on, barely", setback: "the sea takes you" },
+    show: { clean: "+1 on the strike roll", partial: "no harm done", setback: "no harm done" },
+  };
+  function rollEffect(state, game, op, outcome) {
+    var b = game.battle || {};
+    var key = op === "chase" && b.chaseMode === "flee" ? "flee" : op;
+    if (/^act_/.test(op)) return null; // a boarding action's own lines say what it did
+    return (ROLL_EFFECT[key] || {})[outcome] || null;
+  }
+
   function settleShow(state, game, p) { game.battle.step = "strikePre"; return strikePre(state, game, p.outcome === "clean" ? 1 : 0); }
 
   function engage(state, game) {
@@ -1092,6 +1122,7 @@
   }
 
   PC.combat = {
+    rollEffect: rollEffect,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,
     begin: begin, engage: engage, setTarget: setTarget, assignFleetShip: assignFleetShip, showOfForce: showOfForce,
