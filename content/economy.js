@@ -102,4 +102,32 @@
     "Emeralds": { base: 600, kind: "precious" },
     "Bengali gems": { base: 800, kind: "precious" },
   };
+
+  // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
+  // the Tuning Table lists them. Rules in js/meters.js.
+  PC.data.meterRules = {
+    // Heat bleed a season (§28.6), by Standing with the faction: 40+, -39
+    // to 39, -40 or lower; a season with no offense, and one with.
+    BLEED: { high: { clean: 8, offense: 5 }, mid: { clean: 5, offense: 3 }, low: { clean: 3, offense: 1 } },
+    DISTRACTED_EXTRA: 3,          // the Distracted posture bleeds Frisian Heat 3 more (§8); Hunter stops it
+    TRUSTED_HEAT_MULT: 0.75,      // Heat gains at Standing 40+ (§28.1)
+    BETRAYAL_HEAT: 10,            // an offense at 40+: +10, and gains doubled for a year (§28.6)
+    DRIFT: 2, DRIFT_STOP: -9,     // negative Standing recovers +2 a season with no offense, up to -9 (§28.1)
+    DREAD_DECAY: 2,               // a season with no fear deed (§28.8)
+    FEAR_DEED_DREAD: 2, FEAR_DEED_BLACK: 1,
+    FLOOR_CAP: 40,                // the net Dread floor (§28.8)
+    OFFICER_FLOOR: { "Bloodthirsty": 5 },  // officer traits that lift the Dread floor (§25.3)
+    NAVY_FROM: 50,                // navy ships are never interested below Heat 50 (§28.4)
+    NAVY_ATTACK: { "Wanted": 0.15, "Hunted": 0.35, "Most Wanted": 0.60 },
+    PIRATE_ATTACK: 0.35,          // every pirate ship at black -70 or lower (§28.1)
+    POOL_STEP: 0.10,              // crew pools +10% a bonus step (§24.7)
+    WARY_OFFICIAL: 0.20,          // Wary pays +20% on holdings, homes, trade ships and laying up (§28.2)
+    lines: {
+      heatBand: "{faction} Heat cools to {band}.",
+      standingBand: "{faction} Standing mends to {band}.",
+      dreadBand: "Your reputation fades a little: Dread bonus now +{bonus}.",
+      navyAttacks: "PLACEHOLDER: She runs out her guns and turns toward you. A navy captain who knows your name doesn't wait to be asked.",
+      pirateAttacks: "PLACEHOLDER: She hoists the black and comes straight for you. Word of you has spread among the Brethren.",
+    },
+  };
 })();

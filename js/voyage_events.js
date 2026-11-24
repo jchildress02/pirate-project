@@ -648,9 +648,9 @@
     if ("wounded" in f) { var w = wound(state, f.wounded); if (w) chips.push({ icon: "officer", text: plural(w, "hand") + " hurt", ink: "bad" }); }
     if ("purse" in f) { state.money.purse = Math.max(0, state.money.purse + f.purse); chips.push({ icon: "gold", text: (f.purse > 0 ? "+" : "−") + Math.abs(f.purse) + " your purse", ink: f.purse > 0 ? "good" : "mid" }); }
     if ("crewGold" in f) { state.money.crew = Math.max(0, state.money.crew + f.crewGold); chips.push({ icon: "gold", text: (f.crewGold > 0 ? "+" : "−") + Math.abs(f.crewGold) + " crew gold", ink: f.crewGold > 0 ? "good" : "mid" }); }
-    if ("dread" in f) { state.meters.dread = clamp((state.meters.dread || 0) + f.dread, 0, 100); chips.push({ icon: "dread", text: "Dread +" + f.dread }); }
-    if ("heatZone" in f) { var fz = factionOfZone(v.zone); state.meters.heat[fz] = clamp((state.meters.heat[fz] || 0) + f.heatZone, 0, 100); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
-    if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; state.meters.heat[hf] = clamp((state.meters.heat[hf] || 0) + f.heatHere, 0, 100); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
+    if ("dread" in f) { PC.meters.addDread(state, f.dread); chips.push({ icon: "dread", text: "Dread +" + f.dread }); }
+    if ("heatZone" in f) { var fz = factionOfZone(v.zone); PC.meters.addHeat(state, fz, f.heatZone); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
+    if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; PC.meters.addHeat(state, hf, f.heatHere); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
     if ("pressure" in f) { state.crew.pressure = clamp((state.crew.pressure || 0) + f.pressure, 0, 5); chips.push({ icon: "pressure", text: f.pressure > 0 ? "The crew's grievances grow" : "The talk dies down", ink: f.pressure > 0 ? "bad" : "good" }); }
     if ("rumor" in f) {
       var weights = RUMOR_WEIGHTS[f.rumor] || RUMOR_WEIGHTS.C;

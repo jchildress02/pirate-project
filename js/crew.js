@@ -394,7 +394,7 @@
     if (r.outcome === "clean") {
       state.crew.pressure = Math.max(0, state.crew.pressure - 2);
       state.used.makeExampleClean = PC.state.stamp(state);
-      state.meters.dread = clamp(state.meters.dread + 3, 0, 100);
+      PC.meters.fearDeed(state, 3); // a fear deed: Dread +3, black +1 (§28.8, §24.12)
     } else if (r.outcome === "partial") {
       state.crew.pressure = Math.max(0, state.crew.pressure - 1);
       addMorale(state, -5);

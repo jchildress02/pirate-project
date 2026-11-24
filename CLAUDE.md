@@ -27,7 +27,7 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 
 ## Not built yet (deliberately)
 
-- Meter modifiers on checks (Dread and Standing, §11.8.5): `meterModifier()` in `js/checks.js` is a stub.
+- The meters (§28) live in `js/meters.js` (Milestone 8, PR 2): every Standing, Heat and Dread change goes through `PC.meters` so the season's offenses and fear deeds are tracked. Not yet: letters and the letter's Standing cap (PR 4), inspections (PR 3), pardons (PR 5), displays on the Dread floor.
 - Social retries at DR -1 (§11.10); clocks (§11.9); approval tags are recorded on choices but not yet read by anything.
 - Modifier `note` fields (economy cuts, Gunnery, Dread and morale floors) are recorded but not applied; the systems that read them come later.
 - The prize hunt (Milestone 5) is built: `js/hunt_gen.js` (what's met at sea, the loot), `js/combat.js` (battles, boarding, fleets), `js/hunt.js` (the hunt loop and after the battle, run as the "hunt" minigame), numbers and PLACEHOLDER lines in `content/hunt.js`; `tools/hunt_sim.js` plays it automatically. Not yet: patrols, false flags, the Known Prize flag, scouting ranges narrowing with experience, captured enemy captains beyond release, imprisonment and heirs (a captured or killed captain gets a game over), letters of marque, voyage events, laying a ship up. The minigames are built (Milestone 4: `js/salvage.js`, `js/drinking.js`, `js/liarsdice.js`, shared plumbing in `js/minigames.js`, numbers and lines in `content/minigames.js`); not yet: displays (the Giant Tooth and the Kingly Goblet count while carried), the Gambler flaw's stake temptation, item selling, and the giant shark's own cryptid scenes (PLACEHOLDER lines).
@@ -35,5 +35,5 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 - Officers: approval points, barks (only the mentor's first-Articles line shows), bonds and officer events. The Acting Quartermaster and the Quartermaster's vote are built (§25.9): a vacancy is held by the Acting Quartermaster until the vote at the next action at sea (the M5 playtest patch). Officers join, show their traits and can be replaced (dismissed); nothing reads their likes yet.
 - Quest deadlines and their expiry outcomes beyond the warning popup (§16.4): only What Was Lost carries a deadline, and nothing expires it yet.
 - Named NPC portraits: Twopenny, Bobby, Davey, Ollie and Geezer show labeled frames until the art lands in `PC.data.npcPortraits` (content/ocracoke.js).
-- The Dread bonus on crew pools, the Drunkard/Heavy Drinker temptations, world-state price modifiers and the No Quarter tag's lag.
+- The Drunkard/Heavy Drinker temptations, world-state price modifiers and the No Quarter tag's lag.
 - Captain ageing over the years: the portrait already follows `captain.age`, but nothing advances it yet.

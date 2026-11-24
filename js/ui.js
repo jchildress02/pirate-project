@@ -167,7 +167,7 @@
   function standingBand(v) {
     return v >= 70 ? "Honored" : v >= 40 ? "Trusted" : v >= 20 ? "Favored" : v >= -9 ? "Neutral" : v >= -39 ? "Wary" : v >= -69 ? "Hostile" : "Enemy";
   }
-  function heatBand(v) { return v >= 90 ? "Most Wanted" : v >= 70 ? "Hunted" : v >= 40 ? "Wanted" : v >= 20 ? "Noticed" : "Cold"; }
+  function heatBand(v) { return PC.meters.heatBand(v); }
 
   function standingBar(f, v) {
     var left = v >= 0 ? 50 : 50 + v / 2, width = Math.abs(v) / 2;
@@ -185,7 +185,8 @@
       return withNumbers ? bar.replace(standingBand(m.standing[f]) + "</span>", standingBand(m.standing[f]) + n(m.standing[f]) + "</span>") : bar;
     }).join("") +
       '<div class="h4">Dread &amp; Heat</div><div class="vbars">' +
-      vbar("Dread", m.dread, "pirates", withNumbers ? String(m.dread) : "") +
+      // Dread's bonus and floor beside its number (§11.8.5, §5.6).
+      vbar("Dread", m.dread, "pirates", (PC.meters.dreadBonus(state) ? "+" + PC.meters.dreadBonus(state) : "") + (withNumbers ? (PC.meters.dreadBonus(state) ? " · " : "") + m.dread + (PC.meters.dreadFloor(state) ? " (floor " + PC.meters.dreadFloor(state) + ")" : "") : "")) +
       vbar("Frisian Heat", m.heat.frisia || 0, "frisia", heatBand(m.heat.frisia || 0) + n(m.heat.frisia || 0)) +
       vbar("Avalon Heat", m.heat.avalon || 0, "avalon", heatBand(m.heat.avalon || 0) + n(m.heat.avalon || 0)) + "</div>";
   }
@@ -1254,7 +1255,7 @@
     var c = N().docksRollCheck(state);
     if (!c.ok) return "";
     return opts([opt({ act: "docksroll", label: "Size up the hands (optional)",
-      check: PC.checks.assess(state, N().docksCheck(state), { conditions: ["Harbor", "Underworld"] }),
+      check: PC.checks.assess(state, N().docksCheck(state), { conditions: N().docksConditions(state) }),
       meta: "No action · once a visit, before you sign. Clean: a third of the hands you sign come a tier better. Setback: a third of the pool's Seasoned and Veteran hands are gone." })]);
   }
 

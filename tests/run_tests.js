@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -3159,6 +3159,109 @@ test("the developer jump list includes Norfolk's scenes, and Arrive at Norfolk r
   ok(s.seen.nor_fv1 || s.current.sceneId === "nor_fv1");
   PC.devtools.arriveNorfolkFirst(s);
   eq(s.location.node, "norfolk"); eq(s.current.sceneId, "nor_fv1");
+});
+
+// ---- Milestone 8, PR 2: the meters (§28, §11.8.5) ----
+console.log("Milestone 8, PR 2: the meters (§28, §11.8.5)");
+
+function atNorfolk(seed) { var s = m7(seed); PC.world.sail(s, "norfolk"); s.location.popup = null; s.current = { screen: "node" }; return s; }
+function partOf(a, label) { return a.parts.filter(function (p) { return p.label === label; })[0]; }
+
+test("the §11.8.5 bands: +1 / +2 / +3 at 20 / 40 / 70; -1 / -2 / -3 at Wary / Hostile / Enemy; Heat's DR +1 Wanted, +2 Hunted", function () {
+  [[0, 0], [19, 0], [20, 1], [39, 1], [40, 2], [69, 2], [70, 3], [-9, 0], [-10, -1], [-39, -1], [-40, -2], [-70, -3]].forEach(function (x) { eq(PC.meters.bonus(x[0]), x[1], "bonus " + x[0]); });
+  eq(PC.meters.heatDR(39), 0); eq(PC.meters.heatDR(40), 1); eq(PC.meters.heatDR(70), 2); eq(PC.meters.heatDR(95), 2);
+});
+
+test("meter modifiers: Dread on Intimidate always; Avalon Standing with Norfolk's merchants; Heat on Bribe in Avalon's port", function () {
+  var s = atNorfolk("mt1");
+  s.meters.dread = 45;
+  eq(partOf(PC.checks.assess(s, { type: "Intimidate", dr: 2 }), "Dread").value, 2);
+  ok(!partOf(PC.checks.assess(s, { type: "Persuade", dr: 2 }), "Dread"), "no Dread on Persuade");
+  s.meters.standing.avalon = 25;
+  eq(partOf(PC.checks.assess(s, { type: "Haggle", dr: 2 }, { conditions: ["Harbor", "Merchant"] }), "Avalon Standing").value, 1);
+  s.meters.standing.avalon = -15;
+  eq(partOf(PC.checks.assess(s, { type: "Haggle", dr: 2 }, { conditions: ["Harbor", "Merchant"] }), "Avalon Standing").value, -1);
+  s.meters.heat.avalon = 45;
+  var b = PC.checks.assess(s, { type: "Bribe", dr: 1 }, { conditions: ["Official"] });
+  eq(partOf(b, "Avalon Heat (Wanted)").value, -1);
+  s.meters.standing.pirates = 45;
+  var o = huntReady("mt1o");
+  o.meters.standing.pirates = 45;
+  eq(partOf(PC.checks.assess(o, { type: "Recruit", dr: 2 }, { conditions: ["Harbor", "Underworld"] }), "Pirate Standing").value, 2);
+  o.meters.dread = 80; o.meters.standing.pirates = 80;
+  var rec = PC.checks.assess(o, { type: "Recruit", dr: 2 }, { conditions: ["Harbor", "Underworld"] });
+  eq(rec.parts.filter(function (p) { return /Dread|Standing|cap/.test(p.label); }).reduce(function (a, p) { return a + p.value; }, 0), 3, "the slot caps at +3");
+});
+
+test("Heat bleeds at season's end: -5 with no offense, -3 with one, -8 at Standing 40+; Hunter posture stops Frisia's", function () {
+  var s = atNorfolk("mt2");
+  s.meters.heat.avalon = 30; PC.meters.seasonEnd(s); eq(s.meters.heat.avalon, 25);
+  PC.meters.addHeat(s, "avalon", 6); eq(s.meters.heat.avalon, 31); PC.meters.seasonEnd(s); eq(s.meters.heat.avalon, 28);
+  s.meters.standing.avalon = 45; PC.meters.seasonEnd(s); eq(s.meters.heat.avalon, 20);
+  s.meters.heat.frisia = 30; s.world.posture = "Hunter"; PC.meters.seasonEnd(s); eq(s.meters.heat.frisia, 30);
+  s.world.posture = "Distracted"; PC.meters.seasonEnd(s); eq(s.meters.heat.frisia, 22);
+});
+
+test("betrayal: an offense at Standing 40+ is ×0.75, then +10, and doubles that faction's gains for a year", function () {
+  var s = atNorfolk("mt3");
+  s.meters.standing.avalon = 45;
+  PC.meters.addHeat(s, "avalon", 6);
+  eq(s.meters.heat.avalon, 15, "round(6 × 0.75) + 10");
+  ok(PC.meters.betrayalActive(s, "avalon"));
+  s.meters.standing.avalon = 0;
+  PC.meters.addHeat(s, "avalon", 6); eq(s.meters.heat.avalon, 27, "doubled");
+});
+
+test("Standing's drift: +2 a season with no offense, stopping at -9; an offense stops it", function () {
+  var s = atNorfolk("mt4");
+  s.meters.standing.avalon = -30; PC.meters.seasonEnd(s); eq(s.meters.standing.avalon, -28);
+  s.meters.standing.avalon = -10; PC.meters.seasonEnd(s); eq(s.meters.standing.avalon, -9);
+  s.meters.standing.avalon = -30; PC.meters.addHeat(s, "avalon", 6); PC.meters.seasonEnd(s); eq(s.meters.standing.avalon, -30);
+  s.meters.standing.pirates = -20; PC.meters.addStanding(s, "pirates", -1); PC.meters.seasonEnd(s); eq(s.meters.standing.pirates, -21);
+});
+
+test("Dread: -2 a season with no fear deed, never below the floor; One Eye lifts the floor to 10 at once", function () {
+  var s = atNorfolk("mt5");
+  s.meters.dread = 20; PC.meters.seasonEnd(s); eq(s.meters.dread, 18);
+  var bs = s.meters.standing.pirates;
+  PC.meters.fearDeed(s); eq(s.meters.dread, 20); eq(s.meters.standing.pirates, bs + 1);
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 20, "a fear deed stops the decay");
+  s.meters.dread = 4;
+  PC.scenes.applyEffect(s, { tag: "One Eye" });
+  eq(PC.meters.dreadFloor(s), 10); eq(s.meters.dread, 10);
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 10);
+  s.officers[0].voice = "Bloodthirsty"; eq(PC.meters.dreadFloor(s), 15);
+});
+
+test("at sea: navy ships attack first only from Heat 50; pirates 35% at black -70", function () {
+  var s = huntReady("mt6");
+  var navy = { ships: [{ flag: "Avalon", role: "War" }] }, pirate = { ships: [{ flag: "Pirate", role: "Trade" }] };
+  var lo = function () { return 0; };
+  s.meters.heat.avalon = 45; eq(PC.meters.attacksFirst(s, navy, lo), null, "never below 50");
+  s.meters.heat.avalon = 55; eq(PC.meters.attacksFirst(s, navy, lo), "navy");
+  eq(PC.meters.attacksFirst(s, navy, function () { return 0.2; }), null, "15% in the Wanted band");
+  s.meters.heat.avalon = 75; eq(PC.meters.attacksFirst(s, navy, function () { return 0.2; }), "navy");
+  eq(PC.meters.attacksFirst(s, pirate, lo), null);
+  s.meters.standing.pirates = -70; eq(PC.meters.attacksFirst(s, pirate, lo), "pirate");
+});
+
+test("gates: Norfolk's pool halves at Wary and closes at Hostile; Ocracoke's grows with Dread; the Trade Master refuses at Hostile", function () {
+  var s = atNorfolk("mt7");
+  s.meters.standing.avalon = 25; eq(Math.round(PC.meters.poolMult(s, "norfolk") * 100), 110);
+  s.meters.standing.avalon = -15; eq(PC.meters.poolMult(s, "norfolk"), 0.5);
+  s.meters.standing.avalon = -45; eq(PC.meters.poolMult(s, "norfolk"), 0);
+  s.meters.dread = 45; eq(Math.round(PC.meters.poolMult(s, "ocracoke") * 100), 120);
+  eq(PC.meters.officialGate(s, "norfolk").ok, false);
+  s.meters.standing.avalon = -15; eq(PC.meters.officialGate(s, "norfolk").mult, 1.2);
+  var o = huntReady("mt7o"); o.meters.standing.pirates = -75;
+  ok(!PC.world.canSail(o, "ocracoke", { from: "norfolk" }).ok, "Ocracoke turns an Enemy away");
+});
+
+test("fear deeds in battle and the season turn: Make an Example's clean is a fear deed; the season popup lists the bleed", function () {
+  var s = atNorfolk("mt8");
+  s.meters.heat.avalon = 30;
+  var out = PC.world.endSeason(s);
+  ok(out.chips.some(function (c) { return /Avalon Heat −5/.test(c.text); }), "bleed in the popup");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

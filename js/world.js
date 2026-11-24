@@ -236,6 +236,10 @@
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
+    // The meters (§28): Heat bleed, Standing's drift, Dread's decay.
+    var mt = PC.meters.seasonEnd(state);
+    out.lines = out.lines.concat(mt.lines);
+    out.chips = out.chips.concat(mt.chips);
     var wasWinter = seasonName(state) === "Winter";
     var yearEnd = wasWinter && state.time.year >= 1754 && !state.keepPlaying;
     if (yearEnd) {
@@ -489,7 +493,7 @@
       state.flags.earToGround = opts.type || "World State";
       chips.push({ icon: "rumor", text: "A rumor of your choosing at the start of Spring" });
     } else if (id === "courting") {
-      state.meters.standing[n.faction] = (state.meters.standing[n.faction] || 0) + 3;
+      PC.meters.addStanding(state, n.faction, 3);
       chips.push({ icon: "standing", text: (n.faction === "avalon" ? "Avalon" : "Frisian") + " Standing +3", ink: "good" });
     } else if (id === "gaming") {
       state.flags.winterTables = stamp(state);
@@ -540,7 +544,9 @@
       var b = buyout(state, f), fee = tradeFee(state), cost = b + fee;
       var swap = !!ts;
       var due = swap ? Math.max(0, cost - paidBefore) : cost;
-      var lock = refuse ? "He won't deal with you" : ts && ts.node !== id ? "Your trade ship is enrolled at " + placeName(ts.node) + "; swap her there" : state.money.purse < due ? "Needs " + due + " gold in your purse" : null;
+      var gate = PC.meters.officialGate(state, id); // Wary +20%, barred at Hostile (§28.2)
+      fee = Math.round(fee * gate.mult); cost = b + fee; due = swap ? Math.max(0, cost - paidBefore) : cost;
+      var lock = !gate.ok ? gate.why : refuse ? "He won't deal with you" : ts && ts.node !== id ? "Your trade ship is enrolled at " + placeName(ts.node) + "; swap her there" : state.money.purse < due ? "Needs " + due + " gold in your purse" : null;
       if (!lock && swap && !(state.crew.count - (state.ship.crewMin || 5) >= (ts.ship.crewMin || 0))) lock = "Not enough hands to bring your old trade ship back";
       return { id: f.id, name: f.name || f.cls, cls: f.cls, cargo: f.cargo, dirty: !!f.dirty, buyout: b, fee: fee, cost: cost, due: due, swap: swap, income: tradeIncome(f, id), lock: lock };
     });

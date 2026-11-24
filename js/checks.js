@@ -129,11 +129,12 @@
     return { parts: parts, total: cappedTotal + outside, wasCapped: cappedTotal !== capped };
   }
 
-  // Meter modifiers (Dread and Standing, §11.8.5). Not built in Milestone 0:
-  // a scene can pass a fixed value as check.meter while the real rule waits.
-  function meterModifier(state, check) {
+  // Meter modifiers (Dread and Standing, §11.8.5): js/meters.js, which reads
+  // the audience conditions. A scene's fixed check.meter still adds in.
+  function meterModifier(state, check, ctx) {
+    if (PC.meters && state && state.meters) return PC.meters.checkModifier(state, check, ctx);
     var v = check.meter || 0;
-    return clamp(v, -99, RULES.METER_MOD_CAP);
+    return { value: clamp(v, -99, RULES.METER_MOD_CAP), parts: v ? [{ label: "Reputation", value: v }] : [] };
   }
 
   // Full breakdown of a check for one captain. Pure: no dice rolled.
@@ -163,8 +164,13 @@
     if (tr) parts.push({ label: check.type + " training", value: tr });
     var mods = captainModifiers(cap, check, stats, ctx);
     mods.parts.forEach(function (p) { parts.push(p); });
-    var meter = meterModifier(state, check);
-    if (meter) parts.push({ label: "Reputation", value: meter });
+    var mm = meterModifier(state, check, ctx);
+    var meter = mm.value;
+    mm.parts.forEach(function (p) { parts.push(p); });
+    if (mm.parts.length > 1 && mm.parts.reduce(function (a, p) { return a + p.value; }, 0) !== meter) parts.push({ label: "Reputation cap", value: meter - mm.parts.reduce(function (a, p) { return a + p.value; }, 0) });
+    // Heat raises the DR on Smuggle, Bribe and Ship Concealment (§28.4).
+    var hs = PC.meters && state && state.meters ? PC.meters.heatStep(state, check) : null;
+    if (hs) { parts.push(hs); meter += hs.value; }
     // Situational edge outside the captain cap: Strike First's opening (§11.4).
     var extra = 0;
     (check.extra || []).forEach(function (x) { parts.push({ label: x.label, value: x.value }); extra += x.value; });

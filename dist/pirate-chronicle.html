@@ -839,11 +839,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return { parts: parts, total: cappedTotal + outside, wasCapped: cappedTotal !== capped };
   }
 
-  // Meter modifiers (Dread and Standing, §11.8.5). Not built in Milestone 0:
-  // a scene can pass a fixed value as check.meter while the real rule waits.
-  function meterModifier(state, check) {
+  // Meter modifiers (Dread and Standing, §11.8.5): js/meters.js, which reads
+  // the audience conditions. A scene's fixed check.meter still adds in.
+  function meterModifier(state, check, ctx) {
+    if (PC.meters && state && state.meters) return PC.meters.checkModifier(state, check, ctx);
     var v = check.meter || 0;
-    return clamp(v, -99, RULES.METER_MOD_CAP);
+    return { value: clamp(v, -99, RULES.METER_MOD_CAP), parts: v ? [{ label: "Reputation", value: v }] : [] };
   }
 
   // Full breakdown of a check for one captain. Pure: no dice rolled.
@@ -873,8 +874,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (tr) parts.push({ label: check.type + " training", value: tr });
     var mods = captainModifiers(cap, check, stats, ctx);
     mods.parts.forEach(function (p) { parts.push(p); });
-    var meter = meterModifier(state, check);
-    if (meter) parts.push({ label: "Reputation", value: meter });
+    var mm = meterModifier(state, check, ctx);
+    var meter = mm.value;
+    mm.parts.forEach(function (p) { parts.push(p); });
+    if (mm.parts.length > 1 && mm.parts.reduce(function (a, p) { return a + p.value; }, 0) !== meter) parts.push({ label: "Reputation cap", value: meter - mm.parts.reduce(function (a, p) { return a + p.value; }, 0) });
+    // Heat raises the DR on Smuggle, Bribe and Ship Concealment (§28.4).
+    var hs = PC.meters && state && state.meters ? PC.meters.heatStep(state, check) : null;
+    if (hs) { parts.push(hs); meter += hs.value; }
     // Situational edge outside the captain cap: Strike First's opening (§11.4).
     var extra = 0;
     (check.extra || []).forEach(function (x) { parts.push({ label: x.label, value: x.value }); extra += x.value; });
@@ -951,6 +957,314 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     assess: assess,
     resolve: resolve,
     availableReroll: availableReroll,
+  };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — the three meters: Standing, Heat and Dread (§28, §11.8.5).
+ *
+ * Every change to Standing, Heat or Dread goes through here, so the season's
+ * offenses and fear deeds are tracked for the season's end: Heat bleed,
+ * Standing's forgiveness drift and Dread's decay (§28.1, §28.6, §28.8).
+ * Also: the meter modifiers on checks (§11.8.5), the Heat DR on Smuggle,
+ * Bribe and Ship Concealment (§28.4), the Dread floor (§5.6), betrayal
+ * (§28.6), and who attacks first at sea by Heat and black Standing (§28.1,
+ * §28.4).
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function R() { return PC.data.meterRules; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function stamp(state) { return PC.state.stamp(state); }
+
+  // ---- Bands ----------------------------------------------------------------
+
+  // The §11.8.5 table: 20 / 40 / 70 on the positive side; Standing's
+  // negative side -1 / -2 / -3 at Wary / Hostile / Enemy.
+  function bonus(v) {
+    v = v || 0;
+    if (v >= 70) return 3;
+    if (v >= 40) return 2;
+    if (v >= 20) return 1;
+    if (v <= -70) return -3;
+    if (v <= -40) return -2;
+    if (v <= -10) return -1;
+    return 0;
+  }
+  function dreadBonus(state) { return Math.max(0, bonus(state.meters.dread)); }
+
+  // Heat bands (§28.4).
+  function heatBand(v) { v = v || 0; return v >= 90 ? "Most Wanted" : v >= 70 ? "Hunted" : v >= 40 ? "Wanted" : v >= 20 ? "Noticed" : "Cold"; }
+  // The DR on Smuggle, Bribe and Ship Concealment in that faction's waters.
+  function heatDR(v) { var b = heatBand(v); return b === "Wanted" ? 1 : b === "Hunted" || b === "Most Wanted" ? 2 : 0; }
+
+  // Whose port or waters the captain is in: a node's own faction (Avalon or
+  // Frisia), otherwise the weather zone's (Avalon in the north, Frisia in the
+  // south, as voyage hunters read it, §28.4, §44.8). Ocracoke has no faction
+  // and sits in Avalon's waters.
+  function factionHere(state) {
+    var g = state.minigame;
+    if (g && g.kind === "hunt" && g.waters) return g.waters === "south" ? "frisia" : "avalon"; // at sea, the waters decide
+    var id = state.location && state.location.node;
+    var nd = id && PC.data.nodes[id];
+    if (nd && (nd.faction === "avalon" || nd.faction === "frisia")) return nd.faction;
+    var place = id && (PC.data.world.places || []).filter(function (p) { return p.id === id; })[0];
+    if (place) return place.zone === "south" ? "frisia" : "avalon";
+    return null;
+  }
+  // The faction whose port the captain stands in (null at sea or at Ocracoke).
+  function portFaction(state) {
+    var id = state.location && state.location.node, nd = id && PC.data.nodes[id];
+    return nd && nd.kind !== "ocean" && (nd.faction === "avalon" || nd.faction === "frisia") ? nd.faction : null;
+  }
+
+  // ---- Meter modifiers on checks (§11.8.5) ----------------------------------
+  // Returns { value, parts }. The slot is capped at +3 (and floors at -3,
+  // the Enemy band). A scene's fixed check.meter still adds in.
+
+  function has(conds, c) { return conds.indexOf(c) >= 0; }
+
+  function checkModifier(state, check, ctx) {
+    var conds = (ctx && ctx.conditions) || [];
+    var t = check.type, parts = [];
+    var d = dreadBonus(state);
+    var hostile = has(conds, "Underworld") || has(conds, "Hostile");
+    // Dread: Intimidate and Discipline always; Recruit, Negotiate, Parley
+    // with the Underworld or a hostile audience.
+    if (d && (t === "Intimidate" || t === "Discipline" || (hostile && (t === "Recruit" || t === "Negotiate" || t === "Parley")))) parts.push({ label: "Dread", value: d });
+    // Dread's cost with Upstanding NPCs: -(bonus - 1), minimum 0.
+    if (d > 1 && has(conds, "Upstanding NPC")) parts.push({ label: "Dread (an upstanding sort)", value: -(d - 1) });
+    // Black Standing: Recruit, Haggle, Gather Intelligence with the Underworld.
+    if (has(conds, "Underworld") && (t === "Recruit" || t === "Haggle" || t === "Gather Intelligence")) {
+      var b = bonus(state.meters.standing.pirates);
+      if (b) parts.push({ label: "Pirate Standing", value: b });
+    }
+    // Avalon or Frisian Standing with that faction's [Official], [Merchant]
+    // or [Town] audiences, in its ports.
+    var pf = portFaction(state);
+    if (pf && (has(conds, "Official") || has(conds, "Merchant") || has(conds, "Town")) && !has(conds, "Underworld") &&
+        ["Petition", "Negotiate", "Haggle", "Bribe", "Recruit"].indexOf(t) >= 0) {
+      var s = bonus(state.meters.standing[pf]);
+      if (s) parts.push({ label: (pf === "avalon" ? "Avalon" : "Frisian") + " Standing", value: s });
+    }
+    if (check.meter) parts.push({ label: "Reputation", value: check.meter });
+    var total = parts.reduce(function (a, p) { return a + p.value; }, 0);
+    return { value: clamp(total, -3, PC.checks.RULES.METER_MOD_CAP), parts: parts };
+  }
+
+  // The Heat step on the DR (§28.4): Smuggle, Bribe and Ship Concealment in
+  // a faction's waters.
+  function heatStep(state, check) {
+    if (["Smuggle", "Bribe", "Ship Concealment"].indexOf(check.type) < 0) return null;
+    var f = factionHere(state);
+    if (!f) return null;
+    var v = state.meters.heat[f] || 0, n = heatDR(v);
+    return n ? { label: (f === "avalon" ? "Avalon" : "Frisian") + " Heat (" + heatBand(v) + ")", value: -n } : null;
+  }
+
+  // ---- The Dread floor (§5.6, §28.8) ----------------------------------------
+  // Tags and carried items (dreadFloor in content/modifiers.js) and officers
+  // aboard with a floor trait (Bloodthirsty). Nets out, clamps at 0, capped
+  // at 40. Displays wait for the equipment screen (§32.6).
+  function dreadFloor(state) {
+    var c = state.captain, sum = 0;
+    ["traits", "flaws", "tags", "items"].forEach(function (k) {
+      (c[k] || []).forEach(function (id) { var m = PC.data.modifiers[id]; if (m && m.dreadFloor) sum += m.dreadFloor; });
+    });
+    (state.officers || []).forEach(function (o) {
+      if (o.gone || o.captured) return;
+      [o.voice, o.secondary, o.third].forEach(function (t) { sum += (R().OFFICER_FLOOR[t] || 0); });
+    });
+    return clamp(sum, 0, R().FLOOR_CAP);
+  }
+  function liftToFloor(state) {
+    var f = dreadFloor(state);
+    if (state.meters.dread < f) state.meters.dread = f;
+    return f;
+  }
+
+  // ---- This season's record --------------------------------------------------
+  // offense[faction]: Heat gained with it (an executed crew's prize gains
+  // none, so it is no offense, §28.12). black: pirate Standing lost. deed:
+  // a fear deed (any Dread gained).
+  function seasonRec(state) {
+    var st = stamp(state), m = state.meterSeason;
+    if (!m || m.stamp !== st) m = state.meterSeason = { stamp: st, offense: {}, blackLoss: false, deed: false };
+    return m;
+  }
+
+  // ---- Changing the meters ---------------------------------------------------
+  // Each returns the change actually made.
+
+  function betrayalActive(state, f) {
+    var b = (state.meterState || {}).betrayal || {};
+    var until = b[f];
+    if (!until) return false;
+    var now = state.time.year * 4 + state.time.season;
+    return now < until;
+  }
+
+  // Heat (§28.6): gains ×0.75 at Standing 40+ with the faction; an offense
+  // at 40+ is a betrayal: +10 on top and gains doubled for a year.
+  function addHeat(state, f, d, opts) {
+    opts = opts || {};
+    if (!f || !d) return 0;
+    var before = state.meters.heat[f] || 0, gain = d;
+    if (d > 0) {
+      var s = state.meters.standing[f] || 0, wasBetrayed = betrayalActive(state, f);
+      if (s >= 40) gain = Math.round(gain * R().TRUSTED_HEAT_MULT);
+      if (wasBetrayed) gain *= 2; // gains doubled for the year after a betrayal
+      if (s >= 40 && !opts.noBetrayal) {
+        gain += R().BETRAYAL_HEAT;
+        var ms = (state.meterState = state.meterState || {});
+        (ms.betrayal = ms.betrayal || {})[f] = state.time.year * 4 + state.time.season + 4;
+        PC.state.addLog(state, "Betrayal: " + (f === "avalon" ? "Avalon" : "Frisia") + " won't forget this for a year.");
+      }
+      seasonRec(state).offense[f] = true;
+    }
+    state.meters.heat[f] = clamp(before + gain, 0, 100);
+    return state.meters.heat[f] - before;
+  }
+
+  // Standing. The letter's cap on the other side waits for letters (PR 4).
+  function addStanding(state, f, d) {
+    if (!f || !d) return 0;
+    var before = state.meters.standing[f] || 0;
+    state.meters.standing[f] = clamp(before + d, -100, 100);
+    if (f === "pirates" && d < 0) seasonRec(state).blackLoss = true;
+    return state.meters.standing[f] - before;
+  }
+
+  function addDread(state, d) {
+    var before = state.meters.dread || 0;
+    state.meters.dread = clamp(before + d, dreadFloor(state), 100);
+    if (d > 0) seasonRec(state).deed = true;
+    return state.meters.dread - before;
+  }
+
+  // A fear deed (§28.8): Dread (+2 by default) and black Standing +1.
+  // Returns chips.
+  function fearDeed(state, dread, why) {
+    var dd = addDread(state, dread == null ? R().FEAR_DEED_DREAD : dread);
+    var bs = addStanding(state, "pirates", R().FEAR_DEED_BLACK);
+    seasonRec(state).deed = true;
+    var out = [];
+    if (dd) out.push({ icon: "dread", text: "Dread +" + dd + (why ? " (" + why + ")" : ""), ink: "bad" });
+    if (bs) out.push({ icon: "standing", text: "Pirate Standing +" + bs, ink: "pirates" });
+    return out;
+  }
+
+  // ---- The season's end (§28.1, §28.6, §28.8) --------------------------------
+  // Bleed by Standing and offense; Frisian posture; forgiveness drift for
+  // negative Standing (stops at -9); Dread decay with no fear deed. Returns
+  // { lines, chips } for the season-turn popup, including band changes.
+
+  function bleedFor(state, f) {
+    var s = state.meters.standing[f] || 0, off = !!seasonRec(state).offense[f];
+    var row = s >= 40 ? R().BLEED.high : s <= -40 ? R().BLEED.low : R().BLEED.mid;
+    var b = off ? row.offense : row.clean;
+    if (f === "frisia") {
+      var p = state.world && state.world.posture;
+      if (p === "Hunter") return 0;
+      if (p === "Distracted") b += R().DISTRACTED_EXTRA;
+    }
+    return b;
+  }
+
+  function seasonEnd(state) {
+    var rec = seasonRec(state), lines = [], chips = [];
+    var NAME = { avalon: "Avalon", frisia: "Frisian", pirates: "Pirate" };
+    ["avalon", "frisia"].forEach(function (f) {
+      var h = state.meters.heat[f] || 0;
+      if (!h) return;
+      var b = bleedFor(state, f), band0 = heatBand(h);
+      var nv = clamp(h - b, 0, 100);
+      if (nv === h) return;
+      state.meters.heat[f] = nv;
+      chips.push({ icon: "heat", text: NAME[f] + " Heat −" + (h - nv) + (rec.offense[f] ? " (a season with an offense)" : ""), ink: "good" });
+      if (heatBand(nv) !== band0) lines.push(R().lines.heatBand.replace("{faction}", NAME[f]).replace("{band}", heatBand(nv)));
+    });
+    ["avalon", "frisia", "pirates"].forEach(function (f) {
+      var s = state.meters.standing[f] || 0;
+      if (s >= R().DRIFT_STOP) return;
+      var offended = f === "pirates" ? rec.blackLoss : !!rec.offense[f];
+      if (offended) return;
+      var b0 = PC.node.standingBand(state, f).name;
+      var nv = Math.min(R().DRIFT_STOP, s + R().DRIFT);
+      state.meters.standing[f] = nv;
+      chips.push({ icon: "standing", text: NAME[f] + " Standing +" + (nv - s) + " (time heals)", ink: f });
+      var b1 = PC.node.standingBand(state, f).name;
+      if (b1 !== b0) lines.push(R().lines.standingBand.replace("{faction}", NAME[f]).replace("{band}", b1));
+    });
+    var floor = liftToFloor(state);
+    if (!rec.deed && state.meters.dread > floor) {
+      var d0 = state.meters.dread, nd = Math.max(floor, d0 - R().DREAD_DECAY);
+      state.meters.dread = nd;
+      chips.push({ icon: "dread", text: "Dread −" + (d0 - nd) + " (no fear deeds this season)" });
+      if (bonus(nd) !== bonus(d0)) lines.push(R().lines.dreadBand.replace("{bonus}", String(bonus(nd))));
+    }
+    state.meterSeason = null;
+    return { lines: lines, chips: chips };
+  }
+
+  // ---- Who attacks first at sea (§28.1, §28.4) -------------------------------
+  // A navy ship of a faction whose Heat is 50+ attacks first (15% / 35% /
+  // 60% by band); at black Standing -70 or lower every pirate ship has a 35%
+  // chance to. r: the seeded random function. Returns the reason, or null.
+  function attacksFirst(state, grp, r) {
+    if (!grp || grp.hunter || !grp.ships || !grp.ships.length) return null;
+    var lead = grp.ships[0];
+    var f = lead.flag === "Avalon" ? "avalon" : lead.flag === "Frisia" ? "frisia" : null;
+    var war = grp.ships.some(function (s) { return s.role === "War"; });
+    if (f && war) {
+      var h = state.meters.heat[f] || 0;
+      if (h >= R().NAVY_FROM) {
+        var p = R().NAVY_ATTACK[heatBand(h)] || 0;
+        if (r() < p) return "navy";
+      }
+    }
+    if (lead.flag === "Pirate" && (state.meters.standing.pirates || 0) <= -70 && r() < R().PIRATE_ATTACK) return "pirate";
+    return null;
+  }
+
+  // ---- Gates (§28.1, §28.2) --------------------------------------------------
+  // The crew pool's Standing and Dread multiplier (§24.7): Dread at the pirate
+  // havens, Standing in Avalon and Frisian ports (+10% a bonus step; Wary
+  // half; Hostile and below none).
+  function poolMult(state, id) {
+    var nd = PC.data.nodes[id];
+    if (!nd) return 1;
+    if (nd.haven) return 1 + R().POOL_STEP * dreadBonus(state);
+    if (nd.faction === "avalon" || nd.faction === "frisia") {
+      var b = bonus(state.meters.standing[nd.faction]);
+      if (b <= -2) return 0;
+      if (b === -1) return 0.5;
+      return 1 + R().POOL_STEP * b;
+    }
+    return 1;
+  }
+
+  // Holdings, homes, trade-ship enrollment and laying up (§28.2): Wary pays
+  // +20%; barred at Hostile and Enemy. Returns { ok, mult, why }.
+  function officialGate(state, id) {
+    var nd = PC.data.nodes[id];
+    if (!nd || !nd.faction) return { ok: true, mult: 1 };
+    var b = PC.node.standingBand(state, nd.faction).name;
+    if (b === "Hostile" || b === "Enemy") return { ok: false, mult: 1, why: "Not at " + b + " Standing here" };
+    return { ok: true, mult: b === "Wary" ? 1 + R().WARY_OFFICIAL : 1 };
+  }
+
+  PC.meters = {
+    bonus: bonus, dreadBonus: dreadBonus, heatBand: heatBand, heatDR: heatDR, factionHere: factionHere, portFaction: portFaction,
+    checkModifier: checkModifier, heatStep: heatStep,
+    dreadFloor: dreadFloor, liftToFloor: liftToFloor,
+    addHeat: addHeat, addStanding: addStanding, addDread: addDread, fearDeed: fearDeed, betrayalActive: betrayalActive,
+    seasonRec: seasonRec, seasonEnd: seasonEnd, bleedFor: bleedFor,
+    attacksFirst: attacksFirst, poolMult: poolMult, officialGate: officialGate,
   };
 })();
 </script>
@@ -2096,7 +2410,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (r.outcome === "clean") {
       state.crew.pressure = Math.max(0, state.crew.pressure - 2);
       state.used.makeExampleClean = PC.state.stamp(state);
-      state.meters.dread = clamp(state.meters.dread + 3, 0, 100);
+      PC.meters.fearDeed(state, 3); // a fear deed: Dread +3, black +1 (§28.8, §24.12)
     } else if (r.outcome === "partial") {
       state.crew.pressure = Math.max(0, state.crew.pressure - 1);
       addMorale(state, -5);
@@ -3052,10 +3366,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // The pool's size this season after its modifiers: the Articles'
-  // reputation (§26.5) and Dread at a pirate haven (§24.7). The Dread bonus
-  // comes with meter modifiers (not built yet), so it is +0 for now.
+  // reputation (§26.5), and Dread at a pirate haven or Standing in an Avalon
+  // or Frisian port (§24.7, §28.1: Wary halves it, Hostile and below none).
   function poolMult(state) {
-    return PC.articles.currentReputation(state).pool;
+    return PC.articles.currentReputation(state).pool * PC.meters.poolMult(state, here(state));
   }
 
   // A node can close its crew pool below a Standing (Norfolk: Avalon 0+).
@@ -3078,6 +3392,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // of the hands signed this visit come aboard a tier better (minimum 1).
   // Partial: the pool as listed. Setback: a third of the pool's Seasoned and
   // Veteran hands have signed elsewhere (minimum 1, if there are any).
+  // Who the Docks roll talks to (§11.8.5): pirates at a haven (Dread and
+  // black Standing count), townsfolk in an Avalon or Frisian port (that
+  // faction's Standing counts).
+  function docksConditions(state) {
+    var nd = nodeData(here(state));
+    return nd.faction === "avalon" || nd.faction === "frisia" ? ["Harbor", "Town"] : ["Harbor", "Underworld"];
+  }
   var DOCKS_DR = 2; // DEFAULT: §11.4 sets no DR for the Docks roll
   var NEXT_TIER = { Green: "Able", Able: "Seasoned", Seasoned: "Veteran" };
 
@@ -3093,7 +3414,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var c = docksRollCheck(state);
     if (!c.ok) throw new Error(c.why);
     var key = [state.world.seed, PC.state.stamp(state), "docks-roll", state.location.visit].join("|");
-    var r = PC.checks.resolve(state, docksCheck(), key, { conditions: ["Harbor", "Underworld"] });
+    var r = PC.checks.resolve(state, docksCheck(), key, { conditions: docksConditions(state) });
     var out = { visit: state.location.visit, outcome: r.outcome, upgraded: 0, signed: 0, lost: 0, dice: r.dice, edge: r.assessment.edge };
     if (r.outcome === "setback") {
       var avail = poolAvailable(state), S = avail.Seasoned || 0, V = avail.Veteran || 0;
@@ -3370,7 +3691,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     salePrice: salePrice,
     shopPrice: shopPrice,
     demandOf: demandOf,
-    standingBand: standingBand,
+    standingBand: standingBand, docksConditions: docksConditions,
     purchaseMult: purchaseMult,
     slotNpc: slotNpc,
     greeting: greeting,
@@ -3855,14 +4176,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     else if ("hull" in e) { state.ship.hull = clamp(state.ship.hull + e.hull, 0, state.ship.hullMax); }
     else if ("morale" in e) { state.crew.morale = clamp(state.crew.morale + e.morale, 0, 100); }
     else if ("pressure" in e) { state.crew.pressure = Math.max(0, state.crew.pressure + e.pressure); }
-    else if ("dread" in e) { state.meters.dread = clamp(state.meters.dread + e.dread, 0, 100); }
+    // The meters go through js/meters.js, which tracks the season's offenses
+    // and fear deeds (§28.6, §28.8).
+    else if ("dread" in e) { if (PC.meters) PC.meters.addDread(state, e.dread); else state.meters.dread = clamp(state.meters.dread + e.dread, 0, 100); }
     else if ("standing" in e) {
       var f = e.standing.faction;
-      state.meters.standing[f] = clamp(state.meters.standing[f] + e.standing.delta, -100, 100);
+      if (PC.meters) PC.meters.addStanding(state, f, e.standing.delta); else state.meters.standing[f] = clamp(state.meters.standing[f] + e.standing.delta, -100, 100);
     }
     else if ("heat" in e) {
       var h = e.heat.faction;
-      state.meters.heat[h] = clamp((state.meters.heat[h] || 0) + e.heat.delta, 0, 100);
+      if (PC.meters) PC.meters.addHeat(state, h, e.heat.delta); else state.meters.heat[h] = clamp((state.meters.heat[h] || 0) + e.heat.delta, 0, 100);
     }
     else if ("ladder" in e) {
       if (PC.npcs) PC.npcs.moveRung(state, e.ladder.npc, e.ladder.delta);
@@ -3878,6 +4201,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       else if (i < 0) tags.push(e.tag);
       // A temporary tag that lapses when the season turns (§5.3).
       if (e.untilSeasonEnd && !e.remove) { state.captain.tagsUntil = state.captain.tagsUntil || {}; state.captain.tagsUntil[e.tag] = seasonStamp(state); }
+      if (PC.meters) PC.meters.liftToFloor(state); // a floor tag lifts Dread at once (§5.6)
     }
     else if ("rung" in e) {
       // Set an NPC's rung outright ("Twopenny Friendly", §15.6).
@@ -7228,9 +7552,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
   function caName(b) { return H().CA_NAMES[String(b)]; }
 
-  function dreadBonus(state) {
-    var d = (state.meters && state.meters.dread) || 0;
-    return d >= 70 ? 3 : d >= 40 ? 2 : d >= 20 ? 1 : 0;
+  function dreadBonus(state) { return PC.meters.dreadBonus(state); }
+
+  // A fear deed in battle (§28.8): Dread +2 and pirate Standing +1, noted in
+  // the battle log.
+  function fearDeed(state, game, why) {
+    var chips = PC.meters.fearDeed(state, null);
+    if (chips.length) say(state, game, chips.map(function (c) { return c.text; }).join(" · ") + " (a fear deed: " + why + ").");
   }
 
   // ---- The player's ships ---------------------------------------------------
@@ -7618,6 +7946,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     noteRaw(game, "Call on her to strike", r, { clean: "she strikes without a fight", partial: "she won't strike, but she's shaken", setback: "she won't strike" }[r.outcome]);
     if (r.outcome === "clean") {
       say(state, game, L().struckPre);
+      // A clean surrender from an armed ship is a fear deed (§28.8).
+      if (fightingEnemies(b).some(function (x) { return (ship(state, b, x.id).guns || 0) > 0; })) fearDeed(state, game, "she struck without a fight");
       fightingEnemies(b).forEach(function (x) { x.out = "struck"; x.noFight = true; });
       return endBattle(state, game);
     }
@@ -8081,7 +8411,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
-    list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8), extra: dreadBonus(state) ? [{ label: "Dread", value: dreadBonus(state) }] : [] },
+    // Dread joins Intimidate through the meter modifiers now (§11.8.5).
+    list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8) },
       note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
     return list;
   }
@@ -8137,6 +8468,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (p.outcome === "clean") {
         say(state, game, L().duel.clean);
         game.duelsWon = (game.duelsWon || 0) + 1;
+        fearDeed(state, game, "you cut down her captain"); // killing a captain in a duel (§28.8)
         e.leaderless = true;
         if (strikeRoll(state, game, b, e, crewAdvantage(state, b, "flagship", e.id), "duel")) return afterBoardingOut(state, game);
       } else if (p.outcome === "partial") say(state, game, L().duel.partial);
@@ -8144,7 +8476,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     } else if (id === "demand") {
       // A clean demand shows only the surrender line (B40 of the M5 playtest).
       say(state, game, L().demand[p.outcome]);
-      if (p.outcome === "clean") { e.demanded = true; knockOut(state, game, b, e, "struck", true); return afterBoardingOut(state, game); }
+      if (p.outcome === "clean") { e.demanded = true; fearDeed(state, game, "they struck at your word"); knockOut(state, game, b, e, "struck", true); return afterBoardingOut(state, game); }
       e.refusedDemand = true; // the Quarter Asked Article's test (§22.7)
       if (p.outcome === "partial") shake(e, 1);
     }
@@ -8559,7 +8891,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (i === 0 && b.hunter) grp = G().sighting(state, game.waters, r, { kind: "hunter", flag: b.hunter });
     else if (b.force && i === 0) grp = G().sighting(state, game.waters, r, b.force);
     else if (r() < G().density(state, b.condition) || (i === b.n - 1 && !b.found)) grp = G().sighting(state, game.waters, r);
-    if (grp) { b.found += 1; game.sighting = grp; game.phase = grp.hunter ? "hunter" : "scout"; M().say(state, game, grp.hunter ? L().hunter : L().sail); }
+    if (grp) {
+      b.found += 1; game.sighting = grp; game.phase = grp.hunter ? "hunter" : "scout";
+      // A navy ship at Heat 50+, or a pirate at black -70, may attack first (§28.1, §28.4).
+      var first = PC.meters.attacksFirst(state, grp, r);
+      if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); }
+      else M().say(state, game, grp.hunter ? L().hunter : L().sail);
+    }
     else { game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]); }
   }
 
@@ -9221,6 +9559,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     };
     M().start(state, game, "node");
     M().say(state, game, "The weather: " + PC.weather.badge(o.condition) + ".");
+    var first = PC.meters.attacksFirst(state, grp, M().rand(state, game, "attack-first"));
+    if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); return game; }
     if (!grp.hunter && grp.ships[0].flag === "Pirate") {
       var sv = scoutView(state, game);
       if (sv && sv.ca <= 0) { game.phase = "hunter"; game.pirateFirst = true; M().say(state, game, "PLACEHOLDER: She's a pirate, and she likes her odds. She's coming for you."); return game; }
@@ -9581,6 +9921,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
+    // The meters (§28): Heat bleed, Standing's drift, Dread's decay.
+    var mt = PC.meters.seasonEnd(state);
+    out.lines = out.lines.concat(mt.lines);
+    out.chips = out.chips.concat(mt.chips);
     var wasWinter = seasonName(state) === "Winter";
     var yearEnd = wasWinter && state.time.year >= 1754 && !state.keepPlaying;
     if (yearEnd) {
@@ -9834,7 +10178,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       state.flags.earToGround = opts.type || "World State";
       chips.push({ icon: "rumor", text: "A rumor of your choosing at the start of Spring" });
     } else if (id === "courting") {
-      state.meters.standing[n.faction] = (state.meters.standing[n.faction] || 0) + 3;
+      PC.meters.addStanding(state, n.faction, 3);
       chips.push({ icon: "standing", text: (n.faction === "avalon" ? "Avalon" : "Frisian") + " Standing +3", ink: "good" });
     } else if (id === "gaming") {
       state.flags.winterTables = stamp(state);
@@ -9885,7 +10229,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var b = buyout(state, f), fee = tradeFee(state), cost = b + fee;
       var swap = !!ts;
       var due = swap ? Math.max(0, cost - paidBefore) : cost;
-      var lock = refuse ? "He won't deal with you" : ts && ts.node !== id ? "Your trade ship is enrolled at " + placeName(ts.node) + "; swap her there" : state.money.purse < due ? "Needs " + due + " gold in your purse" : null;
+      var gate = PC.meters.officialGate(state, id); // Wary +20%, barred at Hostile (§28.2)
+      fee = Math.round(fee * gate.mult); cost = b + fee; due = swap ? Math.max(0, cost - paidBefore) : cost;
+      var lock = !gate.ok ? gate.why : refuse ? "He won't deal with you" : ts && ts.node !== id ? "Your trade ship is enrolled at " + placeName(ts.node) + "; swap her there" : state.money.purse < due ? "Needs " + due + " gold in your purse" : null;
       if (!lock && swap && !(state.crew.count - (state.ship.crewMin || 5) >= (ts.ship.crewMin || 0))) lock = "Not enough hands to bring your old trade ship back";
       return { id: f.id, name: f.name || f.cls, cls: f.cls, cargo: f.cargo, dirty: !!f.dirty, buyout: b, fee: fee, cost: cost, due: due, swap: swap, income: tradeIncome(f, id), lock: lock };
     });
@@ -10835,9 +11181,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if ("wounded" in f) { var w = wound(state, f.wounded); if (w) chips.push({ icon: "officer", text: plural(w, "hand") + " hurt", ink: "bad" }); }
     if ("purse" in f) { state.money.purse = Math.max(0, state.money.purse + f.purse); chips.push({ icon: "gold", text: (f.purse > 0 ? "+" : "−") + Math.abs(f.purse) + " your purse", ink: f.purse > 0 ? "good" : "mid" }); }
     if ("crewGold" in f) { state.money.crew = Math.max(0, state.money.crew + f.crewGold); chips.push({ icon: "gold", text: (f.crewGold > 0 ? "+" : "−") + Math.abs(f.crewGold) + " crew gold", ink: f.crewGold > 0 ? "good" : "mid" }); }
-    if ("dread" in f) { state.meters.dread = clamp((state.meters.dread || 0) + f.dread, 0, 100); chips.push({ icon: "dread", text: "Dread +" + f.dread }); }
-    if ("heatZone" in f) { var fz = factionOfZone(v.zone); state.meters.heat[fz] = clamp((state.meters.heat[fz] || 0) + f.heatZone, 0, 100); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
-    if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; state.meters.heat[hf] = clamp((state.meters.heat[hf] || 0) + f.heatHere, 0, 100); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
+    if ("dread" in f) { PC.meters.addDread(state, f.dread); chips.push({ icon: "dread", text: "Dread +" + f.dread }); }
+    if ("heatZone" in f) { var fz = factionOfZone(v.zone); PC.meters.addHeat(state, fz, f.heatZone); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
+    if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; PC.meters.addHeat(state, hf, f.heatHere); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
     if ("pressure" in f) { state.crew.pressure = clamp((state.crew.pressure || 0) + f.pressure, 0, 5); chips.push({ icon: "pressure", text: f.pressure > 0 ? "The crew's grievances grow" : "The talk dies down", ink: f.pressure > 0 ? "bad" : "good" }); }
     if ("rumor" in f) {
       var weights = RUMOR_WEIGHTS[f.rumor] || RUMOR_WEIGHTS.C;
@@ -11111,7 +11457,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (delivered(state) >= D().DS_UNITS) {
         state.flags.nor_ds_done = true;
         PC.npcs.moveRung(state, "horace", 1);
-        state.meters.standing.avalon = Math.max(-100, Math.min(100, (state.meters.standing.avalon || 0) + D().DS_STANDING));
+        PC.meters.addStanding(state, "avalon", D().DS_STANDING);
         out.done = true;
         out.line = PC.data.nodes.norfolk.lines.drunkenSailors.done;
       } else out.line = PC.data.nodes.norfolk.lines.drunkenSailors.partial.replace("[number]", delivered(state));
@@ -11549,7 +11895,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Revolutionary", { edge: plus(["Petition", "Negotiate"], -1, { condition: "Official" }), note: "In Avalon ports only, once a faction-port condition exists." });
   add("Animal Friend", { note: "Pet prices -15% (§32.12)." });
   add("Brute", { edge: [{ type: "Intimidate", value: 1 }, { type: "Persuade", value: -1 }] });
-  add("Touched", { reroll: reroll(["Ghost Sense"]), note: "Dread floor +5." });
+  add("Touched", { dreadFloor: 5, reroll: reroll(["Ghost Sense"]), note: "Dread floor +5." });
   add("Haunted", { edge: plus(["Persuade"], -1) });
   add("Heathen", { edge: plus(["Persuade", "Petition"], -1, { condition: "Pious NPC" }) });
   add("Drunkard", { reroll: reroll(["Cast-Iron Stomach", "Cards & Dice", "Tavern Talk"]),
@@ -11573,7 +11919,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Failing Eyes", { edge: plus(["Keep Watch", "Appraise"], -1) });
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
-  add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Shark-Tooth Necklace", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
   // The minigames' tags and items (§14.5, §14.4, §32.12).
   // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
   add("Careened", { edge: plus(["Outrun"], 1) });
@@ -11584,12 +11930,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Loaded Dice", { note: "One reroll of the Cheat roll per Liar's Dice session (§18.3)." });
   add("Diver's Mask", { note: "+1 breath on a dive (§18.2)." });
   add("Diving Barrel", { note: "+2 breath on a dive (§18.2)." });
-  add("Velvet Buccaneer Coat", { edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Velvet Buccaneer Coat", { dreadFloor: 5, edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32)" });
   add("Tin Whistle", { note: "Morale floor +5 (§32.12)." });
   add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
   add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
   add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
-  add("Obsidian Amulet", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Obsidian Amulet", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
   add("Parisian Rapier", { edge: plus(["Swordsmanship"], 1, { condition: "Duel" }) }); // §32.8
   add("Abyssinian Scimitar", { edge: plus(["Swordsmanship"], 1, { condition: "Lead the Charge" }) }); // §32.8
   add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
@@ -11602,7 +11948,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Marsh Fever", { note: "Fever Flares fire more often and last two seasons (§11.9)." });
 
   // ---- Earned physical tags the prototype can already reach (§14.5) ----
-  add("One Eye", { edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
+  add("One Eye", { dreadFloor: 10, edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
 
   PC.data.modifiers = M;
 })();
@@ -12235,6 +12581,34 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     "Emeralds": { base: 600, kind: "precious" },
     "Bengali gems": { base: 800, kind: "precious" },
   };
+
+  // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
+  // the Tuning Table lists them. Rules in js/meters.js.
+  PC.data.meterRules = {
+    // Heat bleed a season (§28.6), by Standing with the faction: 40+, -39
+    // to 39, -40 or lower; a season with no offense, and one with.
+    BLEED: { high: { clean: 8, offense: 5 }, mid: { clean: 5, offense: 3 }, low: { clean: 3, offense: 1 } },
+    DISTRACTED_EXTRA: 3,          // the Distracted posture bleeds Frisian Heat 3 more (§8); Hunter stops it
+    TRUSTED_HEAT_MULT: 0.75,      // Heat gains at Standing 40+ (§28.1)
+    BETRAYAL_HEAT: 10,            // an offense at 40+: +10, and gains doubled for a year (§28.6)
+    DRIFT: 2, DRIFT_STOP: -9,     // negative Standing recovers +2 a season with no offense, up to -9 (§28.1)
+    DREAD_DECAY: 2,               // a season with no fear deed (§28.8)
+    FEAR_DEED_DREAD: 2, FEAR_DEED_BLACK: 1,
+    FLOOR_CAP: 40,                // the net Dread floor (§28.8)
+    OFFICER_FLOOR: { "Bloodthirsty": 5 },  // officer traits that lift the Dread floor (§25.3)
+    NAVY_FROM: 50,                // navy ships are never interested below Heat 50 (§28.4)
+    NAVY_ATTACK: { "Wanted": 0.15, "Hunted": 0.35, "Most Wanted": 0.60 },
+    PIRATE_ATTACK: 0.35,          // every pirate ship at black -70 or lower (§28.1)
+    POOL_STEP: 0.10,              // crew pools +10% a bonus step (§24.7)
+    WARY_OFFICIAL: 0.20,          // Wary pays +20% on holdings, homes, trade ships and laying up (§28.2)
+    lines: {
+      heatBand: "{faction} Heat cools to {band}.",
+      standingBand: "{faction} Standing mends to {band}.",
+      dreadBand: "Your reputation fades a little: Dread bonus now +{bonus}.",
+      navyAttacks: "PLACEHOLDER: She runs out her guns and turns toward you. A navy captain who knows your name doesn't wait to be asked.",
+      pirateAttacks: "PLACEHOLDER: She hoists the black and comes straight for you. Word of you has spread among the Brethren.",
+    },
+  };
 })();
 </script>
   <script>
@@ -12580,6 +12954,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     name: "Ocracoke",
     control: "No control",
     faction: "pirates",        // whose Standing sets fees and prices here
+    haven: true,               // a pirate haven: Dread sizes the crew pool (§24.7)
+    closedAt: "Enemy",         // black Standing -70: turned away (§28.1)
     leader: "twopenny",
     tier: "Very poor",
     prosperity: 10,            // start (§20.2)
@@ -18495,7 +18871,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function standingBand(v) {
     return v >= 70 ? "Honored" : v >= 40 ? "Trusted" : v >= 20 ? "Favored" : v >= -9 ? "Neutral" : v >= -39 ? "Wary" : v >= -69 ? "Hostile" : "Enemy";
   }
-  function heatBand(v) { return v >= 90 ? "Most Wanted" : v >= 70 ? "Hunted" : v >= 40 ? "Wanted" : v >= 20 ? "Noticed" : "Cold"; }
+  function heatBand(v) { return PC.meters.heatBand(v); }
 
   function standingBar(f, v) {
     var left = v >= 0 ? 50 : 50 + v / 2, width = Math.abs(v) / 2;
@@ -18513,7 +18889,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       return withNumbers ? bar.replace(standingBand(m.standing[f]) + "</span>", standingBand(m.standing[f]) + n(m.standing[f]) + "</span>") : bar;
     }).join("") +
       '<div class="h4">Dread &amp; Heat</div><div class="vbars">' +
-      vbar("Dread", m.dread, "pirates", withNumbers ? String(m.dread) : "") +
+      // Dread's bonus and floor beside its number (§11.8.5, §5.6).
+      vbar("Dread", m.dread, "pirates", (PC.meters.dreadBonus(state) ? "+" + PC.meters.dreadBonus(state) : "") + (withNumbers ? (PC.meters.dreadBonus(state) ? " · " : "") + m.dread + (PC.meters.dreadFloor(state) ? " (floor " + PC.meters.dreadFloor(state) + ")" : "") : "")) +
       vbar("Frisian Heat", m.heat.frisia || 0, "frisia", heatBand(m.heat.frisia || 0) + n(m.heat.frisia || 0)) +
       vbar("Avalon Heat", m.heat.avalon || 0, "avalon", heatBand(m.heat.avalon || 0) + n(m.heat.avalon || 0)) + "</div>";
   }
@@ -19582,7 +19959,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var c = N().docksRollCheck(state);
     if (!c.ok) return "";
     return opts([opt({ act: "docksroll", label: "Size up the hands (optional)",
-      check: PC.checks.assess(state, N().docksCheck(state), { conditions: ["Harbor", "Underworld"] }),
+      check: PC.checks.assess(state, N().docksCheck(state), { conditions: N().docksConditions(state) }),
       meta: "No action · once a visit, before you sign. Clean: a third of the hands you sign come a tier better. Setback: a third of the pool's Seasoned and Veteran hands are gone." })]);
   }
 
