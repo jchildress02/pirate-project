@@ -83,6 +83,16 @@
     s = s.replace(/\[Home City\]/g, state.captain.homeCity || "your home");
     // [Loss Target] by loss variant (S17 appendix, the mentor beat).
     s = s.replace(/\[Loss Target\]/g, LOSS_TARGET[state.captain.loss] || "what you lost");
+    // [Quartermaster]: the officer's first name, or the Acting Quartermaster.
+    if (s.indexOf("[Quartermaster]") >= 0) {
+      var q = PC.officers && PC.officers.quartermaster ? PC.officers.quartermaster(state) : null;
+      s = s.replace(/\[Quartermaster\]/g, q ? (q.first || q.full) : "your Quartermaster");
+    }
+    // A node's computed values (js/norfolk.js): {port_fee}, {dirty_good}, {waters}.
+    s = s.replace(/\{([a-z_0-9]+)\}/g, function (whole, k) {
+      var f = PC.text.vars && PC.text.vars[k];
+      return f ? String(f(state)) : whole;
+    });
     return s;
   }
 
@@ -92,5 +102,5 @@
     return m || [];
   }
 
-  PC.text = { render: render, unresolved: unresolved, FORMS: FORMS };
+  PC.text = { render: render, unresolved: unresolved, FORMS: FORMS, vars: (PC.text && PC.text.vars) || {} };
 })();

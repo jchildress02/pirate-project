@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -2462,6 +2462,7 @@ console.log("Milestone 7, PR 2: the map, voyages, the season loop and Norfolk (�
 function m7(seed) {
   var s = huntReady(seed || "m7");
   s.money.crew = 2000; s.provisions = 30;
+  s.seen.nor_fv1 = true; // Norfolk's first-arrival inspection has its own tests (PR 5)
   return s;
 }
 
@@ -2954,6 +2955,183 @@ test("the Vote comes at the next voyage event after the post falls vacant; the c
     PC.voyageEvents.next(s);
     eq(s.location.node, "norfolk"); ok(!PC.officers.votePending(s));
   });
+});
+
+console.log("Milestone 7, PR 5: Norfolk's first visit, its errands and the barkeep favors (§17.4)");
+
+function pick(s, re, dice) {
+  var sc = PC.data.scenes[s.current.sceneId];
+  var i = sc.choices.findIndex(function (c, k) { var v = PC.scenes.viewScene(s).choices.filter(function (x) { return x.index === k; })[0]; return v && re.test(v.label); });
+  if (i < 0) throw new Error("no choice " + re + " in " + s.current.sceneId);
+  var go = function () { PC.scenes.choose(s, i); PC.scenes.commit(s, "crew"); };
+  if (dice) withDice(dice, go); else go();
+}
+function toNorfolk(seed) {
+  var s = m7(seed); delete s.seen.nor_fv1;
+  PC.world.sail(s, "norfolk");
+  return s;
+}
+function popupGo(s) { s.location.popup = null; PC.scenes.enterScene(s, PC.node.nextQueued(s)); }
+
+test("the first arrival holds the fee for the inspection scene; a clean hold goes through", function () {
+  var s = toNorfolk("nf1"), crew = s.money.crew;
+  ok(s.location.popup && s.location.popup.ok === "popupscene", "the voyage popup leads into the scene");
+  eq(s.money.crew, crew, "no fee yet");
+  popupGo(s);
+  eq(s.current.sceneId, "nor_fv1");
+  ok(/The fee to dock here is 75 gold/.test(PC.scenes.viewScene(s).setup));
+  pick(s, /^My name is Captain Test/);
+  eq(crew - s.money.crew, 75); ok(s.flags.nor_first_inspection_done);
+  pick(s, /^By all means/);
+  eq(s.current.sceneId, "nor_fv1_hold");
+  ok(/Everything appears in order/.test(PC.scenes.viewScene(s).setup));
+  pick(s, /^Continue/);
+  eq(s.current.screen, "node");
+});
+
+test("dirty cargo: the crate names the largest stack; Take it, then confiscates everything dirty, Heat +5, never jail", function () {
+  var s = toNorfolk("nf2");
+  PC.crew.addGood(s, "Tobacco", 12, true); PC.crew.addGood(s, "Sugar", 4, true); PC.crew.addGood(s, "Sugar", 3, false);
+  popupGo(s); pick(s, /^Don't worry/); pick(s, /^By all means/);
+  ok(/a crate of tobacco/.test(PC.scenes.viewScene(s).setup));
+  var heat = s.meters.heat.avalon;
+  pick(s, /^Take it, then/);
+  eq((s.cargo.goods.Tobacco || {}).dirty || 0, 0); eq(s.cargo.goods.Sugar.dirty || 0, 0); eq(s.cargo.goods.Sugar.clean, 3);
+  eq(s.meters.heat.avalon, heat + 5); ok(!s.gameOver);
+});
+
+test("the bribes: 4 × the port fee before the search, half the goods' fence value after; a partial doubles", function () {
+  var s = toNorfolk("nf3");
+  PC.crew.addGood(s, "Tobacco", 10, true);
+  eq(PC.norfolk.bribeBefore(s), 300);
+  var fence = Math.round(10 * PC.node.salePrice(s, "norfolk", "Tobacco") * PC.data.economy.FENCE_RATE);
+  eq(PC.norfolk.bribeFound(s), Math.max(20, Math.round(fence / 2)));
+  popupGo(s); pick(s, /^My name/);
+  var crew = s.money.crew;
+  pick(s, /^I'm just now realizing/, [3, 4]); // partial: "Double."
+  eq(s.current.sceneId, "nor_fv1_double_before");
+  pick(s, /^Deal\./);
+  eq(crew - s.money.crew, 600); eq(s.cargo.goods.Tobacco.dirty, 10, "the goods stay aboard");
+});
+
+test("a setback with goods found is jail, and the story ends on the end screen", function () {
+  var s = toNorfolk("nf4");
+  PC.crew.addGood(s, "Tobacco", 10, true);
+  popupGo(s); pick(s, /^My name/); pick(s, /^By all means/);
+  pick(s, /^Ah, that must be a mistake/, [1, 1]);
+  eq(s.current.sceneId, "nor_fv1_jail");
+  pick(s, /^Continue/);
+  eq(s.current.screen, "end"); eq(s.gameOver.line, "jailed"); ok(s.flags.nor_jailed);
+  eq((s.cargo.goods.Tobacco || {}).dirty || 0, 0);
+});
+
+test("the profession options: the Smuggler's partial risks only the cheapest stack; the Merchant haggles Double to ×1.5", function () {
+  var s = toNorfolk("nf5"); s.captain.profession = "Smuggler";
+  PC.crew.addGood(s, "Tobacco", 10, true); PC.crew.addGood(s, "French brandy", 2, true);
+  popupGo(s); pick(s, /^My name/);
+  pick(s, /^I'd be happy to help/, [3, 4]);
+  eq(PC.norfolk.atRisk(s).length, 1);
+  var cheap = PC.node.salePrice(s, "norfolk", "Tobacco") < PC.node.salePrice(s, "norfolk", "French brandy") ? "Tobacco" : "French brandy";
+  eq(PC.norfolk.atRisk(s)[0].what, cheap);
+  var m = toNorfolk("nf6"); m.captain.profession = "Merchant";
+  popupGo(m); pick(m, /^My name/);
+  pick(m, /^I'm just now realizing/, [3, 4]);
+  var crew = m.money.crew;
+  pick(m, /^Surely we can come/, [6, 6]);
+  eq(crew - m.money.crew, 450);
+});
+
+test("the hometown line and the Quartermaster's bark by warmth", function () {
+  var s = toNorfolk("nf7"); s.captain.homeCity = "Charleston";
+  popupGo(s);
+  var t = PC.scenes.viewScene(s).setup;
+  ok(/A year ago, this fleet might have saved Charleston\./.test(t), "the hometown line");
+  ok(/remarks, awestruck|says of the flagship|cautions/.test(t), "one bark");
+});
+
+test("Horace's beat: the light, the room, Horace warms once; Godfrey joins for 1,000 at the bar", function () {
+  var s = m7("nf8"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  var sc = PC.node.enter(s, "tavern");
+  eq(sc, "nor_ht_1"); PC.scenes.enterScene(s, sc);
+  var r0 = PC.npcs.rung(s, "horace");
+  pick(s, /^Uh, sure/); pick(s, /^I know the feeling/); pick(s, /^I know it doesn't mean much/);
+  eq(PC.npcs.rung(s, "horace"), r0 + 1, "one rung, once");
+  pick(s, /^That sounds excellent/); pick(s, /^Ale, please/);
+  eq(s.current.sceneId, "nor_ht_room"); pick(s, /^Continue/);
+  ok(s.flags.horace_met && s.flags.saw_howe_advert);
+  PC.scenes.enterScene(s, "nor_godfrey_talk"); pick(s, /^You were a navy gunner/);
+  eq(s.current.sceneId, "nor_godfrey_pay");
+  var crew = s.money.crew;
+  pick(s, /^Sure am/);
+  var g = PC.officers.aboard(s).filter(function (o) { return o.id === "godfrey"; })[0];
+  ok(g && g.type === "Gunner"); eq(crew - s.money.crew, 1000); ok(s.flags.godfrey_hired);
+});
+
+test("walking away from Horace: the re-entry plays next time; a declined Godfrey keeps a Tavern seat", function () {
+  var s = m7("nf9"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  PC.scenes.enterScene(s, PC.node.enter(s, "tavern"));
+  pick(s, /^I don't have time/);
+  PC.node.leave(s);
+  eq(PC.node.enter(s, "tavern"), "nor_ht_reentry");
+  s.flags.godfrey_met = true; s.money.crew = 500;
+  ok(PC.officers.candidates(s).some(function (c) { return c.id === "godfrey"; }), "his seat");
+  ok(/You payin' this time\?/.test(PC.officers.hiringText(s, PC.officers.candidates(s).filter(function (c) { return c.id === "godfrey"; })[0])));
+});
+
+test("Drunken Sailors: 30 units, ×1.5 for clean during the errand; done: Horace +1, Avalon +5, then he buys at ×1.25", function () {
+  var s = m7("nf10"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  s.flags.horace_met = true; s.flags.nor_drunken_sailors = true;
+  var price = PC.node.salePrice(s, "norfolk", "Scotch whisky");
+  PC.crew.addGood(s, "Scotch whisky", 10, false);
+  var crew = s.money.crew, r = PC.norfolk.sellToHorace(s);
+  eq(r.units, 10); eq(s.money.crew - crew, Math.round(10 * price * 1.5)); ok(/10 of thirty/.test(r.line));
+  PC.crew.addGood(s, "Scotch whisky", 25, false);
+  var rung = PC.npcs.rung(s, "horace"), st = s.meters.standing.avalon;
+  r = PC.norfolk.sellToHorace(s);
+  eq(r.units, 20); ok(r.done); ok(s.flags.nor_ds_done);
+  eq(PC.npcs.rung(s, "horace"), rung + 1); eq(s.meters.standing.avalon, st + 5);
+  eq(s.cargo.goods["Scotch whisky"].clean, 5);
+  crew = s.money.crew; r = PC.norfolk.sellToHorace(s);
+  eq(s.money.crew - crew, Math.round(5 * price * 1.25));
+});
+
+test("The Apprentices: cover for them (clean) earns a free repair; a setback costs the action and the season", function () {
+  var s = m7("nf11"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  PC.node.enter(s, "docks"); ok(s.npcs.christoph.met);
+  PC.scenes.enterScene(s, "nor_appr");
+  var ap = s.ap.left, r0 = PC.npcs.rung(s, "christoph");
+  pick(s, /^Go easy on them/, [6, 6]);
+  eq(s.ap.left, ap - 1); eq(PC.npcs.rung(s, "christoph"), r0 + 1); ok(s.flags.nor_free_repair && s.flags.nor_appr_done);
+  s.ship.hull = s.ship.hullMax - 2; var crew = s.money.crew;
+  var rep = PC.node.repair(s, 2);
+  ok(rep.free); eq(s.money.crew, crew); ok(!s.flags.nor_free_repair);
+  var t = m7("nf12"); PC.world.sail(t, "norfolk"); t.location.popup = null; PC.node.enter(t, "docks");
+  PC.scenes.enterScene(t, "nor_appr"); pick(t, /^Let me take a look/, [1, 1]);
+  eq(t.flags.nor_appr_failed, PC.scenes.seasonStamp(t)); ok(!t.flags.nor_appr_done);
+});
+
+test("barkeep favors: one a season at each Tavern, by seed; clean moves the keeper up a rung for an action", function () {
+  var s = m7("nf13"); PC.world.sail(s, "norfolk"); s.location.popup = null; s.flags.horace_met = true;
+  PC.node.enter(s, "tavern");
+  var f = PC.norfolk.favorOffer(s);
+  ok(f.ok); ok(/^fav_norfolk_[ab]_(fight|tab|bar)$/.test(f.scene)); eq(PC.norfolk.favorScene(s), f.scene);
+  PC.scenes.enterScene(s, f.scene);
+  var ap = s.ap.left, r0 = PC.npcs.rung(s, "horace");
+  var v = PC.scenes.viewScene(s);
+  ok(/Hey, you\. Yes, you\./.test(v.setup));
+  withDice([6, 6], function () { PC.scenes.choose(s, v.choices[0].index); PC.scenes.commit(s); });
+  eq(PC.npcs.rung(s, "horace"), r0 + 1); eq(s.ap.left, ap - 1);
+  ok(!PC.norfolk.favorOffer(s).ok, "once a season");
+  var o = huntReady("nf14"); o.location.place = "tavern";
+  ok(/^fav_ocracoke_o_/.test(PC.norfolk.favorScene(o)));
+});
+
+test("Variant C: Horace's wanted bill is lead 3, once", function () {
+  var s = m7("nf15"); s.captain.loss = "C"; PC.world.sail(s, "norfolk");
+  ok(PC.norfolk.variantCActive(s));
+  ok(PC.quests.addLead(s, "what_was_lost", "gregoire_bill"));
+  ok(PC.quests.journal(s).some(function (q) { return q.entries.some(function (e) { return /Gregoire LeGardier/.test(e); }); }));
+  ok(/Gregoire LeGardier/.test(PC.text.render(PC.data.nodes.norfolk.lines.horaceAsk.billReply, s)) && !/\{waters\}/.test(PC.text.render(PC.data.nodes.norfolk.lines.horaceAsk.billReply, s)));
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

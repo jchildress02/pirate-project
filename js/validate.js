@@ -11,7 +11,7 @@
 
   var KINDS = ["check", "choice", "beat"];
   var EFFECT_KEYS = ["gold", "provisions", "treasure", "hull", "morale", "pressure", "dread", "standing", "heat",
-    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace", "minigame"];
+    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace", "minigame", "hook"];
   var FACTIONS = ["frisia", "avalon", "pirates"];
 
   function validate(sampleState) {
@@ -25,7 +25,7 @@
       (Array.isArray(exit) ? exit : [exit]).forEach(function (x) {
         var to = typeof x === "string" ? x : x.to;
         if (typeof x !== "string") checkCond(where + " exit", x.when);
-        if (to !== "hub" && !d.scenes[to]) err(where, "exit goes to unknown scene '" + to + "'");
+        if (to !== "hub" && to !== "end" && !d.scenes[to]) err(where, "exit goes to unknown scene '" + to + "'");
       });
     }
 
@@ -58,6 +58,7 @@
         if (e.join && !(d.namedOfficers || {})[e.join]) err(where, "unknown Named officer " + e.join);
         if (e.lead && !(((d.quests || {})[e.lead.quest] || {}).leads || {})[e.lead.id]) err(where, "unknown lead " + JSON.stringify(e.lead));
         if (e.dies && !d.npcs[e.dies]) err(where, "unknown NPC " + e.dies);
+        if (e.hook && !(PC.sceneFns && PC.sceneFns.hasHook(e.hook))) err(where, "unknown scene hook " + e.hook);
         if (e.when) checkCond(where + " effect", e.when);
       });
     }
@@ -73,7 +74,7 @@
       if (s.id !== id) err(w, "id field doesn't match its key");
       if (/[^a-z0-9_]/.test(id)) err(w, "IDs are plain lowercase ASCII with underscores (§33.1.3)");
       if (KINDS.indexOf(s.kind) < 0) err(w, "kind must be check, choice or beat");
-      if (s.repeat && ["once", "season"].indexOf(s.repeat) < 0) err(w, "repeat must be once or season");
+      if (s.repeat && ["once", "season", "always"].indexOf(s.repeat) < 0) err(w, "repeat must be once, season or always");
       checkCond(w, s.firesWhen);
       checkText(w + " setup", s.setup);
       (s.variants || []).forEach(function (v, i) { checkCond(w + " variant " + i, v.when); checkText(w + " variant " + i, v.line); });

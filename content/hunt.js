@@ -259,6 +259,10 @@
     gameOver: {
       captured: "PLACEHOLDER: Irons, a dark hold and a long voyage to a gallows or a prison hulk. Your story ends here, for now.",
       died: "PLACEHOLDER: The sea closes over you. Your story ends here.",
+      // Milestone 7: the Norfolk cells (until §43, Milestone 8) and the sea (§44.7).
+      jailed: "PLACEHOLDER: The cell door slams shut behind you. Imprisonment comes with Milestone 8; until then, your story ends here.",
+      drowned: "PLACEHOLDER: The sea takes your ship, and then it takes you. Your story ends here.",
+      shipwrecked: "PLACEHOLDER: You wash ashore with nothing but the clothes on your back. A captain with no ship comes in a later milestone; for now, your story ends here.",
     },
     // The Quartermaster's advice (§24.14): {qm} is his first name.
     advice: {

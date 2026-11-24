@@ -56,6 +56,9 @@
     if (cond.minYear) return state.time.year >= cond.minYear;
     if (cond.maxYear) return state.time.year <= cond.maxYear;
     if (cond.node) return !!(state.location && state.location.node === cond.node);
+    if (cond.profession) return c.profession === cond.profession;
+    // A node's own test, by name (js/norfolk.js): { fn: "dirtyAtRisk" }, { fn: "afford:bribe_before:2" }.
+    if (cond.fn) { if (!PC.sceneFns) throw new Error("No scene functions loaded"); return !!PC.sceneFns.cond(state, cond.fn); }
     throw new Error("Unknown condition: " + JSON.stringify(cond));
   }
 
@@ -63,7 +66,7 @@
 
   function canEnter(state, id) {
     var s = sceneById(id);
-    if (s.repeat !== "season" && state.seen[id]) return { ok: false, why: "Already done" };
+    if (s.repeat !== "season" && s.repeat !== "always" && state.seen[id]) return { ok: false, why: "Already done" };
     if (s.repeat === "season" && state.seen[id] === seasonStamp(state)) return { ok: false, why: "Done this season" };
     if (!test(state, s.firesWhen)) return { ok: false, why: "Not available" };
     if ((s.ap || 0) > state.ap.left) return { ok: false, why: "Not enough time this season" };
@@ -107,6 +110,7 @@
   // "hub" means back to where the captain is: the node's menus (and any
   // scene queued to fire there next, §17.2), or the engine's test harbor.
   function goTo(state, exit) {
+    if (exit === "end") return PC.summary.end(state); // the story ends here (jail, until §43; Milestone 7)
     if (!exit || exit === "hub") {
       if (state.location && state.location.node) {
         var next = PC.node ? PC.node.nextQueued(state) : null;
@@ -372,7 +376,7 @@
     }
     if ("join" in e) { var jn = PC.data.npcs[e.join]; return (jn ? jn.first + " " + jn.last : e.join) + " joins your officers"; }
     if ("lead" in e) return "Lead recorded in your journal";
-    if ("dies" in e || "seasonFlag" in e || "meet" in e) return null;
+    if ("dies" in e || "seasonFlag" in e || "meet" in e || "hook" in e) return null;
     if ("tag" in e) return e.tell === false ? null : (e.remove ? "Lost tag: " : "New tag: ") + e.tag + (e.untilSeasonEnd ? " (until the end of the season)" : "");
     if ("item" in e) return "Gained: " + e.item;
     if ("ap" in e) return "Time " + signed(e.ap);
@@ -387,6 +391,7 @@
   var INKS = { frisia: "frisia", avalon: "avalon", pirates: "pirates" };
   var FACTION_NAME = { frisia: "Frisia", avalon: "Avalon", pirates: "Pirates" };
   function effectChip(state, e) {
+    if ("hook" in e) return PC.sceneFns ? PC.sceneFns.chip(state, e) : null;
     if ("gold" in e) return { icon: "gold", text: (e.gold > 0 ? "+" : "−") + Math.abs(e.gold) + " gold" + (e.pot === "purse" ? " · your purse" : e.pot === "crew" ? " · crew gold" : ""), ink: "mid" };
     if ("provisions" in e) return { icon: "prov", text: "Provisions " + signed(e.provisions) };
     if ("treasure" in e) return { icon: "treasure", text: signed(e.treasure) + " " + (e.dirty ? "dirty" : "clean") + " treasure", ink: "mid" };
@@ -414,6 +419,9 @@
   }
 
   function applyEffect(state, e, pot) {
+    // A node's own effect, by name (js/norfolk.js): the port fee, a bribe,
+    // confiscation, an officer joining.
+    if ("hook" in e) return PC.sceneFns.apply(state, e);
     if ("gold" in e) {
       var p = e.pot && e.pot !== "prompt" ? e.pot : (pot || "crew");
       state.money[p] = (state.money[p] || 0) + e.gold;
@@ -490,8 +498,30 @@
     goTo(state, "hub");
   }
 
+  // ---- A node's own tests, effects and values (js/norfolk.js) -----------------
+  // Registered by name so scenes stay data: { fn: "afford:bribe_before:2" }
+  // (the name, then its arguments) and { hook: "nor_pay", what, mult }.
+  var FNS = { conds: {}, hooks: {} };
+  PC.sceneFns = {
+    addCond: function (name, f) { FNS.conds[name] = f; },
+    addHook: function (name, h) { FNS.hooks[name] = h; },
+    hasHook: function (name) { return !!FNS.hooks[name]; },
+    cond: function (state, spec) {
+      var parts = String(spec).split(":"), f = FNS.conds[parts[0]];
+      if (!f) throw new Error("Unknown scene test: " + parts[0]);
+      return f.apply(null, [state].concat(parts.slice(1)));
+    },
+    apply: function (state, e) {
+      var h = FNS.hooks[e.hook];
+      if (!h) throw new Error("Unknown scene hook: " + e.hook);
+      return h.apply(state, e) || null;
+    },
+    chip: function (state, e) { var h = FNS.hooks[e.hook]; return h && h.chip ? h.chip(state, e) : null; },
+  };
+
   PC.scenes = {
     test: test,
+    seasonStamp: seasonStamp,
     textOf: textOf,
     resolveExit: resolveExit,
     sceneById: sceneById,
