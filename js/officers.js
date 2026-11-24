@@ -120,17 +120,22 @@
     }
     var list = s.candidates.filter(function (c) { return !c.hired; });
     // Davey's permanent seat (§17.2): he takes the second chair while he waits.
-    if (state.flags.davey_at_tavern && !holdingId(state, "davey")) {
+    if (state.flags.davey_at_tavern && !holdingId(state, "davey") && id === "ocracoke") {
       list = list.slice(0, 1).concat([daveyCandidate(state)]);
+    }
+    // Godfrey's seat at Norfolk once met in Horace's beat (records §7).
+    if (id === "norfolk" && state.flags.godfrey_met && !state.flags.godfrey_hired && !holdingId(state, "godfrey")) {
+      list = list.slice(0, 1).concat([namedCandidate(state, "godfrey")]);
     }
     return list;
   }
 
   function holdingId(state, id) { return aboard(state).some(function (o) { return o.id === id; }); }
 
-  function daveyCandidate(state) {
-    var d = PC.data.namedOfficers.davey;
-    return { id: "davey", named: true, first: d.first, last: d.last, full: d.first + " " + d.last, gender: d.gender, age: d.age,
+  function daveyCandidate(state) { return namedCandidate(state, "davey"); }
+  function namedCandidate(state, id) {
+    var d = PC.data.namedOfficers[id];
+    return { id: id, named: true, first: d.first, last: d.last, full: d.first + " " + d.last, gender: d.gender, age: d.age,
       type: namedType(state, d), voice: d.voice, secondary: d.secondary, third: d.third };
   }
 
@@ -149,7 +154,7 @@
   // The hiring scene (§25.7): the stem, the secondary trait's hint, then the
   // voice trait's intro. Davey has his own intro.
   function hiringText(state, c) {
-    if (c.id === "davey") return PC.data.namedOfficers.davey.hiringIntro;
+    if (c.named && PC.data.namedOfficers[c.id]) return PC.data.namedOfficers[c.id].hiringIntro;
     var stemAndHint = L().stem.replace("[Name]", c.first) + ", " + L().hints[c.secondary];
     if (c.gender === "f") stemAndHint = forWoman(stemAndHint);
     return stemAndHint + "\n\n" + PC.text.render(L().intros[c.voice] || "", state);
@@ -311,14 +316,17 @@
   }
 
   function makeOfficer(state, c) {
-    if (c.id === "davey") {
-      var d = PC.data.namedOfficers.davey;
-      return { id: "davey", named: true, first: d.first, last: d.last, gender: d.gender, age: d.age,
+    if (c.named && PC.data.namedOfficers[c.id]) {
+      var d = PC.data.namedOfficers[c.id];
+      var no = { id: c.id, named: true, first: d.first, last: d.last, gender: d.gender, age: d.age,
         type: namedType(state, d), level: 1, voice: d.voice, secondary: d.secondary, third: d.third, unique: d.unique,
         likes: d.likes.slice(), dislikes: d.dislikes.slice(), warmth: d.warmth,
         drive: d.drive, fear: d.fear, rung: PC.npcs.RUNG_VALUE[d.startRung], approval: 0,
         aboard: "flagship", wounded: false, sacrificeUsed: false,
         joined: { year: state.time.year, season: state.time.season } };
+      // A start rung of "leaning" is Neutral shifted by the captain's leaning (§25.5; Godfrey).
+      if (d.startRung === "leaning") no.rung = leaning(state, no);
+      return no;
     }
     var o = JSON.parse(JSON.stringify(c));
     delete o.hired;
@@ -339,6 +347,7 @@
     }
     state.officers.push(o);
     if (o.id === "davey") state.flags.davey_at_tavern = false;
+    if (o.id === "godfrey") state.flags.godfrey_hired = true;
     var first = !state.flags.first_officer_hired;
     state.flags.first_officer_hired = true;
     out.mentorLine = first && mentor(state) ? L().mentorFirstHire : null; // §25.8 milestone
@@ -348,9 +357,10 @@
 
   // The Named officer joins through a scene (Restless & Ruined).
   function joinNamed(state, id) {
-    if (id !== "davey") throw new Error("Unknown Named officer: " + id);
-    var r = join(state, daveyCandidate(state));
-    PC.state.addLog(state, "Davey Dell joins as your " + r.officer.type + ".");
+    if (!PC.data.namedOfficers[id]) throw new Error("Unknown Named officer: " + id);
+    var r = join(state, namedCandidate(state, id));
+    if (id === "godfrey") state.flags.godfrey_hired = true;
+    PC.state.addLog(state, r.officer.first + " " + r.officer.last + " joins as your " + r.officer.type + ".");
     return r;
   }
 
@@ -363,7 +373,7 @@
     if (ap) { PC.crew.spendAP(state, ap); PC.node.tavernVisit(state); } // a season with AP spent here (§30.4)
     state.officerVisit = state.location.visit;
     state.money.crew -= FEE;
-    if (c.id !== "davey") c.hired = true;
+    if (!c.named) c.hired = true;
     var r = join(state, c);
     PC.node.tavernActionDone(state);
     PC.state.addLog(state, "Hired " + (r.officer.first + " " + (r.officer.last || "")).trim() + " (" + r.officer.type + ") for " + FEE + " crew gold" + (ap ? " and an action" : "") + ".");

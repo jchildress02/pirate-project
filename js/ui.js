@@ -331,7 +331,7 @@
     // The year's recap (Milestone 7; its words are the author's to write, PH7).
     if (v.how === "year" && v.year) rows.unshift(["This year", "Prizes taken " + v.year.prizes + " · your purse " + (v.year.purse >= 0 ? "+" : "−") + gold(Math.abs(v.year.purse)) +
       " · " + (v.year.split ? "the crew split in Winter" : "no split") + (v.year.tradeShip ? " · trade ship: the " + esc(v.year.tradeShip) : "") + " · ports: " + esc(v.year.visited.join(", "))]);
-    var how = v.how === "stopped" || v.how === "year" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[v.how === "died" ? "died" : "captured"]) + "</div>";
+    var how = v.how === "stopped" || v.how === "year" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[(state.gameOver && PC.data.huntLines.gameOver[state.gameOver.line]) ? state.gameOver.line : v.how === "died" ? "died" : "captured"]) + "</div>";
     root.innerHTML = frame('<div class="endscreen" style="padding:18px 16px 32px;max-width:720px;margin:0 auto">' + '<p class="sc" style="margin:0">' + esc(v.season) + "</p>" +
       '<h2 class="title">' + esc(head) + "</h2>" + how +
       '<div class="person" style="margin:12px 0">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:96px;height:auto">' : sil(72, 108)) +
@@ -1024,7 +1024,39 @@
         return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
       }).join("") + "</div></div>";
     }
-    return html + "</div>" + DIVIDER + officersBlock();
+    return html + "</div>" + nodeExtras("tavern") + DIVIDER + officersBlock();
+  }
+
+  // Norfolk's own entries and the barkeep favor (Milestone 7, PR 5; records
+  // §7 and §10, §16.6). The rules are in js/norfolk.js.
+  function nodeExtras(place) {
+    var id = N().here(state), f = state.flags, list = [];
+    if (place === "tavern") {
+      var fav = PC.norfolk.favorOffer(state);
+      if (fav) list.push(opt({ act: "enter", attrs: 'data-scene="' + esc(fav.scene) + '"', label: "A favor for " + esc(PC.npcs.get(state, who("keeper")).first),
+        meta: "Once a season · no action to hear him out, 1 to do it. Clean: he thinks better of you. Partial: the same, at a cost.", lock: fav.ok ? null : fav.why }));
+      if (id === "norfolk" && f.horace_met) {
+        var NL = N().nodeData(id).lines;
+        if (!f.nor_drunken_sailors) list.push(opt({ act: "dsask", label: f.asked_horace_help ? NL.drunkenSailors.askAgain : NL.drunkenSailors.ask, meta: "No action" }));
+        var have = PC.norfolk.liquorAboard(state).reduce(function (a, x) { return a + x.n; }, 0);
+        if (f.nor_drunken_sailors) list.push(opt({ act: "horacesell", label: PC.norfolk.dsOpen(state) ? "Bring Horace your good liquor" : "Sell Horace good liquor",
+          meta: (PC.norfolk.dsOpen(state) ? "Drunken Sailors: " + PC.norfolk.delivered(state) + " of 30 delivered. He pays half again Norfolk's price for clean liquor, the plain price for dirty." :
+            "A quarter over Norfolk's price for clean liquor, the plain price for dirty.") + " No action · " + plural(have, "unit") + " aboard" + (PC.norfolk.pendragonOpen(state) ? " (no wine)" : "") + ".",
+          lock: have ? null : "No good liquor aboard" }));
+        list.push(opt({ act: "horaceask", attrs: 'data-q="advert"', label: NL.horaceAsk.advert, meta: "No action" }));
+        if (PC.norfolk.variantCActive(state) && !f.gregoire_bill_lead) list.push(opt({ act: "horaceask", attrs: 'data-q="bill"', label: NL.horaceAsk.bill, meta: "No action" }));
+        if (!f.godfrey_hired && !PC.officers.aboard(state).some(function (o) { return o.id === "godfrey"; })) {
+          list.push(opt({ act: "enter", attrs: 'data-scene="' + (f.godfrey_met ? "nor_godfrey_pay" : "nor_godfrey_talk") + '"', label: f.godfrey_met ? NL.horaceAsk.godfreyAgain : NL.horaceAsk.godfrey, meta: "No action" }));
+        }
+      }
+    }
+    if (place === "docks" && id === "norfolk" && (state.npcs.christoph || {}).met && !f.nor_appr_done) {
+      var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
+      list.push(opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
+        meta: "The Apprentices · 1 action to help", lock: failed ? "Christoph wants you away from his ship until next season" : state.ap.left < 1 ? "No actions left this season" : null }));
+    }
+    if (!list.length) return "";
+    return DIVIDER + '<div class="block"><div class="h4">' + (place === "tavern" ? "At the bar" : "Around the yard") + "</div>" + opts(list) + "</div>";
   }
 
   // Officer recruitment (§25.7): two seats a season.
@@ -1091,6 +1123,7 @@
         html += '<div class="buyrow">' + qstep("q-repair", fix, fix) + '<button class="secondary" data-act="repair" data-for="q-repair">Repair</button> ' +
           totalSlot(function () { var n = val("q-repair"); return n + " points · " + gold(N().repairCost(state, n)) + " gold" + (N().repairTakesAP(state, n) ? " · 1 action" : ""); }) + "</div>" +
           '<div class="actions" style="margin-top:8px"><button class="secondary" data-act="repair" data-all="1"' + (N().repairTakesAP(state, missing) ? ' data-cost-ap="1"' : "") + ">Repair all · " + gold(N().repairCost(state, missing)) + " gold" + (N().repairTakesAP(state, missing) ? " · 1 action" : "") + "</button></div>" +
+          (state.flags.nor_free_repair && N().here(state) === "norfolk" ? '<p class="note">Christoph owes you one repair: your next one here is free.</p>' : "") +
           '<p class="note">' + gold(per) + " gold a point. A repair of " + Math.ceil(0.25 * sh.hullMax) + " points or more takes an action." + (sh.rigging === "frayed" ? " Any repair fixes the frayed rigging." : "") + "</p>";
       } else html += '<p class="note">Nothing to fix.</p>';
       html += "</div>";
@@ -1172,7 +1205,7 @@
             '<button class="secondary" data-act="payoff" data-tier="' + t + '" data-for="q-off-' + t + '">Put ashore</button></div></td></tr>';
         }).join("") + "</table></details>";
     }
-    return html + "</div>";
+    return html + "</div>" + nodeExtras("docks");
   }
 
   // ---- Optional rolls (§41.1): marked optional, every outcome stated ----
@@ -2784,6 +2817,34 @@
     },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship:stores", null, "The crew drink to your health.", null, null, { chips: [moraleChip(m)] }); },
     "closepopup": function () { state.location.popup = null; },
+    "popupscene": function () {
+      state.location.popup = null;
+      var nx = N().nextQueued(state);
+      if (nx) PC.scenes.enterScene(state, nx);
+    },
+    "dsask": function () {
+      var id = who("keeper"), D = N().nodeData("norfolk").lines.drunkenSailors;
+      var again = state.flags.asked_horace_help;
+      state.flags.nor_drunken_sailors = true;
+      PC.state.addLog(state, "Journal: Drunken Sailors. " + D.objective);
+      state.journalDot = true;
+      say(id, firstName(id), again ? D.replyAgain : D.reply, null, null, { ask: again ? D.askAgain : D.ask });
+    },
+    "horacesell": function () {
+      var id = who("keeper"), HL = N().nodeData("norfolk").lines.horaceLiquor;
+      var r = PC.norfolk.sellToHorace(state);
+      say(id, firstName(id), r.line, null, null, { ask: HL.open, chips: r.gold ? [{ icon: "gold", text: "+" + gold(r.gold) + " crew gold for " + plural(r.units, "unit") }] : null });
+    },
+    "horaceask": function (el) {
+      var id = who("keeper"), A = N().nodeData("norfolk").lines.horaceAsk;
+      if (el.dataset.q === "bill") {
+        PC.quests.addLead(state, "what_was_lost", "gregoire_bill");
+        state.flags.gregoire_bill_lead = true;
+        say(id, firstName(id), A.billReply, null, null, { ask: A.bill, heardNote: "A lead · Journal updated." });
+        return;
+      }
+      say(id, firstName(id), A.advertReply, null, null, { ask: A.advert });
+    },
     // ---- Milestone 7: the chart, voyages, the season loop ----
     "openmap": function () { mapSel = null; menu = null; state.current = { screen: "map" }; },
     "closemap": function () { mapSel = null; state.current = { screen: "node" }; },

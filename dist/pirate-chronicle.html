@@ -1307,6 +1307,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     s = s.replace(/\[Home City\]/g, state.captain.homeCity || "your home");
     // [Loss Target] by loss variant (S17 appendix, the mentor beat).
     s = s.replace(/\[Loss Target\]/g, LOSS_TARGET[state.captain.loss] || "what you lost");
+    // [Quartermaster]: the officer's first name, or the Acting Quartermaster.
+    if (s.indexOf("[Quartermaster]") >= 0) {
+      var q = PC.officers && PC.officers.quartermaster ? PC.officers.quartermaster(state) : null;
+      s = s.replace(/\[Quartermaster\]/g, q ? (q.first || q.full) : "your Quartermaster");
+    }
+    // A node's computed values (js/norfolk.js): {port_fee}, {dirty_good}, {waters}.
+    s = s.replace(/\{([a-z_0-9]+)\}/g, function (whole, k) {
+      var f = PC.text.vars && PC.text.vars[k];
+      return f ? String(f(state)) : whole;
+    });
     return s;
   }
 
@@ -1316,7 +1326,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return m || [];
   }
 
-  PC.text = { render: render, unresolved: unresolved, FORMS: FORMS };
+  PC.text = { render: render, unresolved: unresolved, FORMS: FORMS, vars: (PC.text && PC.text.vars) || {} };
 })();
 </script>
   <script>
@@ -2528,8 +2538,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     });
     if (id === "ocracoke" && place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
     // A node's own first-entry scenes (Norfolk's beat 2, PR 5).
-    var fe = (nodeData(id).firstEntry || {})[place];
-    if (fe && !state.seen[fe] && PC.scenes.canEnter(state, fe).ok) return fe;
+    // A list: the first that can play (Horace's beat, then its re-entry).
+    var fe = [].concat((nodeData(id).firstEntry || {})[place] || []);
+    for (var i = 0; i < fe.length; i++) if (!state.seen[fe[i]] && PC.scenes.canEnter(state, fe[i]).ok) return fe[i];
     return null;
   }
 
@@ -2863,6 +2874,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (shipwrightGreeting(state).refuse) return { line: L.refuse };
     if (hp <= 0) return { line: L.nothingToFix };
     var cost = repairCost(state, hp);
+    // The Apprentices' free repair (records §10): one repair on the house.
+    var free = id === "norfolk" && state.flags.nor_free_repair;
+    if (free) cost = 0;
     var ap = repairTakesAP(state, hp) ? 1 : 0;
     if (state.ap.left < ap) throw new Error("A big repair takes an action, and you have none left.");
     if (state.money.crew < cost) return { line: L.broke, failed: true };
@@ -2873,7 +2887,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (sh.rigging === "frayed") { sh.rigging = "sound"; sh.speed = sh.speedMax; fixed = true; } // §21.7
     var up = ladderTick(state, slotNpc(id, "shipwright"), "commission");
     PC.state.addLog(state, "Repaired " + hp + " hull for " + cost + " crew gold" + (ap ? " and an action" : "") + (fixed ? "; the frayed rigging is fixed too" : "") + ".");
-    return { cost: cost, ap: ap, fixedRigging: fixed, line: ap ? L.bigRepair : L.repair, rungUp: up };
+    if (free) state.flags.nor_free_repair = false;
+    return { cost: cost, ap: ap, fixedRigging: fixed, line: free ? L.freeRepair : ap ? L.bigRepair : L.repair, rungUp: up, free: free };
   }
 
   var TRACKS = { hull: "Hull", rigging: "Rigging", guns: "Guns" };
@@ -3227,8 +3242,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var lines = [];
     var pre = [];
     if (opts.voyage) pre = opts.voyage.lines.slice();
+    // The node's scripted first arrival (Norfolk's inspection, records §5):
+    // it charges the fee itself, so the popup only carries the voyage.
+    var firstScene = !opts.fromHunt && nd.firstArrival && !state.seen[nd.firstArrival] && PC.scenes.canEnter(state, nd.firstArrival).ok ? nd.firstArrival : null;
     if (opts.fromHunt) lines.push(L.back);
-    else if (L.arrive) lines.push(L.arrive);
+    else if (L.arrive && !firstScene) lines.push(L.arrive);
     var c = state.crew;
     if (c.wounded > 0) {
       var cook = (state.officers || []).some(function (o) { return !o.gone && o.type === "Cook" && o.aboard === "flagship"; });
@@ -3275,6 +3293,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Holdings come in M9; the trade ship's earnings are collected here (§27.7).
     var ledger = PC.world ? PC.world.collectLedger(state, id) : null;
     if (ledger) lines.push("PLACEHOLDER: The Trade Master hands over your trade ship's earnings: " + ledger + " gold, into your purse.");
+    if (firstScene) {
+      state.location.queue = (state.location.queue || []).concat([firstScene]);
+      var fall = pre.concat(lines);
+      if (!fall.length && !(opts.voyage && opts.voyage.chips.length)) { state.location.popup = null; PC.scenes.enterScene(state, nextQueued(state)); return null; }
+      state.location.popup = { title: "Arrival at " + nd.name, lines: fall, chips: fall.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), ok: "popupscene" };
+      return state.location.popup;
+    }
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
     // P16: the lines carry which pot paid in brackets, so the old pay chips
@@ -3431,6 +3456,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (cond.minYear) return state.time.year >= cond.minYear;
     if (cond.maxYear) return state.time.year <= cond.maxYear;
     if (cond.node) return !!(state.location && state.location.node === cond.node);
+    if (cond.profession) return c.profession === cond.profession;
+    // A node's own test, by name (js/norfolk.js): { fn: "dirtyAtRisk" }, { fn: "afford:bribe_before:2" }.
+    if (cond.fn) { if (!PC.sceneFns) throw new Error("No scene functions loaded"); return !!PC.sceneFns.cond(state, cond.fn); }
     throw new Error("Unknown condition: " + JSON.stringify(cond));
   }
 
@@ -3438,7 +3466,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function canEnter(state, id) {
     var s = sceneById(id);
-    if (s.repeat !== "season" && state.seen[id]) return { ok: false, why: "Already done" };
+    if (s.repeat !== "season" && s.repeat !== "always" && state.seen[id]) return { ok: false, why: "Already done" };
     if (s.repeat === "season" && state.seen[id] === seasonStamp(state)) return { ok: false, why: "Done this season" };
     if (!test(state, s.firesWhen)) return { ok: false, why: "Not available" };
     if ((s.ap || 0) > state.ap.left) return { ok: false, why: "Not enough time this season" };
@@ -3482,6 +3510,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // "hub" means back to where the captain is: the node's menus (and any
   // scene queued to fire there next, §17.2), or the engine's test harbor.
   function goTo(state, exit) {
+    if (exit === "end") return PC.summary.end(state); // the story ends here (jail, until §43; Milestone 7)
     if (!exit || exit === "hub") {
       if (state.location && state.location.node) {
         var next = PC.node ? PC.node.nextQueued(state) : null;
@@ -3747,7 +3776,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     if ("join" in e) { var jn = PC.data.npcs[e.join]; return (jn ? jn.first + " " + jn.last : e.join) + " joins your officers"; }
     if ("lead" in e) return "Lead recorded in your journal";
-    if ("dies" in e || "seasonFlag" in e || "meet" in e) return null;
+    if ("dies" in e || "seasonFlag" in e || "meet" in e || "hook" in e) return null;
     if ("tag" in e) return e.tell === false ? null : (e.remove ? "Lost tag: " : "New tag: ") + e.tag + (e.untilSeasonEnd ? " (until the end of the season)" : "");
     if ("item" in e) return "Gained: " + e.item;
     if ("ap" in e) return "Time " + signed(e.ap);
@@ -3762,6 +3791,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   var INKS = { frisia: "frisia", avalon: "avalon", pirates: "pirates" };
   var FACTION_NAME = { frisia: "Frisia", avalon: "Avalon", pirates: "Pirates" };
   function effectChip(state, e) {
+    if ("hook" in e) return PC.sceneFns ? PC.sceneFns.chip(state, e) : null;
     if ("gold" in e) return { icon: "gold", text: (e.gold > 0 ? "+" : "−") + Math.abs(e.gold) + " gold" + (e.pot === "purse" ? " · your purse" : e.pot === "crew" ? " · crew gold" : ""), ink: "mid" };
     if ("provisions" in e) return { icon: "prov", text: "Provisions " + signed(e.provisions) };
     if ("treasure" in e) return { icon: "treasure", text: signed(e.treasure) + " " + (e.dirty ? "dirty" : "clean") + " treasure", ink: "mid" };
@@ -3789,6 +3819,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function applyEffect(state, e, pot) {
+    // A node's own effect, by name (js/norfolk.js): the port fee, a bribe,
+    // confiscation, an officer joining.
+    if ("hook" in e) return PC.sceneFns.apply(state, e);
     if ("gold" in e) {
       var p = e.pot && e.pot !== "prompt" ? e.pot : (pot || "crew");
       state.money[p] = (state.money[p] || 0) + e.gold;
@@ -3865,8 +3898,30 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     goTo(state, "hub");
   }
 
+  // ---- A node's own tests, effects and values (js/norfolk.js) -----------------
+  // Registered by name so scenes stay data: { fn: "afford:bribe_before:2" }
+  // (the name, then its arguments) and { hook: "nor_pay", what, mult }.
+  var FNS = { conds: {}, hooks: {} };
+  PC.sceneFns = {
+    addCond: function (name, f) { FNS.conds[name] = f; },
+    addHook: function (name, h) { FNS.hooks[name] = h; },
+    hasHook: function (name) { return !!FNS.hooks[name]; },
+    cond: function (state, spec) {
+      var parts = String(spec).split(":"), f = FNS.conds[parts[0]];
+      if (!f) throw new Error("Unknown scene test: " + parts[0]);
+      return f.apply(null, [state].concat(parts.slice(1)));
+    },
+    apply: function (state, e) {
+      var h = FNS.hooks[e.hook];
+      if (!h) throw new Error("Unknown scene hook: " + e.hook);
+      return h.apply(state, e) || null;
+    },
+    chip: function (state, e) { var h = FNS.hooks[e.hook]; return h && h.chip ? h.chip(state, e) : null; },
+  };
+
   PC.scenes = {
     test: test,
+    seasonStamp: seasonStamp,
     textOf: textOf,
     resolveExit: resolveExit,
     sceneById: sceneById,
@@ -4148,17 +4203,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     var list = s.candidates.filter(function (c) { return !c.hired; });
     // Davey's permanent seat (§17.2): he takes the second chair while he waits.
-    if (state.flags.davey_at_tavern && !holdingId(state, "davey")) {
+    if (state.flags.davey_at_tavern && !holdingId(state, "davey") && id === "ocracoke") {
       list = list.slice(0, 1).concat([daveyCandidate(state)]);
+    }
+    // Godfrey's seat at Norfolk once met in Horace's beat (records §7).
+    if (id === "norfolk" && state.flags.godfrey_met && !state.flags.godfrey_hired && !holdingId(state, "godfrey")) {
+      list = list.slice(0, 1).concat([namedCandidate(state, "godfrey")]);
     }
     return list;
   }
 
   function holdingId(state, id) { return aboard(state).some(function (o) { return o.id === id; }); }
 
-  function daveyCandidate(state) {
-    var d = PC.data.namedOfficers.davey;
-    return { id: "davey", named: true, first: d.first, last: d.last, full: d.first + " " + d.last, gender: d.gender, age: d.age,
+  function daveyCandidate(state) { return namedCandidate(state, "davey"); }
+  function namedCandidate(state, id) {
+    var d = PC.data.namedOfficers[id];
+    return { id: id, named: true, first: d.first, last: d.last, full: d.first + " " + d.last, gender: d.gender, age: d.age,
       type: namedType(state, d), voice: d.voice, secondary: d.secondary, third: d.third };
   }
 
@@ -4177,7 +4237,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // The hiring scene (§25.7): the stem, the secondary trait's hint, then the
   // voice trait's intro. Davey has his own intro.
   function hiringText(state, c) {
-    if (c.id === "davey") return PC.data.namedOfficers.davey.hiringIntro;
+    if (c.named && PC.data.namedOfficers[c.id]) return PC.data.namedOfficers[c.id].hiringIntro;
     var stemAndHint = L().stem.replace("[Name]", c.first) + ", " + L().hints[c.secondary];
     if (c.gender === "f") stemAndHint = forWoman(stemAndHint);
     return stemAndHint + "\n\n" + PC.text.render(L().intros[c.voice] || "", state);
@@ -4339,14 +4399,17 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function makeOfficer(state, c) {
-    if (c.id === "davey") {
-      var d = PC.data.namedOfficers.davey;
-      return { id: "davey", named: true, first: d.first, last: d.last, gender: d.gender, age: d.age,
+    if (c.named && PC.data.namedOfficers[c.id]) {
+      var d = PC.data.namedOfficers[c.id];
+      var no = { id: c.id, named: true, first: d.first, last: d.last, gender: d.gender, age: d.age,
         type: namedType(state, d), level: 1, voice: d.voice, secondary: d.secondary, third: d.third, unique: d.unique,
         likes: d.likes.slice(), dislikes: d.dislikes.slice(), warmth: d.warmth,
         drive: d.drive, fear: d.fear, rung: PC.npcs.RUNG_VALUE[d.startRung], approval: 0,
         aboard: "flagship", wounded: false, sacrificeUsed: false,
         joined: { year: state.time.year, season: state.time.season } };
+      // A start rung of "leaning" is Neutral shifted by the captain's leaning (§25.5; Godfrey).
+      if (d.startRung === "leaning") no.rung = leaning(state, no);
+      return no;
     }
     var o = JSON.parse(JSON.stringify(c));
     delete o.hired;
@@ -4367,6 +4430,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     state.officers.push(o);
     if (o.id === "davey") state.flags.davey_at_tavern = false;
+    if (o.id === "godfrey") state.flags.godfrey_hired = true;
     var first = !state.flags.first_officer_hired;
     state.flags.first_officer_hired = true;
     out.mentorLine = first && mentor(state) ? L().mentorFirstHire : null; // §25.8 milestone
@@ -4376,9 +4440,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // The Named officer joins through a scene (Restless & Ruined).
   function joinNamed(state, id) {
-    if (id !== "davey") throw new Error("Unknown Named officer: " + id);
-    var r = join(state, daveyCandidate(state));
-    PC.state.addLog(state, "Davey Dell joins as your " + r.officer.type + ".");
+    if (!PC.data.namedOfficers[id]) throw new Error("Unknown Named officer: " + id);
+    var r = join(state, namedCandidate(state, id));
+    if (id === "godfrey") state.flags.godfrey_hired = true;
+    PC.state.addLog(state, r.officer.first + " " + r.officer.last + " joins as your " + r.officer.type + ".");
     return r;
   }
 
@@ -4391,7 +4456,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (ap) { PC.crew.spendAP(state, ap); PC.node.tavernVisit(state); } // a season with AP spent here (§30.4)
     state.officerVisit = state.location.visit;
     state.money.crew -= FEE;
-    if (c.id !== "davey") c.hired = true;
+    if (!c.named) c.hired = true;
     var r = join(state, c);
     PC.node.tavernActionDone(state);
     PC.state.addLog(state, "Hired " + (r.officer.first + " " + (r.officer.last || "")).trim() + " (" + r.officer.type + ") for " + FEE + " crew gold" + (ap ? " and an action" : "") + ".");
@@ -4812,7 +4877,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   var KINDS = ["check", "choice", "beat"];
   var EFFECT_KEYS = ["gold", "provisions", "treasure", "hull", "morale", "pressure", "dread", "standing", "heat",
-    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace", "minigame"];
+    "ladder", "tag", "item", "ap", "flag", "rung", "join", "lead", "dies", "meet", "seasonFlag", "goPlace", "minigame", "hook"];
   var FACTIONS = ["frisia", "avalon", "pirates"];
 
   function validate(sampleState) {
@@ -4826,7 +4891,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       (Array.isArray(exit) ? exit : [exit]).forEach(function (x) {
         var to = typeof x === "string" ? x : x.to;
         if (typeof x !== "string") checkCond(where + " exit", x.when);
-        if (to !== "hub" && !d.scenes[to]) err(where, "exit goes to unknown scene '" + to + "'");
+        if (to !== "hub" && to !== "end" && !d.scenes[to]) err(where, "exit goes to unknown scene '" + to + "'");
       });
     }
 
@@ -4859,6 +4924,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         if (e.join && !(d.namedOfficers || {})[e.join]) err(where, "unknown Named officer " + e.join);
         if (e.lead && !(((d.quests || {})[e.lead.quest] || {}).leads || {})[e.lead.id]) err(where, "unknown lead " + JSON.stringify(e.lead));
         if (e.dies && !d.npcs[e.dies]) err(where, "unknown NPC " + e.dies);
+        if (e.hook && !(PC.sceneFns && PC.sceneFns.hasHook(e.hook))) err(where, "unknown scene hook " + e.hook);
         if (e.when) checkCond(where + " effect", e.when);
       });
     }
@@ -4874,7 +4940,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (s.id !== id) err(w, "id field doesn't match its key");
       if (/[^a-z0-9_]/.test(id)) err(w, "IDs are plain lowercase ASCII with underscores (§33.1.3)");
       if (KINDS.indexOf(s.kind) < 0) err(w, "kind must be check, choice or beat");
-      if (s.repeat && ["once", "season"].indexOf(s.repeat) < 0) err(w, "repeat must be once or season");
+      if (s.repeat && ["once", "season", "always"].indexOf(s.repeat) < 0) err(w, "repeat must be once, season or always");
       checkCond(w, s.firesWhen);
       checkText(w + " setup", s.setup);
       (s.variants || []).forEach(function (v, i) { checkCond(w + " variant " + i, v.when); checkText(w + " variant " + i, v.line); });
@@ -10850,6 +10916,302 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — Norfolk's first visit and its errands (§17.4;
+ * Milestone 7, PR 5), and the barkeep favors at both Taverns (§16.6).
+ *
+ * The scenes are data (content/norfolk_scenes.js). This file holds what
+ * they compute: the inspection's prices and confiscation (§5 of the
+ * Norfolk records), Godfrey joining, Drunken Sailors' deliveries and
+ * Horace's liquor buying (§7, §10), The Apprentices' costs, and which
+ * barkeep favor the season offers. It registers the scene tests ({ fn }),
+ * effects ({ hook }) and text values ({port_fee}) the scenes use.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function E() { return PC.data.economy; }
+  function D() { return PC.data.norfolkRules; }
+  function stamp(state) { return PC.state.stamp(state); }
+  function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
+  function here(state) { return state.location && state.location.node; }
+
+  // ---- The first inspection (Norfolk records §5) --------------------------------
+
+  function portFee(state) { return PC.node.portFee(state, "norfolk"); }
+
+  // One stack's fence value (§6 of the records: the bribe after the goods
+  // are found is half the fence value of the goods at risk).
+  function unitValue(state, what) {
+    if (what === "treasure") return E().TREASURE_UNIT * PC.node.tierOf(state, "norfolk").treasure;
+    return PC.node.salePrice(state, "norfolk", what);
+  }
+
+  // Every dirty stack aboard. DEFAULT: dirty treasure counts as cargo the
+  // search can find, as dirty goods do.
+  function dirtyStacks(state) {
+    var out = [];
+    Object.keys(state.cargo.goods).forEach(function (g) { var n = (state.cargo.goods[g] || {}).dirty || 0; if (n) out.push({ what: g, n: n }); });
+    if (state.cargo.treasure.dirty) out.push({ what: "treasure", n: state.cargo.treasure.dirty });
+    return out;
+  }
+  // What the search puts at risk: everything dirty, or after the Smuggler's
+  // partial only the least valuable stack.
+  function atRisk(state) {
+    var all = dirtyStacks(state);
+    var only = state.flags.nor_fv1_least;
+    return only ? all.filter(function (s) { return s.what === only; }) : all;
+  }
+  function riskValue(state) {
+    return Math.round(atRisk(state).reduce(function (a, s) { return a + s.n * unitValue(state, s.what) * E().FENCE_RATE; }, 0));
+  }
+  // The crate the soldiers carry out: the largest dirty stack, or the one
+  // the Smuggler's partial left them.
+  function dirtyGood(state) {
+    var r = atRisk(state).slice().sort(function (a, b) { return b.n - a.n; })[0];
+    if (!r) return "contraband";
+    return r.what === "treasure" ? "stolen silver" : r.what.toLowerCase();
+  }
+  function bribeBefore(state) { return D().BRIBE_BEFORE * portFee(state); }
+  function bribeFound(state) { return Math.max(D().BRIBE_FOUND_MIN, Math.round(D().BRIBE_FOUND * riskValue(state))); }
+  // The price after a Haggle (×1.5 clean, ×1.75 partial, ×2 otherwise).
+  function priceOf(state, what) {
+    var base = what === "bribe_found" ? bribeFound(state) : bribeBefore(state);
+    return Math.round(base * (state.flags.nor_fv1_price || 2));
+  }
+
+  function confiscate(state) {
+    var gone = [];
+    atRisk(state).forEach(function (s) {
+      if (s.what === "treasure") state.cargo.treasure.dirty -= s.n;
+      else PC.crew.removeGood(state, s.what, s.n, true);
+      gone.push(s.n + " " + (s.what === "treasure" ? "dirty treasure" : s.what));
+    });
+    return gone;
+  }
+
+  // ---- The hometown line and the Quartermaster's bark ---------------------------
+
+  var YEARS = ["A year ago", "Two years ago", "Three years ago", "Four years ago", "Five years ago", "Six years ago"];
+  function raidYear(state) {
+    var r = D().RAIDS[state.captain.homeCity];
+    return r == null ? null : r;
+  }
+  function yearsSinceRaid(state) {
+    var r = raidYear(state);
+    if (r == null) return "Not long ago";
+    var now = state.time.year + [0.3, 0.55, 0.75, 0.95][state.time.season];
+    return YEARS[Math.max(0, Math.min(YEARS.length - 1, Math.round(now - r) - 1))];
+  }
+  function qmWarmth(state) {
+    var q = PC.officers.quartermaster(state);
+    if (!q || !q.voice) return "neutral"; // an Acting Quartermaster speaks the neutral line
+    if (q.warmth) return q.warmth;
+    var t = (PC.data.creator.OFFICER_TRAITS || []).filter(function (x) { return x.id === q.voice; })[0];
+    return t ? t.warmth : "neutral";
+  }
+
+  // ---- Variant C: is the loss quest still open? --------------------------------
+
+  function variantCActive(state) {
+    if (state.captain.loss !== "C") return false;
+    var r = (state.quests || {}).what_was_lost;
+    if (r && r.status && r.status !== "open") return false;
+    var dl = PC.data.quests.what_was_lost.deadline;
+    return state.time.year * 4 + state.time.season <= dl.year * 4 + dl.season;
+  }
+
+  // ---- Drunken Sailors (§7, §10): Horace wants 30 units of good liquor -------------
+
+  function pendragonOpen(state) {
+    var p = D().PENDRAGON_OPENS;
+    return state.time.year * 4 + state.time.season >= p.year * 4 + p.season;
+  }
+  function liquorKinds(state) {
+    return D().GOOD_LIQUOR.filter(function (g) { return !(g === "French wine" && pendragonOpen(state)); });
+  }
+  function liquorAboard(state) {
+    var out = [];
+    liquorKinds(state).forEach(function (g) {
+      var e = state.cargo.goods[g];
+      if (!e) return;
+      if (e.clean) out.push({ good: g, n: e.clean, dirty: false });
+      if (e.dirty) out.push({ good: g, n: e.dirty, dirty: true });
+    });
+    return out.sort(function (a, b) { return (a.dirty ? 1 : 0) - (b.dirty ? 1 : 0); }); // clean first
+  }
+  function delivered(state) { return state.world.dsDelivered || 0; }
+  function dsOpen(state) { return !!state.flags.nor_drunken_sailors && !state.flags.nor_ds_done; }
+
+  // Sell to Horace: during the errand at ×1.5 clean and ×1.0 dirty, up to
+  // what's left of the 30; afterward he buys any amount at ×1.25 / ×1.0
+  // (the Norfolk price). DEFAULT: the gold goes to crew gold, as any sale.
+  function sellToHorace(state) {
+    var L = PC.data.nodes.norfolk.lines.horaceLiquor;
+    var errand = dsOpen(state);
+    var cap = errand ? D().DS_UNITS - delivered(state) : Infinity;
+    var have = liquorAboard(state);
+    if (!have.length) return { line: L.nothing, units: 0, gold: 0 };
+    var units = 0, gold = 0, anyDirty = false, anyClean = false;
+    have.forEach(function (s) {
+      if (cap - units <= 0) return;
+      var n = Math.min(s.n, cap - units);
+      var mult = s.dirty ? D().DIRTY_MULT : errand ? D().DS_MULT : D().AFTER_MULT;
+      gold += Math.round(n * PC.node.salePrice(state, "norfolk", s.good) * mult);
+      PC.crew.removeGood(state, s.good, n, s.dirty);
+      units += n;
+      if (s.dirty) anyDirty = true; else anyClean = true;
+    });
+    state.money.crew += gold;
+    var lines = [];
+    var out = { units: gold ? units : 0, gold: gold, lines: lines };
+    if (errand) {
+      state.world.dsDelivered = delivered(state) + units;
+      if (delivered(state) >= D().DS_UNITS) {
+        state.flags.nor_ds_done = true;
+        PC.npcs.moveRung(state, "horace", 1);
+        state.meters.standing.avalon = Math.max(-100, Math.min(100, (state.meters.standing.avalon || 0) + D().DS_STANDING));
+        out.done = true;
+        out.line = PC.data.nodes.norfolk.lines.drunkenSailors.done;
+      } else out.line = PC.data.nodes.norfolk.lines.drunkenSailors.partial.replace("[number]", delivered(state));
+    } else {
+      out.line = anyClean ? L.clean : L.dirty;
+      if (anyClean && anyDirty) lines.push(L.dirty);
+    }
+    PC.state.addLog(state, "Sold Horace " + plural(units, "unit") + " of liquor for " + gold + " crew gold" + (out.done ? "; Drunken Sailors is done" : "") + ".");
+    return out;
+  }
+
+  // ---- Barkeep favors (§16.6): one a season at each Tavern ---------------------
+
+  function favorScene(state) {
+    var id = here(state);
+    if (!D().FAVORS[id]) return null;
+    var r = PC.rng.fromKey([state.world.seed, stamp(state), id, "favor"].join("|"));
+    var type = D().FAVOR_TYPES[Math.floor(r() * 3)];
+    var sets = D().FAVORS[id];
+    var set = sets[Math.floor(r() * sets.length)];
+    return "fav_" + id + "_" + set + "_" + type;
+  }
+  function favorOffer(state) {
+    var sc = favorScene(state);
+    if (!sc) return null;
+    var c = PC.scenes.canEnter(state, sc);
+    var anyDone = Object.keys(state.seen).some(function (k) { return k.indexOf("fav_" + here(state) + "_") === 0 && state.seen[k] === PC.scenes.seasonStamp(state); });
+    if (here(state) === "ocracoke" && !PC.node.firstTavernDone(state)) return null;
+    var refuse = PC.npcs.serviceLevel ? PC.npcs.serviceLevel(state, PC.node.slotNpc(here(state), "keeper")) == null : false;
+    return { scene: sc, ok: c.ok && !anyDone && !refuse && state.ap.left >= 1, why: anyDone ? "Once a season" : refuse ? "He won't serve you" : state.ap.left < 1 ? "No actions left this season" : c.ok ? null : c.why };
+  }
+
+  // ---- The registered scene tests, effects and values ------------------------------
+
+  var F = PC.sceneFns;
+  F.addCond("dirtyAtRisk", function (state) { return atRisk(state).length > 0; });
+  F.addCond("noDirty", function (state) { return atRisk(state).length === 0; });
+  F.addCond("afford", function (state, what, mult) {
+    var amt = mult === "price" ? priceOf(state, what) : Math.round((what === "bribe_found" ? bribeFound(state) : what === "bribe_before" ? bribeBefore(state) : Number(what)) * Number(mult || 1));
+    return PC.crew.canPay(state, amt);
+  });
+  F.addCond("qmWarmth", function (state, w) { return qmWarmth(state) === w; });
+  F.addCond("hometown", function (state) { return (state.captain.tags || []).indexOf("Ash-Born") >= 0 && raidYear(state) != null; });
+  F.addCond("variantC", function (state) { return variantCActive(state); });
+  F.addCond("gunnerAboard", function (state) { var g = PC.officers.holding(state, "Gunner"); return !!(g && g.id !== "godfrey"); });
+  F.addCond("hasAp", function (state) { return state.ap.left >= 1; });
+  F.addCond("seasonedHand", function (state) { return (state.crew.tiers.Seasoned || 0) + (state.crew.tiers.Veteran || 0) > 0; });
+
+  var payChip = function (amt) { return { icon: "gold", text: "−" + amt + " gold (crew gold first, then your purse)", ink: "mid" }; };
+  function pay(state, amt) { var p = PC.crew.payFrom(state, amt, true); return (p.crew ? p.crew + " crew gold" : "") + (p.crew && p.purse ? ", " : "") + (p.purse ? p.purse + " purse gold" : ""); }
+
+  F.addHook("nor_port_fee", {
+    apply: function (state) { var r = PC.node.payPortFee(state, "norfolk"); return r.lines.join(" "); },
+    chip: function (state) { return { icon: "gold", text: "The port fee · " + portFee(state) + " gold", ink: "mid" }; },
+  });
+  F.addHook("nor_pay", {
+    amount: function (state, e) { return e.mult === "price" ? priceOf(state, e.what) : Math.round((e.what === "bribe_found" ? bribeFound(state) : bribeBefore(state)) * (e.mult || 1)); },
+    apply: function (state, e) { return "Paid " + pay(state, this.amount(state, e)) + "."; },
+    chip: function (state, e) { return payChip(this.amount(state, e)); },
+  });
+  F.addHook("nor_price", { apply: function (state, e) { state.flags.nor_fv1_price = e.mult; return null; } });
+  F.addHook("nor_least", {
+    apply: function (state) {
+      var s = dirtyStacks(state).sort(function (a, b) { return unitValue(state, a.what) - unitValue(state, b.what); })[0];
+      state.flags.nor_fv1_least = s ? s.what : null;
+      return null;
+    },
+  });
+  F.addHook("nor_confiscate", {
+    apply: function (state) { var g = confiscate(state); return g.length ? "Confiscated: " + g.join(", ") + "." : null; },
+    chip: function (state) {
+      var r = atRisk(state);
+      return r.length ? { icon: "treasure", text: "Confiscated: " + r.map(function (s) { return s.n + " " + (s.what === "treasure" ? "dirty treasure" : s.what); }).join(", "), ink: "bad" } : null;
+    },
+  });
+  // Jail (§43) isn't built: the story ends here (§37.1), until Milestone 8.
+  F.addHook("nor_jail", {
+    apply: function (state) { state.flags.nor_jailed = true; state.gameOver = { how: "captured", line: "jailed" }; return "Jailed at Norfolk."; },
+    chip: function () { return { icon: "person", text: "Hauled off to prison", ink: "bad" }; },
+  });
+  F.addHook("godfrey_join", {
+    apply: function (state) {
+      state.money.crew -= PC.officers.FEE;
+      PC.officers.joinNamed(state, "godfrey");
+      state.flags.godfrey_hired = true;
+      return "Hired Nicholas Godfrey (Gunner) for " + PC.officers.FEE + " crew gold.";
+    },
+    chip: function (state) {
+      var g = PC.officers.holding(state, "Gunner");
+      return { icon: "officer", text: "Nicholas Godfrey joins as your Gunner · −" + PC.officers.FEE + " crew gold" + (g && g.id !== "godfrey" ? " · " + g.first + " is dismissed" : ""), ink: "good" };
+    },
+  });
+  F.addHook("lose_hand", {
+    apply: function (state) {
+      var t = (state.crew.tiers.Seasoned || 0) ? "Seasoned" : "Veteran";
+      state.crew.tiers[t] -= 1; state.crew.count -= 1;
+      return "A " + t + " hand stays at the Dockyard for good.";
+    },
+    chip: function (state) { return { icon: "officer", text: "A " + ((state.crew.tiers.Seasoned || 0) ? "Seasoned" : "Veteran") + " hand stays with Christoph for good", ink: "bad" }; },
+  });
+  F.addHook("pay_gold", {
+    apply: function (state, e) { return "Paid " + pay(state, e.amount) + "."; },
+    chip: function (state, e) { return payChip(e.amount); },
+  });
+  F.addHook("keeper_rung", {
+    apply: function (state, e) { PC.npcs.moveRung(state, PC.node.slotNpc(here(state), "keeper"), e.delta); return null; },
+    chip: function (state, e) {
+      var id = PC.node.slotNpc(here(state), "keeper"), n = PC.npcs.get(state, id);
+      var to = Math.max(-3, Math.min(3, (n ? n.rung : 0) + e.delta));
+      return { icon: "rel", text: (n ? n.full || n.first : "The keeper") + " · now " + PC.npcs.rungName(to), ink: e.delta > 0 ? "good" : "bad" };
+    },
+  });
+  F.addHook("keeper_line", {
+    apply: function () { return null; },
+    chip: function () { return null; },
+  });
+
+  PC.text.vars.port_fee = function (state) { return portFee(state) + " gold"; };
+  PC.text.vars.bribe_before = function (state) { return bribeBefore(state) + " gold"; };
+  PC.text.vars.bribe_before_2 = function (state) { return priceOf(state, "bribe_before") + " gold"; };
+  PC.text.vars.bribe_found = function (state) { return bribeFound(state) + " gold"; };
+  PC.text.vars.bribe_found_2 = function (state) { return priceOf(state, "bribe_found") + " gold"; };
+  PC.text.vars.dirty_good = dirtyGood;
+  PC.text.vars.ship = function (state) { return state.ship.name; };
+  PC.text.vars.city = function (state) { return state.captain.homeCity || "your home"; };
+  PC.text.vars.years_since_raid = yearsSinceRaid;
+  PC.text.vars.gunner_name = function (state) { var g = PC.officers.holding(state, "Gunner"); return g ? (g.first + " " + (g.last || "")).trim() : "your Gunner"; };
+  PC.text.vars.dismiss_pay = function (state) { return PC.officers.dismissPay(state); };
+  PC.text.vars.waters = function (state) { return PC.quests.tridentWaters(state).name; };
+
+  PC.norfolk = {
+    portFee: portFee, atRisk: atRisk, riskValue: riskValue, dirtyGood: dirtyGood, bribeBefore: bribeBefore, bribeFound: bribeFound, priceOf: priceOf,
+    confiscate: confiscate, yearsSinceRaid: yearsSinceRaid, qmWarmth: qmWarmth, variantCActive: variantCActive,
+    liquorKinds: liquorKinds, liquorAboard: liquorAboard, delivered: delivered, dsOpen: dsOpen, sellToHorace: sellToHorace, pendragonOpen: pendragonOpen,
+    favorScene: favorScene, favorOffer: favorOffer,
+  };
+})();
+</script>
+  <script>
 /* Pirate Chronicle — Developer tools that change the game state (§41.12).
  *
  * Skip the mandatory quests: A Dying Pirate's Wish, Welcome to the
@@ -15935,6 +16297,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     gameOver: {
       captured: "PLACEHOLDER: Irons, a dark hold and a long voyage to a gallows or a prison hulk. Your story ends here, for now.",
       died: "PLACEHOLDER: The sea closes over you. Your story ends here.",
+      // Milestone 7: the Norfolk cells (until §43, Milestone 8) and the sea (§44.7).
+      jailed: "PLACEHOLDER: The cell door slams shut behind you. Imprisonment comes with Milestone 8; until then, your story ends here.",
+      drowned: "PLACEHOLDER: The sea takes your ship, and then it takes you. Your story ends here.",
+      shipwrecked: "PLACEHOLDER: You wash ashore with nothing but the clothes on your back. A captain with no ship comes in a later milestone; for now, your story ends here.",
     },
     // The Quartermaster's advice (§24.14): {qm} is his first name.
     advice: {
@@ -16969,6 +17335,473 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Norfolk's first visit (beats 1 and 2), its errands and the barkeep
+ * favors at both Taverns (Milestone 7, PR 5). Filed from Norfolk Scene
+ * Records Part 2 §5 (the first inspection), Part 3 §7 (Horace's tavern)
+ * and Part 4 §9, §10 and §14 (the Apprentices, Drunken Sailors, the
+ * favors, Godfrey's lines). The author's language is final: lines are
+ * copied exactly, with tokens marked. Lines marked † in the records are
+ * Claude's, approved.
+ *
+ * The rules these scenes call are in js/norfolk.js: { fn } tests,
+ * { hook } effects and {port_fee}-style values. The same §33 fields as
+ * content/ocracoke_scenes.js.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+  PC.data.scenes = PC.data.scenes || {};
+
+  var scenes = {};
+  function S(id, o) {
+    o.id = id; o.ap = o.ap || 0; o.repeat = o.repeat || "once"; o.kind = o.kind || "choice";
+    o.choices.forEach(function (c, i) { c.id = c.id || "c" + i; c.approval = c.approval || []; });
+    scenes[id] = o;
+  }
+  function R(text, effects, exit, more) { return Object.assign({ text: text || "", effects: effects || [], exit: exit || "hub" }, more || {}); }
+  function K(label, approval, check, clean, partial, setback, more) {
+    return Object.assign({ label: label, approval: approval, check: check, outcomes: { clean: clean, partial: partial, setback: setback } }, more || {});
+  }
+  function C(label, approval, result, more) { return Object.assign({ label: label, approval: approval, result: result }, more || {}); }
+
+  // ---- Rules data (js/norfolk.js) --------------------------------------------------
+  PC.data.norfolkRules = {
+    BRIBE_BEFORE: 4,        // × the port fee (records §5)
+    BRIBE_FOUND: 0.5,       // × the fence value of the goods at risk (records §5)
+    BRIBE_FOUND_MIN: 20,    // DEFAULT: a floor, so a crate of molasses still costs something
+    RAIDS: { Baltimore: 1752.7, Savannah: 1753.45, Charleston: 1753.45 }, // Sep 1752; Jun 1753
+    GOOD_LIQUOR: ["Plantation rum", "Frisian genever", "Scotch whisky", "French wine", "French brandy", "Nassau reserve"],
+    DS_UNITS: 30,           // Drunken Sailors (ruled)
+    DS_MULT: 1.5,           // clean liquor during the errand (×Norfolk's price)
+    AFTER_MULT: 1.25,       // clean liquor once the 30 are in
+    DIRTY_MULT: 1.0,        // dirty liquor, "no questions" (Part 4 §9)
+    DS_STANDING: 5,         // Avalon Standing on completion
+    PENDRAGON_OPENS: { year: 1755, season: 1 }, // Summer 1755: wine stops counting
+    TIMBER_BILL: 100,       // The Apprentices, fix it, partial (ruled placeholder)
+    FAVOR_COST: 25,         // DEFAULT: a barkeep favor's partial "at a cost" (§16.6 names none)
+    FAVOR_TYPES: ["fight", "tab", "bar"],
+    FAVORS: { norfolk: ["a", "b"], ocracoke: ["o"] },
+  };
+
+  // ---- Nicholas Godfrey (records §7, a proposal; his lines §14) ---------------------
+  PC.data.namedOfficers = PC.data.namedOfficers || {};
+  PC.data.namedOfficers.godfrey = {
+    id: "godfrey", first: "Nicholas", last: "Godfrey", gender: "m", age: 48, named: true,
+    type: "Gunner", level: 1,
+    voice: "Curmudgeon", warmth: "cold", likes: ["Honor"], dislikes: ["Revelry"],
+    secondary: "Lonesome", third: "Grudge-Keeper", unique: "Curmudgeon",
+    drive: "Revenge", fear: "Disgrace", startRung: "leaning",
+    hiringIntro: "He doesn't look up from his bottle. \"You payin' this time?\"",
+    dismissal: "\"Hrmph. Figures.\"",
+    barks: ["\"Hrmph.\"", "\"Guns are clean. Don't touch 'em.\"", "\"Too much singing on this ship.\"", "\"Powder's damp. Somebody's getting a kick.\"",
+      "\"Quiet. Finally.\"", "\"Port. Hate port.\"", "\"Seen faster gun crews. Not many.\"", "\"Hrmph. Fine.\""],
+    approve: "\"Hrmph. Good.\"", disapprove: "\"Fool's business.\"",
+    want: "\"I've got dreams of blasting Deadman's cursed ship to smithereens.\"",
+    fearLine: "\"Men remember the wrong things about a fight. Don't let 'em remember the wrong thing about you.\"",
+    lastWords: "\"Should've... reloaded faster.\"", bonded: "\"{dead.He} was all right. Hrmph.\"",
+    commission: "\"My own ship. Don't expect a speech.\"", ringleader: "\"Should've listened to me.\"",
+  };
+  PC.data.npcs = PC.data.npcs || {};
+  PC.data.npcs.godfrey = { first: "Nicholas", last: "Godfrey", gender: "m", role: "Colonial Officer", startRung: "Neutral", node: "norfolk", label: "the gruff man" };
+
+  // ---- Variant C, lead 3: Gregoire's wanted bill (records §7) -------------------------
+  if (PC.data.quests && PC.data.quests.what_was_lost) {
+    PC.data.quests.what_was_lost.leads.gregoire_bill = { node: "norfolk", variants: ["C"], journal: {
+      C: "A wanted bill in Horace's tavern names him: Gregoire LeGardier, one of Deadman's men, said to haunt [Trident Waters].",
+    } };
+  }
+
+  // ---- Norfolk's lines for the new services (Part 4 §9, §10) -------------------------
+  var N = PC.data.nodes.norfolk.lines;
+  N.horaceLiquor = {
+    open: "\"Let's see it then.\"",
+    clean: "\"Now that's the good stuff. Fine work.\"",
+    dirty: "\"I won't ask where it came from. I'm just glad to have it.\"",
+    nothing: "\"You've got nothing I want. Come back when you do.\"",
+    noWine: "\"A fancy wine man opened shop down the street. The city's got wine aplenty now, so I don't need any more.\"",
+    wineAfter: "\"Take it to Pendragon. Wine's his business now.\"",
+  };
+  N.drunkenSailors = {
+    askAgain: "Ask Horace again if there's anything you can do to help.",
+    ask: "Ask Horace if there's anything you can do to help.",
+    replyAgain: "\"You're persistent, aren't you. Well, we are always running out of quality drink. These days all we've got to serve is rotgut rum and gritty ale. I'd pay well for anything you're able to find. The more the better—thirty crates would be a dream.\"",
+    reply: "\"Funny you should ask. We are always running out of quality drink. These days all we've got to serve is rotgut rum and gritty ale. I'd pay well for anything you're able to find. The more the better—thirty crates would be a dream.\"",
+    partial: "Horace pries open a crate and pulls out a bottle to inspect it. \"Good, keep it coming. That's [number] of thirty.\"",
+    done: "Horace sets the last crate on the bar and pours two glasses. \"This place is afloat thanks to you. Appreciate all the help.\" He thinks deeply for a moment. \"Although...I'd certainly be willing to buy any more that you bring me.\"",
+    noWine: "\"Keep your wine. Pendragon's got that covered. Anything else, I'll take.\"",
+    objective: "Bring Horace Daley 30 crates of good liquor (plantation rum, genever, whiskey, wine, brandy or Nassau reserve). He's paying well.",
+  };
+  N.horaceAsk = {
+    advert: "Ask about the help wanted advertisement.",
+    advertReply: "\"Oh, that? The Admiral's man put that up. Said that anyone who can sail should head up to the Admiralty House. Hasn't done a lick of good, though. Everyone here's already in the damn navy.\"",
+    bill: "Ask about the wanted bill.",
+    billReply: "\"Seems like a real bad fella. Gregoire LeGardier. Apparently he was part of Deadman's fleet, but even meaner than the rest, if that's even possible. They say he's been lurking around {waters} for a while now.\"",
+    godfrey: "Strike up a conversation with the gruff man next to you.",
+    godfreyAgain: "Talk to the gruff man next to you.",
+  };
+  N.apprentices = {
+    opening: "Your apprentices seem...distracted.",
+    objective: "Christoph Buchanan's apprentices have made a mess of a refit at the Norfolk Dockyard. Help him set it right.",
+  };
+
+  // ---- Beat 1: Hampton Roads and the first inspection (records §5) ---------------------
+
+  var DEAL_ONE = "You hand over a hefty pouch of gold. The man peeks inside the pouch before stuffing it into his coat.\n\n\"Enjoy your time in Norfolk,\" he says as he departs.";
+  var DEAL_TWO = "You hand over two hefty pouches of gold. The man peeks inside the pouches before stuffing them into his coat.\n\n\"Enjoy your time in Norfolk,\" he says as he departs.";
+  var CRATE_ONE = "The soldiers put the crate down as you hand over a hefty pouch of gold. The man peeks inside the pouch before stuffing it into his coat.\n\n\"Enjoy your time in Norfolk,\" he says as he departs.";
+  var CRATE_TWO = "The soldiers put the crate down as you hand over two hefty pouches of gold. The man peeks inside the pouches before stuffing them into his coat.\n\n\"Enjoy your time in Norfolk,\" he says as he departs.";
+  var TAKE_IT = "The soldiers haul the goods away as the official writes your name in his ledger.";
+  var SEARCH = "\"As you may be aware, Admiral Key has ordered Avalon's port officials to crack down on smuggling. I've got orders to search every suspicious ship that docks here for illicit cargo. That includes yours, newcomer. We'll need to step aboard to conduct the search.\"";
+  var FEE = function (eyebrow) {
+    return "\"Is that so?\" he remarks" + (eyebrow ? ", raising an eyebrow" : "") + ". You pay the port fee to avoid any trouble, but he doesn't turn to leave.\n\n" + SEARCH;
+  };
+  var feeFx = [{ hook: "nor_port_fee" }, { flag: "nor_first_inspection_done" }, { meet: "snodgrass" }];
+  var HEAT5 = { heat: { faction: "avalon", delta: 5 } };
+  var takeIt = C("Take it, then.", ["Retreat"], R(TAKE_IT, [{ hook: "nor_confiscate" }, HEAT5]));
+  var bribeFound = K("Perhaps there's an additional \"wrong stamp\" fee? ({bribe_found})", ["Caution"], { type: "Bribe", dr: 3 },
+    R(CRATE_ONE, [{ hook: "nor_pay", what: "bribe_found", mult: 1 }]),
+    R("He shifts uncomfortably. He lowers his voice and whispers, \"Double.\"", [], "nor_fv1_double_found", { carry: true }),
+    R("", [], "nor_fv1_jail"),
+    { lockedUnless: { fn: "afford:bribe_found:1" }, lockedReason: "Not enough gold" });
+  var talkDown = function (label, appr, check) {
+    return K(label, appr, check,
+      R("He sizes you up for a moment. Finally, he cracks a smile.\n\n\"Put it down,\" he instructs the soldiers, before turning back to you. \"Just keep that on the ship and you won't have a problem.\" The three of them depart down the gangplank."),
+      R("He glances in both directions. \"I might reconsider if you made it worth my while.\"", [], "nor_fv1_limited", { carry: true }),
+      R("", [], "nor_fv1_jail"));
+  };
+  var haggle = function (dealText, what, back) {
+    return K("Surely we can come to a more acceptable arrangement.", ["Risk"], { type: "Haggle", dr: 2 },
+      R("You manage to reach an understanding.\n\n" + dealText, [{ hook: "nor_pay", what: what, mult: 1.5 }]),
+      R("You manage to reach an understanding, though it isn't as good as you would have liked.\n\n" + dealText, [{ hook: "nor_pay", what: what, mult: 1.75 }]),
+      R("He stands firm.", [{ flag: back + "_haggled" }], back),
+      { hiddenUnless: { all: [{ profession: "Merchant" }, { notFlag: back + "_haggled" }] }, lockedUnless: { fn: "afford:" + what + ":1.75" }, lockedReason: "Not enough gold" });
+  };
+
+  S("nor_fv1", {
+    title: "Hampton Roads", where: "Norfolk, Hampton Roads and the docks", conditions: ["Harbor", "Official"], manyChoices: true,
+    setup: [
+      "The bustling harbor of Norfolk is a hive of activity as you approach the mouth of the Elizabeth River. Merchant vessels, cargo ships, and a wide variety of coastal sailboats crisscross the river as fluffy white clouds glide lazily overhead.\n\n",
+      "Those busy boats, however, have an obstacle to avoid. Taking up nearly half the harbor is an enormous war fleet, consisting of at least two dozen ships of all sizes and classes. At the center of the formation, surrounded by several heavily-armed frigates, sits the largest ship you've ever seen. The sun gleams off her hull as you count at least fifty guns on one side of her, spread across three tall decks. She seems to have enough sail on her to move a small armada, and she casts a tremendous shadow over the harbor. The gold flag of Scotland fluttering atop her mainmast must be at least fifty feet wide. Two smaller ships of the line, still formidable, anchor either end of the harbor.\n\n",
+      { when: { fn: "hometown" }, text: "{years_since_raid}, this fleet might have saved {city}.\n\n" },
+      { when: { fn: "qmWarmth:warm" }, text: "\"Get a load of that beauty,\" [Quartermaster] remarks, awestruck by the titanic flagship. \"I've never seen anything like it.\"\n\n" },
+      { when: { fn: "qmWarmth:neutral" }, text: "\"I don't know about you, but I certainly wouldn't want to tangle with her,\" [Quartermaster] says of the flagship.\n\n" },
+      { when: { fn: "qmWarmth:cold" }, text: "\"Don't let her size fool you; she's only as good as her captain,\" cautions [Quartermaster]. \"And the Scottish navy has a rather spotty track record in that department.\"\n\n" },
+      "As you pull slowly into the harbor, giving the fleet a wide berth, you take notice of the infrastructure required to support a fleet like that. Spacious warehouses and sturdy wharves line the waterfront, and a small army of porters, sailors, and craftsmen work at a brisk pace up and down the length of the docks.\n\n",
+      "As your crew ties {ship} up at one of the many docks and you disembark, you're met by a bookish man in an official-looking gold uniform, with his spectacles pushed to the end of his nose, carrying a thick ledger underneath his arm. He's flanked by two uniformed soldiers carrying polished muskets.\n\n",
+      { when: { tag: "Brute" }, text: "The soldiers' hands tense around their muskets as they watch you step onto the docks.\n\n" },
+      "\"Welcome to Norfolk,\" he says in a nasally voice. \"The fee to dock here is {port_fee}. May I inquire as to the purpose of your visit?\" Judging by the soldiers, the question doesn't stem from innocent curiosity.",
+    ],
+    choices: [
+      C("Quite the fleet you have here.", [], R("The man nods curtly. \"It's the finest fleet Scotland has ever produced. And its presence has been good for the city's economy. We're all grateful that Admiral Key is here.\"", [{ flag: "nor_fv1_fleet" }], "nor_fv1"), { info: true }),
+      C("Who is Admiral Key?", [], R("\"Admiral Key is the fleet's ranking officer. He's really turned the city around since his arrival.\"", [], "nor_fv1"), { info: true, hiddenUnless: { flag: "nor_fv1_fleet" } }),
+      C("My name is Captain {captain.last}. I've got business here in Norfolk.", ["Honor"], R(FEE(false), feeFx, "nor_fv1_search")),
+      C("We're simple traders. Our hold contains cargo in search of a buyer.", ["Caution"], R(FEE(false), feeFx, "nor_fv1_search")),
+      C("Don't worry, we won't be staying long.", ["Caution"], R(FEE(false), feeFx, "nor_fv1_search")),
+      C("My business is my own. I'll just pay the fee and be on my way.", ["Defiance"], R(FEE(true), feeFx, "nor_fv1_search")),
+    ],
+  });
+
+  S("nor_fv1_search", {
+    kind: "check", title: "Hampton Roads", where: "Norfolk, the docks", conditions: ["Harbor", "Official"],
+    setup: SEARCH,
+    choices: [
+      C("By all means.", ["Caution"], R("", [], "nor_fv1_hold")),
+      K("I'd be happy to help.", ["Deceit"], { type: "Smuggle", dr: 2 },
+        R("You keep the official occupied looking through barrels of your provisions. Eventually, he nods to the soldiers, and the three of them depart."),
+        R("", [{ hook: "nor_least" }], "nor_fv1_hold"),
+        R("", [], "nor_fv1_hold"),
+        { hiddenUnless: { profession: "Smuggler" } }),
+      K("That won't be necessary. It was actually Admiral Key who summoned me here.", ["Deceit", "Risk"], { type: "Bluff & Disguise", dr: 3 },
+        R("He steps back. \"Oh, you must be the timber merchant from New Scotland that he mentioned! I apologize for the trouble. Enjoy your time in Norfolk.\" He and the soldiers depart without another word."),
+        R("He steps back and sizes you up. \"Hmm, I'm not sure that I buy that story, but the inspection is at my discretion. I might reconsider if you made it worth my while.\"", [], "nor_fv1_deal", { carry: true }),
+        R("\"A likely story. Unfortunately, the inspection is required of all ships.\"", [], "nor_fv1_hold")),
+      // Bribe: base DR 1, +1 at an Admiralty port (records §5). DEFAULT: Heat's step (§6) isn't added yet.
+      K("I'm just now realizing I gave you the wrong amount for the port fee earlier. Here's the rest. ({bribe_before})", ["Caution"], { type: "Bribe", dr: 2 },
+        R(DEAL_ONE, [{ hook: "nor_pay", what: "bribe_before", mult: 1 }]),
+        R("He shifts uncomfortably. He lowers his voice and whispers, \"Double.\"", [], "nor_fv1_double_before", { carry: true }),
+        R("\"You must be mistaken. I'm under orders to search every suspicious ship.\"", [], "nor_fv1_hold"),
+        { lockedUnless: { fn: "afford:bribe_before:1" }, lockedReason: "Not enough gold" }),
+    ],
+  });
+
+  S("nor_fv1_deal", {
+    title: "Hampton Roads", where: "Norfolk, the docks",
+    setup: "He steps back and sizes you up. \"Hmm, I'm not sure that I buy that story, but the inspection is at my discretion. I might reconsider if you made it worth my while.\"",
+    choices: [
+      C("Deal. ({bribe_before})", ["Caution"], R(DEAL_ONE, [{ hook: "nor_pay", what: "bribe_before", mult: 1 }]), { lockedUnless: { fn: "afford:bribe_before:1" }, lockedReason: "Not enough gold" }),
+      C("That's too much.", ["Defiance"], R("\"Shame. In that case the inspection is required.\"", [], "nor_fv1_hold")),
+    ],
+  });
+
+  S("nor_fv1_double_before", {
+    kind: "check", title: "Hampton Roads", where: "Norfolk, the docks", repeat: "always", conditions: ["Harbor", "Official"],
+    setup: "He shifts uncomfortably. He lowers his voice and whispers, \"Double.\"",
+    choices: [
+      haggle(DEAL_ONE, "bribe_before", "nor_fv1_double_before"),
+      C("Deal. ({bribe_before_2})", ["Caution"], R(DEAL_TWO, [{ hook: "nor_pay", what: "bribe_before", mult: 2 }]), { lockedUnless: { fn: "afford:bribe_before:2" }, lockedReason: "Not enough gold" }),
+      C("That's too much.", ["Defiance"], R("\"In that case, we'll have to search your hold.\"", [], "nor_fv1_hold")),
+    ],
+  });
+
+  S("nor_fv1_hold", {
+    kind: "check", title: "Hampton Roads", where: "Norfolk, the docks", conditions: ["Harbor", "Official"], manyChoices: true,
+    setup: [
+      "The official and soldiers walk up the gangplank and head down into your hold.\n\n",
+      { when: { fn: "noDirty" }, text: "They emerge a few minutes later. \"Everything appears in order. Enjoy your time in Norfolk,\" the official says as they depart." },
+      { when: { fn: "dirtyAtRisk" }, text: "They emerge a few minutes later, the soldiers carrying a crate of {dirty_good} between them.\n\n\"This appears to be missing the proper customs seal,\" the official says." },
+    ],
+    choices: [
+      C("Continue", [], R(""), { hiddenUnless: { fn: "noDirty" } }),
+      Object.assign({}, takeIt, { hiddenUnless: { fn: "dirtyAtRisk" } }),
+      Object.assign(talkDown("Ah, that must be a mistake. The official who was stamping the crates upon our departure seemed quite harried.", ["Deceit"], { type: "Bluff & Disguise", dr: 3 }), { hiddenUnless: { fn: "dirtyAtRisk" } }),
+      Object.assign(talkDown("Oh, is it? Surely there's a way we can remedy this, one honest {captain.man} to another.", ["Caution"], { type: "Persuade", dr: 3 }), { hiddenUnless: { fn: "dirtyAtRisk" } }),
+      Object.assign({}, bribeFound, { hiddenUnless: { fn: "dirtyAtRisk" } }),
+    ],
+  });
+
+  S("nor_fv1_limited", {
+    kind: "check", title: "Hampton Roads", where: "Norfolk, the docks", conditions: ["Harbor", "Official"],
+    setup: "He glances in both directions. \"I might reconsider if you made it worth my while.\"",
+    choices: [takeIt, bribeFound],
+  });
+
+  S("nor_fv1_double_found", {
+    kind: "check", title: "Hampton Roads", where: "Norfolk, the docks", repeat: "always", conditions: ["Harbor", "Official"],
+    setup: "He shifts uncomfortably. He lowers his voice and whispers, \"Double.\"",
+    choices: [
+      haggle(CRATE_ONE, "bribe_found", "nor_fv1_double_found"),
+      C("Deal. ({bribe_found_2})", ["Caution"], R(CRATE_TWO, [{ hook: "nor_pay", what: "bribe_found", mult: 2 }]), { lockedUnless: { fn: "afford:bribe_found:2" }, lockedReason: "Not enough gold" }),
+      C("That's too much.", ["Defiance"], R("", [], "nor_fv1_jail")),
+    ],
+  });
+
+  // Jail follows §43 (Milestone 8); until then the story ends here (§37.1).
+  S("nor_fv1_jail", {
+    kind: "beat", title: "Hampton Roads", where: "Norfolk, the docks",
+    setup: "\"You must be mistaken. Smugglers face consequences here in Norfolk,\" he says with a smarmy grin. \"Take {captain.him}.\"\n\nThe two large soldiers drop the crate and seize you by both arms as more armed soldiers march up the dock. Your crew watches on helplessly as you're hauled off to prison.",
+    choices: [C("Continue", [], R("", [{ hook: "nor_confiscate" }, HEAT5, { hook: "nor_jail" }], "end"))],
+  });
+
+  // ---- Beat 2: Horace's tavern (records §7) ---------------------------------------------
+
+  var warm = [{ ladder: { npc: "horace", delta: 1 }, when: { notFlag: "horace_warmed" } }, { flag: "horace_warmed" }];
+  var left = R("\"Hm, suit yourself.\" He heads back into the bar.", [{ flag: "horace_left" }]);
+
+  S("nor_ht_1", {
+    title: "Horace's Tavern", where: "Norfolk, outside Horace's tavern",
+    setup: "As you walk up the street, you pass by a bustling establishment with \"HORACE'S TAVERN\" written over the door.\n\nBy morning standards, the tavern is positively riotous. A multitude of muffled sounds emanate from behind the intricately carved wooden door. The laughter, shouting, screaming, and crying of its many patrons are audible all the way across the street. A large bay window that would otherwise offer a look inside the tavern instead displays only the backsides of dozens of sailors and marines pressed up against it.\n\nOutside the tavern, a stooped, balding man with a thick white beard is attempting unsuccessfully to strike a spark from his tinderbox to light his pipe. He wears a grimy apron, and he appears to be getting increasingly agitated with each fruitless strike of the flint.\n\nAs you walk by, he grabs your attention. \"Hey, you! Got a light?\"",
+    choices: [
+      C("Uh, sure. *hand the man your tinderbox*", ["Generosity"], R("\"Thanks,\" he says out of the corner of his mouth as he finally manages to light his carved wooden pipe. He takes a long drag and sighs deeply as he exhales the smooth tobacco smoke.", [], "nor_ht_2")),
+      C("What's the matter with you?", [], R("\"Lend me a light and I'll tell you every secret I know,\" he replies sardonically.", [{ flag: "nor_ht_matter" }], "nor_ht_1"),
+        { info: true, lockedUnless: { notFlag: "nor_ht_matter" }, lockedReason: "Asked" }),
+      C("I don't have time for this.", [], R("", [{ flag: "horace_left" }])),
+    ],
+  });
+
+  S("nor_ht_2", {
+    title: "Horace's Tavern", where: "Norfolk, outside Horace's tavern",
+    setup: "He leans back against the brick wall and hands your tinderbox back. \"You ever gotten something you think you want, only to discover that you think you like it a whole lot less than you thunk?\"",
+    choices: [
+      C("I know the feeling well.", [], R("He nods slowly, taking another deep drag from his pipe. \"Something about folk like us. Like God just put us here to have a good laugh.\"", warm, "nor_ht_3")),
+      C("Can't say that I have.", [], R("\"Hmph. Must be nice to live with nothing but sunshine and daisies.\"", [], "nor_ht_3")),
+      C("I'm not sure I understand.", [], R("\"Ah, so it's just rocks in there where the brains should be.\"", [], "nor_ht_3")),
+    ],
+  });
+
+  S("nor_ht_3", {
+    title: "Horace's Tavern", where: "Norfolk, outside Horace's tavern", manyChoices: true,
+    setup: "\"See that lot in there? The ones currently destroying my tavern? They've been in there for three bloody days. These locusts have been drinking me dry, and wrecking my beloved establishment, ever since they arrived. Makes me wish Norfolk was a shithole again.\"",
+    choices: [
+      C("Your tavern? Are you Horace?", [], R("\"Unfortunately I am. Built this place with my own two hands, and now look what's happened.\"", [{ meet: "horace" }], "nor_ht_3"), { info: true }),
+      C("Business must be good.", [], R("He raises his voice and shakes his fist at the sky. \"But at what cost? At what cost?!\"", [], "nor_ht_3"), { info: true }),
+      C("That's a beautiful pattern on the door. Did you carve it yourself?", [], R("\"Sure did. About time somebody with eyes walks by.\"", warm, "nor_ht_4"), { hiddenUnless: { profession: "Artisan" } }),
+      C("I know it doesn't mean much coming from a stranger, but I sympathize.", [], R("\"I appreciate it nonetheless. And I appreciate the light.\"", warm, "nor_ht_4")),
+      C("Anything you need help with?", [], R("He raises his eyebrows. \"Sure. Invade Scotland. Then maybe the locusts will have to fly home.\"", [{ flag: "asked_horace_help" }], "nor_ht_4")),
+      C("You sound ungrateful.", [], R("\"Oh, I'm the King of the Ingrates. Call me whatever you like, I'm miserable all the same.\"", [], "nor_ht_4")),
+    ],
+  });
+
+  S("nor_ht_4", {
+    title: "Horace's Tavern", where: "Norfolk, outside Horace's tavern",
+    setup: "\"Say, stranger, how about you head back in with me? I've enjoyed our conversation, and owe you a drink for the light.\"",
+    choices: [
+      C("That sounds excellent.", [], R("", [], "nor_ht_inside")),
+      C("I'd never turn down a free drink.", ["Revelry"], R("", [], "nor_ht_inside")),
+      C("That's very generous of you, but I have to be going.", [], left),
+      C("No thanks. Looks awful.", [], left),
+    ],
+  });
+
+  S("nor_ht_inside", {
+    title: "Horace's Tavern", where: "Norfolk, Horace's tavern",
+    setup: [
+      "He empties his pipe on the ground, then pushes the door open. The wall of sound that greets you is deafening. Gold-coated soldiers stand shoulder to shoulder, a solid mass of inebriated young men.\n\nHorace puts his shiny head down and pushes his way through the crowd like a heavy plow. You follow in his wake.\n\n",
+      { when: { gender: "f" }, text: "You feel more than one pair of eyes fall upon you as you step toward the bar.\n\n" },
+      "\"Move over, you damnable pest!\" Horace shouts as he reaches the bar, before throwing a red-faced soldier off one of the stools. He turns to you and pats the seat, newly yours, as the soldiers clear a bit of space.\n\nAs you take a seat at the bar, the nearby soldiers return to their revelry. Horace pushes his way behind the bar to join a stern-faced barmaid hurriedly pouring foaming mugs of ale. She's moving with great urgency and shouting back at the soldiers as they toss their gold on the bartop. Horace slowly bends down to grab a bottle of whiskey and takes a deep swig.\n\n\"What'll it be?\"",
+    ],
+    choices: [
+      C("Ale, please.", [], R("\"You and everyone else,\" he laments. \"Martha! One more down here!\"\n\nWithout looking, the barmaid slides a full mug down the bar. The ale is coarse and extremely forgettable.", [{ meet: "horace" }, { meet: "martha" }], "nor_ht_room")),
+      C("I prefer wine.", [], R("\"Suit yourself, fancypants. I think I've got one last bottle of Burgundian red around here.\" He pours you a glass from a dusty bottle, and it's completely unremarkable.", [{ meet: "horace" }], "nor_ht_room")),
+      C("I'll take some of that whiskey.", ["Revelry"], R("He hands you the bottle. \"Have the rest,\" he shouts. \"I don't care anymore.\" You take a sip. It's very strong, but tastes as though it was aged in the hold of a filthy ship.", [{ meet: "horace" }], "nor_ht_room")),
+      C("Have anything weaker? A glass of milk, perhaps?", [], R("He nearly spits out his whiskey. \"I cannot believe you just asked that,\" he cackles. \"Hey, Martha!\" He tries and fails to get the barmaid's attention. \"Did you hear what {captain.he} just said? Milk! Ha!\"", [{ flag: "nor_ht_milk" }], "nor_ht_inside"),
+        { info: true, lockedUnless: { notFlag: "nor_ht_milk" }, lockedReason: "Asked" }),
+    ],
+  });
+
+  S("nor_ht_room", {
+    kind: "beat", title: "Horace's Tavern", where: "Norfolk, Horace's tavern",
+    setup: [
+      "Now that you have a bit of space, you take a quick scan around the room.\n\n",
+      { when: { not: { fn: "variantC" } }, text: "Behind the bar is a poster, with big, bold letters at the top reading \"WANT TO GET RICH? CAPTAINS WANTED.\"\n\n" },
+      { when: { fn: "variantC" }, text: "Behind the bar are two posters. One has big, bold letters at the top reading \"WANT TO GET RICH?\" The other appears to be a wanted bill.\n\n" },
+      "In addition, the stout, middle-aged man sitting at the bar to your right strikes you as out of place. He isn't partaking in the revelry; in fact, quite the opposite. He stares straight ahead, holding a bottle of whiskey with a fist the size of a cannonball.",
+    ],
+    choices: [C("Continue", [], R("", [{ flag: "horace_met" }, { flag: "saw_howe_advert" }, { meet: "horace" }]))],
+  });
+
+  S("nor_ht_reentry", {
+    kind: "beat", title: "Horace's Tavern", where: "Norfolk, Horace's tavern",
+    firesWhen: { all: [{ flag: "horace_left" }, { notFlag: "horace_met" }] },
+    setup: "You have to elbow your way through a pack of marines to sit at the lone open barstool. Behind the bar, a look of recognition passes across the face of the white-bearded bartender, who then pretends to not hear you as you try to order a drink.",
+    choices: [C("Continue", [], R("", [{ meet: "horace" }], "nor_ht_room"))],
+  });
+
+  // ---- Godfrey at the bar (records §7, menu item 5) ---------------------------------------
+
+  var HIRED = R("\"Hrmph.\" He grabs your gold off the bartop and takes one last swig from his bottle before heaving himself off the stool.\n\n\"I'll be at the docks,\" he mumbles as he lumbers off.", [{ hook: "godfrey_join" }]);
+  var CAN_PAY = { gold: { pot: "crew", atLeast: 1000 } };
+
+  S("nor_godfrey_talk", {
+    title: "Horace's Tavern", where: "Norfolk, Horace's tavern",
+    setup: "You ask him a question, but he doesn't respond beyond a barely-audible grunt. \"Don't mind him,\" says Horace. \"Ol' Nick Godfrey's a right curmudgeon.\"\n\nHe leans in and lowers his voice. \"Believe it or not, he used to be one of the finest gunners in Avalon's navy. He was on one of the few ships Deadman didn't manage to sink. They say none of the French ships wanted to come in range.\"",
+    choices: [
+      C("You were a navy gunner? I'm looking for experienced officers for my crew.", [], R("", [{ flag: "godfrey_met" }, { meet: "godfrey" }], "nor_godfrey_pay")),
+      C("Leave him alone.", [], R("", [{ flag: "godfrey_met" }, { meet: "godfrey" }])),
+    ],
+  });
+
+  S("nor_godfrey_pay", {
+    title: "Nicholas Godfrey", where: "Norfolk, Horace's tavern", repeat: "always",
+    setup: "This does elicit a response. He turns his meaty head and sizes you up and down with narrow eyes. \"You payin'?\"",
+    choices: [
+      C("Sure am. (Hire Nicholas Godfrey as a gunner)", [], HIRED, { hiddenUnless: { not: { fn: "gunnerAboard" } }, lockedUnless: CAN_PAY, lockedReason: "Needs 1,000 crew gold" }),
+      C("Sure am. (Hire Nicholas Godfrey as a gunner)", [], R("", [], "nor_godfrey_replace"), { hiddenUnless: { fn: "gunnerAboard" }, lockedUnless: CAN_PAY, lockedReason: "Needs 1,000 crew gold" }),
+      C("Don't have the coin today, I'm afraid.", [], R("\"Hrmph.\" He turns away and takes a big swig from his bottle.")),
+    ],
+  });
+
+  // The replacement warning (§25.7, ruled: no line from the officer).
+  S("nor_godfrey_replace", {
+    title: "Nicholas Godfrey", where: "Norfolk, Horace's tavern", repeat: "always",
+    setup: "Hiring Nicholas Godfrey replaces {gunner_name}, your Gunner, who is dismissed with {dismiss_pay} crew gold.",
+    choices: [
+      C("Hire him anyway", [], HIRED, { lockedUnless: CAN_PAY, lockedReason: "Needs 1,000 crew gold" }),
+      C("Go back", [], R("")),
+    ],
+  });
+
+  // ---- The Apprentices (Part 4 §10; partials ruled) -------------------------------------
+
+  var APP_SET = { setback: R("You only make things worse. Christoph shoos you away from his ship. \"Out, before you sink her at the dock!\"", [{ ap: -1 }, { seasonFlag: "nor_appr_failed" }]) };
+  var DONE = { flag: "nor_appr_done" };
+  S("nor_appr", {
+    kind: "check", title: "The Apprentices", where: "Norfolk, the Dockyard", repeat: "always", manyChoices: true,
+    setup: "Christoph shakes his head. \"You don't know the half of it.\" He points at a half-built hull with the planks sticking out at exceedingly odd angles. \"Three days' work, and that's the best they could do. I've got a small army of clowns on my hands.\"",
+    choices: [
+      K("Let me take a look.", [], { type: "Repair & Refit", dr: 2 },
+        R("By sundown the planks sit flush. Christoph runs his hand along the seams. \"Not bad. Not bad at all.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
+        R("The planks sit flush at last, but only after you've split half a stack of good timber. Christoph sighs and hands you the bill.", [{ ladder: { npc: "christoph", delta: 1 } }, { hook: "pay_gold", amount: 100 }, DONE, { ap: -1 }]),
+        APP_SET.setback),
+      C("Would a more experienced assistant help? I've got a hand who knows his way around a hull.", ["Generosity"],
+        R("Within the hour, the boys are following your man's lead. \"Now this is more like it,\" Christoph says. \"I owe you, Captain.\"", [{ hook: "lose_hand" }, { ladder: { npc: "christoph", delta: 2 } }, DONE]),
+        { hiddenUnless: { fn: "seasonedHand" } }),
+      K("Go easy on them. They're boys, and they're still learning. Remember what you were like at that age?", ["Generosity"], { type: "Persuade", dr: 2 },
+        R("Christoph glares at the timber, then at the boys. \"At least I had a hair more respect back then. But I take your point. I'll give them one more chance.\" The chastened boys look at you like you hung the moon.", [{ ladder: { npc: "christoph", delta: 1 } }, { flag: "nor_free_repair" }, DONE, { ap: -1 }]),
+        R("Christoph grumbles, but agrees to give the boys another chance. \"Don't expect any favors for it, though.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
+        APP_SET.setback),
+      C("Hand me that saw. I'll show them how it's done.", [],
+        R("By sundown the planks sit flush. Christoph runs his hand along the seams. \"Not bad. Not bad at all.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
+        { hiddenUnless: { profession: "Artisan" } }),
+      C("Sounds like your problem, not mine.", [], R("")),
+    ],
+  });
+
+  // ---- Barkeep favors (§16.6; Part 4 §10) --------------------------------------------------
+  // fav_<node>_<set>_<type>: once a season; 0 AP to accept, 1 to do. Clean:
+  // the keeper +1 rung; partial: +1 at a cost; setback: nothing.
+
+  var HORACE_DONE = "\n\n\"Well, that could have gone worse.\"";
+  function favor(node, set, type, setup, approaches, outs) {
+    var offer = node === "norfolk" ? "\"Hey, you. Yes, you. I've got something I could use your help with.\"\n\n" : "";
+    var done = node === "norfolk" ? HORACE_DONE : "";
+    var place = { title: "A Favor for the Keeper", where: node === "norfolk" ? "Norfolk, Horace's tavern" : "Ocracoke, the Tavern" };
+    S("fav_" + node + "_" + set + "_" + type, Object.assign({
+      kind: "check", repeat: "season", setup: offer + setup, manyChoices: true,
+      choices: approaches.map(function (a) {
+        return K(a.label, a.approval, a.check,
+          R(outs[0] + done, [{ hook: "keeper_rung", delta: 1 }, { ap: -1 }]),
+          R(outs[1], [{ hook: "keeper_rung", delta: 1 }, { hook: "pay_gold", amount: 25 }, { ap: -1 }]),
+          R(outs[2], [{ ap: -1 }]),
+          a.more || { lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" });
+      }).concat([C("Not tonight.", [], R(""))]),
+    }, place));
+  }
+  var FIGHT = function (l1, l2) { return [{ label: l1, approval: ["Risk"], check: { type: "Brawling", dr: 2 } }, { label: l2, approval: ["Order"], check: { type: "Intimidate", dr: 2 } }]; };
+  var TAB = function (l1, l2, merchant) {
+    var a = [{ label: l1, approval: ["Honor"], check: { type: "Persuade", dr: 2 } }, { label: l2, approval: ["Order"], check: { type: "Intimidate", dr: 2 } }];
+    if (merchant) a.push({ label: merchant, approval: ["Honor"], check: { type: "Persuade", dr: 1 }, more: { hiddenUnless: { profession: "Merchant" }, lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" } });
+    return a;
+  };
+  var BAR = function (l) { return [{ label: l, approval: ["Revelry"], check: { type: "Tavern Talk", dr: 2 } }]; };
+
+  // Horace, set A
+  favor("norfolk", "a", "fight", "A scuffle between two marines has turned into an all-out brawl. Horace points their way. \"Would you mind doing something about them?\"",
+    FIGHT("*walk up and start swinging*", "Break it up, or you won't have teeth by the end of the night."),
+    ["The marines slink back to their seats, rubbing their new bruises.", "You break it up, but not before a stool goes through the bay window.", "Someone's fist finds your jaw, and the whole room joins in."]);
+  favor("norfolk", "a", "tab", "\"See the fancy lieutenant in the corner? He owes me forty in gold and a bottle of brandy. Go remind him.\"",
+    TAB("Let's settle up before your captain hears about this.", "*loom over him and crack your knuckles*", "Let's work out a payment plan."),
+    ["He pays up with a sheepish grin.", "He pays half, and spits on your boots for good measure.", "He laughs in your face and orders another round on Horace's tab."]);
+  favor("norfolk", "a", "bar", "\"I need a smoke and some quiet. You're on the bar. Don't let Martha kill anyone.\"",
+    BAR("*pour with a flourish and start up a shanty*"),
+    ["When Horace returns, the whole room is singing and the till is full.", "The till is full, but the floor is covered in broken glass.", "You lose count of the free drinks you've poured. Horace comes back to an empty till."]);
+  // Horace, set B
+  favor("norfolk", "b", "fight", "Two sailors are rolling across the floor, fighting over the last bottle of rum. Horace looks at you forlornly.",
+    FIGHT("*pull them apart by their belts*", "Next man to swing goes into the river."),
+    ["They let go of each other, and the bottle.", "They stop, but the bottle smashes on the floor.", "They both turn on you."]);
+  favor("norfolk", "b", "tab", "\"That fellow by the door has been drinking on credit for weeks. Think you could have a word?\"",
+    TAB("Time to pay the man, friend.", "Pay up or I'll toss you in the river.", "Let's work out a payment plan."),
+    ["He empties his pockets onto the bar.", "He hands over a few coins and a rusty knife.", "He bolts out the door and disappears down the alley."]);
+  favor("norfolk", "b", "bar", "\"Watch the bar a minute, would you? And don't drink it all.\"",
+    BAR("*pour generous servings and tell your best story*"),
+    ["Horace returns to a bar filled with raucous laughter.", "Everyone's happy, but the rum barrel is nearly empty.", "A brawl breaks out over your story's ending."]);
+  // Ocracoke's keeper (role lines, †, approved)
+  favor("ocracoke", "o", "fight", "Two pirates are rolling across the floor, fighting over the last bottle of kill-devil. The keeper looks at you hopefully.",
+    FIGHT("*pull them apart by their belts*", "Next man to swing goes in the sound."),
+    ["They let go of each other, and the bottle.", "They stop, but the bottle smashes on the floor.", "They both turn on you."]);
+  favor("ocracoke", "o", "tab", "\"That fellow by the door has been drinking on credit since spring. Think you could have a word?\"",
+    TAB("Time to pay the man, friend.", "*rest your hand on your cutlass*", null),
+    ["He empties his pockets onto the bar.", "He hands over a few coins and a rusty knife.", "He bolts out the door and into the dunes."]);
+  favor("ocracoke", "o", "bar", "\"Watch the bar a minute, would you? And don't drink it all.\"",
+    BAR("*pour generous measures and tell your best story*"),
+    ["The sad sacks are laughing for the first time in weeks.", "Everyone's happy, but the rum barrel is nearly empty.", "A brawl breaks out over your story's ending."]);
+
+  Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });
+
+  // How each is presented (§41.1): the place's banner and heading, and who.
+  var P = PC.data.nodes.norfolk.present.scenes;
+  Object.keys(scenes).forEach(function (id) {
+    if (/^nor_fv1/.test(id)) P[id] = { place: "arrival", person: "snodgrass" };
+    else if (/^nor_ht_[1-4]$/.test(id)) P[id] = { place: "tavern", heading: "Outside Horace's Tavern" };
+    else if (/^nor_ht|^fav_norfolk/.test(id)) P[id] = { place: "tavern", person: "horace" };
+    else if (/^nor_godfrey/.test(id)) P[id] = { place: "tavern", person: "godfrey" };
+    else if (id === "nor_appr") P[id] = { place: "docks", person: "christoph" };
+  });
+  PC.data.nodes.norfolk.firstArrival = "nor_fv1";
+  PC.data.nodes.norfolk.firstEntry = Object.assign(PC.data.nodes.norfolk.firstEntry || {}, { tavern: ["nor_ht_1", "nor_ht_reentry"] });
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -17720,7 +18553,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // The year's recap (Milestone 7; its words are the author's to write, PH7).
     if (v.how === "year" && v.year) rows.unshift(["This year", "Prizes taken " + v.year.prizes + " · your purse " + (v.year.purse >= 0 ? "+" : "−") + gold(Math.abs(v.year.purse)) +
       " · " + (v.year.split ? "the crew split in Winter" : "no split") + (v.year.tradeShip ? " · trade ship: the " + esc(v.year.tradeShip) : "") + " · ports: " + esc(v.year.visited.join(", "))]);
-    var how = v.how === "stopped" || v.how === "year" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[v.how === "died" ? "died" : "captured"]) + "</div>";
+    var how = v.how === "stopped" || v.how === "year" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[(state.gameOver && PC.data.huntLines.gameOver[state.gameOver.line]) ? state.gameOver.line : v.how === "died" ? "died" : "captured"]) + "</div>";
     root.innerHTML = frame('<div class="endscreen" style="padding:18px 16px 32px;max-width:720px;margin:0 auto">' + '<p class="sc" style="margin:0">' + esc(v.season) + "</p>" +
       '<h2 class="title">' + esc(head) + "</h2>" + how +
       '<div class="person" style="margin:12px 0">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:96px;height:auto">' : sil(72, 108)) +
@@ -18413,7 +19246,39 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
       }).join("") + "</div></div>";
     }
-    return html + "</div>" + DIVIDER + officersBlock();
+    return html + "</div>" + nodeExtras("tavern") + DIVIDER + officersBlock();
+  }
+
+  // Norfolk's own entries and the barkeep favor (Milestone 7, PR 5; records
+  // §7 and §10, §16.6). The rules are in js/norfolk.js.
+  function nodeExtras(place) {
+    var id = N().here(state), f = state.flags, list = [];
+    if (place === "tavern") {
+      var fav = PC.norfolk.favorOffer(state);
+      if (fav) list.push(opt({ act: "enter", attrs: 'data-scene="' + esc(fav.scene) + '"', label: "A favor for " + esc(PC.npcs.get(state, who("keeper")).first),
+        meta: "Once a season · no action to hear him out, 1 to do it. Clean: he thinks better of you. Partial: the same, at a cost.", lock: fav.ok ? null : fav.why }));
+      if (id === "norfolk" && f.horace_met) {
+        var NL = N().nodeData(id).lines;
+        if (!f.nor_drunken_sailors) list.push(opt({ act: "dsask", label: f.asked_horace_help ? NL.drunkenSailors.askAgain : NL.drunkenSailors.ask, meta: "No action" }));
+        var have = PC.norfolk.liquorAboard(state).reduce(function (a, x) { return a + x.n; }, 0);
+        if (f.nor_drunken_sailors) list.push(opt({ act: "horacesell", label: PC.norfolk.dsOpen(state) ? "Bring Horace your good liquor" : "Sell Horace good liquor",
+          meta: (PC.norfolk.dsOpen(state) ? "Drunken Sailors: " + PC.norfolk.delivered(state) + " of 30 delivered. He pays half again Norfolk's price for clean liquor, the plain price for dirty." :
+            "A quarter over Norfolk's price for clean liquor, the plain price for dirty.") + " No action · " + plural(have, "unit") + " aboard" + (PC.norfolk.pendragonOpen(state) ? " (no wine)" : "") + ".",
+          lock: have ? null : "No good liquor aboard" }));
+        list.push(opt({ act: "horaceask", attrs: 'data-q="advert"', label: NL.horaceAsk.advert, meta: "No action" }));
+        if (PC.norfolk.variantCActive(state) && !f.gregoire_bill_lead) list.push(opt({ act: "horaceask", attrs: 'data-q="bill"', label: NL.horaceAsk.bill, meta: "No action" }));
+        if (!f.godfrey_hired && !PC.officers.aboard(state).some(function (o) { return o.id === "godfrey"; })) {
+          list.push(opt({ act: "enter", attrs: 'data-scene="' + (f.godfrey_met ? "nor_godfrey_pay" : "nor_godfrey_talk") + '"', label: f.godfrey_met ? NL.horaceAsk.godfreyAgain : NL.horaceAsk.godfrey, meta: "No action" }));
+        }
+      }
+    }
+    if (place === "docks" && id === "norfolk" && (state.npcs.christoph || {}).met && !f.nor_appr_done) {
+      var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
+      list.push(opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
+        meta: "The Apprentices · 1 action to help", lock: failed ? "Christoph wants you away from his ship until next season" : state.ap.left < 1 ? "No actions left this season" : null }));
+    }
+    if (!list.length) return "";
+    return DIVIDER + '<div class="block"><div class="h4">' + (place === "tavern" ? "At the bar" : "Around the yard") + "</div>" + opts(list) + "</div>";
   }
 
   // Officer recruitment (§25.7): two seats a season.
@@ -18480,6 +19345,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         html += '<div class="buyrow">' + qstep("q-repair", fix, fix) + '<button class="secondary" data-act="repair" data-for="q-repair">Repair</button> ' +
           totalSlot(function () { var n = val("q-repair"); return n + " points · " + gold(N().repairCost(state, n)) + " gold" + (N().repairTakesAP(state, n) ? " · 1 action" : ""); }) + "</div>" +
           '<div class="actions" style="margin-top:8px"><button class="secondary" data-act="repair" data-all="1"' + (N().repairTakesAP(state, missing) ? ' data-cost-ap="1"' : "") + ">Repair all · " + gold(N().repairCost(state, missing)) + " gold" + (N().repairTakesAP(state, missing) ? " · 1 action" : "") + "</button></div>" +
+          (state.flags.nor_free_repair && N().here(state) === "norfolk" ? '<p class="note">Christoph owes you one repair: your next one here is free.</p>' : "") +
           '<p class="note">' + gold(per) + " gold a point. A repair of " + Math.ceil(0.25 * sh.hullMax) + " points or more takes an action." + (sh.rigging === "frayed" ? " Any repair fixes the frayed rigging." : "") + "</p>";
       } else html += '<p class="note">Nothing to fix.</p>';
       html += "</div>";
@@ -18561,7 +19427,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
             '<button class="secondary" data-act="payoff" data-tier="' + t + '" data-for="q-off-' + t + '">Put ashore</button></div></td></tr>';
         }).join("") + "</table></details>";
     }
-    return html + "</div>";
+    return html + "</div>" + nodeExtras("docks");
   }
 
   // ---- Optional rolls (§41.1): marked optional, every outcome stated ----
@@ -20173,6 +21039,34 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship:stores", null, "The crew drink to your health.", null, null, { chips: [moraleChip(m)] }); },
     "closepopup": function () { state.location.popup = null; },
+    "popupscene": function () {
+      state.location.popup = null;
+      var nx = N().nextQueued(state);
+      if (nx) PC.scenes.enterScene(state, nx);
+    },
+    "dsask": function () {
+      var id = who("keeper"), D = N().nodeData("norfolk").lines.drunkenSailors;
+      var again = state.flags.asked_horace_help;
+      state.flags.nor_drunken_sailors = true;
+      PC.state.addLog(state, "Journal: Drunken Sailors. " + D.objective);
+      state.journalDot = true;
+      say(id, firstName(id), again ? D.replyAgain : D.reply, null, null, { ask: again ? D.askAgain : D.ask });
+    },
+    "horacesell": function () {
+      var id = who("keeper"), HL = N().nodeData("norfolk").lines.horaceLiquor;
+      var r = PC.norfolk.sellToHorace(state);
+      say(id, firstName(id), r.line, null, null, { ask: HL.open, chips: r.gold ? [{ icon: "gold", text: "+" + gold(r.gold) + " crew gold for " + plural(r.units, "unit") }] : null });
+    },
+    "horaceask": function (el) {
+      var id = who("keeper"), A = N().nodeData("norfolk").lines.horaceAsk;
+      if (el.dataset.q === "bill") {
+        PC.quests.addLead(state, "what_was_lost", "gregoire_bill");
+        state.flags.gregoire_bill_lead = true;
+        say(id, firstName(id), A.billReply, null, null, { ask: A.bill, heardNote: "A lead · Journal updated." });
+        return;
+      }
+      say(id, firstName(id), A.advertReply, null, null, { ask: A.advert });
+    },
     // ---- Milestone 7: the chart, voyages, the season loop ----
     "openmap": function () { mapSel = null; menu = null; state.current = { screen: "map" }; },
     "closemap": function () { mapSel = null; state.current = { screen: "node" }; },

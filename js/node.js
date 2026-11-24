@@ -275,8 +275,9 @@
     });
     if (id === "ocracoke" && place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
     // A node's own first-entry scenes (Norfolk's beat 2, PR 5).
-    var fe = (nodeData(id).firstEntry || {})[place];
-    if (fe && !state.seen[fe] && PC.scenes.canEnter(state, fe).ok) return fe;
+    // A list: the first that can play (Horace's beat, then its re-entry).
+    var fe = [].concat((nodeData(id).firstEntry || {})[place] || []);
+    for (var i = 0; i < fe.length; i++) if (!state.seen[fe[i]] && PC.scenes.canEnter(state, fe[i]).ok) return fe[i];
     return null;
   }
 
@@ -610,6 +611,9 @@
     if (shipwrightGreeting(state).refuse) return { line: L.refuse };
     if (hp <= 0) return { line: L.nothingToFix };
     var cost = repairCost(state, hp);
+    // The Apprentices' free repair (records §10): one repair on the house.
+    var free = id === "norfolk" && state.flags.nor_free_repair;
+    if (free) cost = 0;
     var ap = repairTakesAP(state, hp) ? 1 : 0;
     if (state.ap.left < ap) throw new Error("A big repair takes an action, and you have none left.");
     if (state.money.crew < cost) return { line: L.broke, failed: true };
@@ -620,7 +624,8 @@
     if (sh.rigging === "frayed") { sh.rigging = "sound"; sh.speed = sh.speedMax; fixed = true; } // §21.7
     var up = ladderTick(state, slotNpc(id, "shipwright"), "commission");
     PC.state.addLog(state, "Repaired " + hp + " hull for " + cost + " crew gold" + (ap ? " and an action" : "") + (fixed ? "; the frayed rigging is fixed too" : "") + ".");
-    return { cost: cost, ap: ap, fixedRigging: fixed, line: ap ? L.bigRepair : L.repair, rungUp: up };
+    if (free) state.flags.nor_free_repair = false;
+    return { cost: cost, ap: ap, fixedRigging: fixed, line: free ? L.freeRepair : ap ? L.bigRepair : L.repair, rungUp: up, free: free };
   }
 
   var TRACKS = { hull: "Hull", rigging: "Rigging", guns: "Guns" };
@@ -974,8 +979,11 @@
     var lines = [];
     var pre = [];
     if (opts.voyage) pre = opts.voyage.lines.slice();
+    // The node's scripted first arrival (Norfolk's inspection, records §5):
+    // it charges the fee itself, so the popup only carries the voyage.
+    var firstScene = !opts.fromHunt && nd.firstArrival && !state.seen[nd.firstArrival] && PC.scenes.canEnter(state, nd.firstArrival).ok ? nd.firstArrival : null;
     if (opts.fromHunt) lines.push(L.back);
-    else if (L.arrive) lines.push(L.arrive);
+    else if (L.arrive && !firstScene) lines.push(L.arrive);
     var c = state.crew;
     if (c.wounded > 0) {
       var cook = (state.officers || []).some(function (o) { return !o.gone && o.type === "Cook" && o.aboard === "flagship"; });
@@ -1022,6 +1030,13 @@
     // Holdings come in M9; the trade ship's earnings are collected here (§27.7).
     var ledger = PC.world ? PC.world.collectLedger(state, id) : null;
     if (ledger) lines.push("PLACEHOLDER: The Trade Master hands over your trade ship's earnings: " + ledger + " gold, into your purse.");
+    if (firstScene) {
+      state.location.queue = (state.location.queue || []).concat([firstScene]);
+      var fall = pre.concat(lines);
+      if (!fall.length && !(opts.voyage && opts.voyage.chips.length)) { state.location.popup = null; PC.scenes.enterScene(state, nextQueued(state)); return null; }
+      state.location.popup = { title: "Arrival at " + nd.name, lines: fall, chips: fall.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), ok: "popupscene" };
+      return state.location.popup;
+    }
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
     // P16: the lines carry which pot paid in brackets, so the old pay chips
