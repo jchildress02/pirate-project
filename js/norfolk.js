@@ -141,7 +141,8 @@
       if (cap - units <= 0) return;
       var n = Math.min(s.n, cap - units);
       var mult = s.dirty ? D().DIRTY_MULT : errand ? D().DS_MULT : D().AFTER_MULT;
-      gold += Math.round(n * PC.node.salePrice(state, "norfolk", s.good) * mult);
+      var g0 = Math.round(n * PC.node.salePrice(state, "norfolk", s.good) * mult);
+      gold += s.dirty ? g0 : PC.node.takeCut(state, "horace", g0).net; // the issuer's cut on clean sales (§29.12)
       PC.crew.removeGood(state, s.good, n, s.dirty);
       units += n;
       if (s.dirty) anyDirty = true; else anyClean = true;
@@ -211,8 +212,15 @@
   F.addCond("hasAp", function (state) { return state.ap.left >= 1; });
   F.addCond("seasonedHand", function (state) { return (state.crew.tiers.Seasoned || 0) + (state.crew.tiers.Veteran || 0) > 0; });
 
-  var payChip = function (amt) { return { icon: "gold", text: "−" + amt + " gold (crew gold first, then your purse)", ink: "mid" }; };
-  function pay(state, amt) { var p = PC.crew.payFrom(state, amt, true); return (p.crew ? p.crew + " crew gold" : "") + (p.crew && p.purse ? ", " : "") + (p.purse ? p.purse + " purse gold" : ""); }
+  var payChip = function (amt) { return { icon: "gold", text: "−" + amt + " gold (your purse first, then crew gold)", ink: "mid" }; };
+  // Bribes come from the purse first, crew gold second (the author's ruling;
+  // port fees are the other way round).
+  function pay(state, amt) {
+    amt = Math.round(amt);
+    var fromPurse = Math.min(state.money.purse, amt); state.money.purse -= fromPurse;
+    var fromCrew = Math.min(state.money.crew, amt - fromPurse); state.money.crew -= fromCrew;
+    return (fromPurse ? fromPurse + " purse gold" : "") + (fromPurse && fromCrew ? ", " : "") + (fromCrew ? fromCrew + " crew gold" : "");
+  }
 
   F.addHook("nor_port_fee", {
     apply: function (state) { var r = PC.node.payPortFee(state, "norfolk"); return r.lines.join(" "); },

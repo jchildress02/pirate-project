@@ -30,7 +30,7 @@
   function hunterChances(state, waters) {
     var m = state.meters, W = H().WATERS[waters], out = {};
     var admiralty = W.ports.filter(function (p) { return p.admiralty; }).length;
-    var av = heatChance(m.heat.avalon || 0);
+    var av = heatChance(PC.letters ? PC.letters.huntHeat(state, "avalon") : (m.heat.avalon || 0)); // Key's hunt reads +20 (§28.4)
     if ((m.heat.avalon || 0) >= 20) av += H().AVALON_HUNTER_PER_ADMIRALTY_PORT * admiralty;
     out.Avalon = av;
     var fr = heatChance(m.heat.frisia || 0) * (H().FRISIAN_HUNTER_POSTURE[state.world.posture] || 1);

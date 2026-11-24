@@ -113,6 +113,32 @@
     },
   };
 
+  // Letters of marque (§22.4, §29.12, §28.3) and Legendary regard (§39.6,
+  // §17.4.7). Numbers are placeholders; the Tuning Table lists them.
+  PC.data.letterRules = {
+    issuers: {
+      key: { name: "Admiral Key", faction: "avalon", factionName: "Avalon", legendary: "key", minStanding: 0, cut: 0.10,
+        covers: ["France", "Sicily", "Spain", "Frisia", "Ireland"] },   // Blue and Orange (§22.4)
+    },
+    ACCEPT_OTHER: 10,          // accepting a letter: -10 with the other side (§28.3)
+    OTHER_CAP: -10,            // ...held at -10 or below while the letter is held
+    DESTROY_NEW: 5, DESTROY_OLD: 5,
+    ISSUER_PER_PRIZE: 1, ISSUER_SEASON_CAP: 4,
+    FEE_MULT: 0.5,             // port fees at the issuer's ports (§20.4)
+    KEY_HUNT: 20,              // Key's hunt: Avalon Heat read 20 higher for hunters (§28.4)
+    KEY_TRUSTED_YARD: 0.15,    // Norfolk's level 4 at -15% for a captain Key trusts (§17.4.7)
+    // One journal line when regard crosses into a band (§39.6). PLACEHOLDERs.
+    regardLines: {
+      key: {
+        "Sworn enemy": "PLACEHOLDER: Admiral Key has sworn to see you hanged.",
+        "Distrusted": "PLACEHOLDER: Admiral Key doesn't trust you.",
+        "Neutral": "PLACEHOLDER: Admiral Key has no strong opinion of you.",
+        "Respected": "PLACEHOLDER: Admiral Key seems to respect you.",
+        "Trusted": "PLACEHOLDER: Admiral Key trusts you.",
+      },
+    },
+  };
+
   // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
   // the Tuning Table lists them. Rules in js/meters.js.
   PC.data.meterRules = {

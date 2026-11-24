@@ -1134,7 +1134,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function addStanding(state, f, d) {
     if (!f || !d) return 0;
     var before = state.meters.standing[f] || 0;
-    state.meters.standing[f] = clamp(before + d, -100, 100);
+    // While a letter is held the other side can't rise above -10 (§28.3).
+    var cap = PC.letters ? PC.letters.capFor(state, f) : 100;
+    var nv = clamp(before + d, -100, 100);
+    if (d > 0 && nv > cap) nv = Math.max(before, cap); // a rise stops at the cap
+    state.meters.standing[f] = nv;
     if (f === "pirates" && d < 0) seasonRec(state).blackLoss = true;
     return state.meters.standing[f] - before;
   }
@@ -1194,7 +1198,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var offended = f === "pirates" ? rec.blackLoss : !!rec.offense[f];
       if (offended) return;
       var b0 = PC.node.standingBand(state, f).name;
-      var nv = Math.min(R().DRIFT_STOP, s + R().DRIFT);
+      var nv = Math.min(R().DRIFT_STOP, s + R().DRIFT, PC.letters ? PC.letters.capFor(state, f) : 100);
+      if (nv <= s) return;
       state.meters.standing[f] = nv;
       chips.push({ icon: "standing", text: NAME[f] + " Standing +" + (nv - s) + " (time heals)", ink: f });
       var b1 = PC.node.standingBand(state, f).name;
@@ -1269,6 +1274,178 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — letters of marque and Legendary regard (Milestone 8, PR 4).
+ *
+ * Letters (§22.4, §29.12, §28.3): one at a time. A letter covers the axes
+ * its issuer names; a covered prize's cargo and hull are clean, the issuer
+ * gains +1 Standing a covered prize (at most +4 a season), and the other
+ * side still charges the full uncovered Heat and Standing (only the
+ * issuer's side honors a letter, §31.1). Holding one holds the other side's
+ * Standing at -10 or below, halves port fees at the issuer's ports (§20.4),
+ * and the issuer's cut comes off every clean sale at the till (§29.12).
+ *
+ * Regard (§39.6, §17.4.7): each Legendary's hidden -5..+5 opinion of the
+ * captain, unmet until the first meeting; a journal line when it crosses
+ * into a new band. Key's is the only one live in this build.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function L() { return PC.data.letterRules; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // ---- Regard ------------------------------------------------------------------
+
+  function regardRec(state, who) {
+    state.regard = state.regard || {};
+    return (state.regard[who] = state.regard[who] || { v: 0, met: false });
+  }
+  function regard(state, who) { return regardRec(state, who).v; }
+  function regardBand(v) {
+    return v <= -4 ? "Sworn enemy" : v <= -2 ? "Distrusted" : v <= 1 ? "Neutral" : v <= 3 ? "Respected" : "Trusted";
+  }
+  function band(state, who) { var r = regardRec(state, who); return r.met ? regardBand(r.v) : "Unmet"; }
+  function meet(state, who) { regardRec(state, who).met = true; }
+  // Move regard; a journal (log) line when it crosses into a new band.
+  // Never shown as a number (§39.6).
+  function addRegard(state, who, d) {
+    var r = regardRec(state, who);
+    var b0 = regardBand(r.v);
+    r.met = true;
+    r.v = clamp(r.v + d, -5, 5);
+    var b1 = regardBand(r.v);
+    if (b1 !== b0) {
+      var line = (L().regardLines[who] || {})[b1];
+      if (line) PC.state.addLog(state, line);
+      return { from: b0, to: b1, line: line || null };
+    }
+    return null;
+  }
+
+  // ---- Letters ---------------------------------------------------------------------
+
+  function letter(state) { return state.letter || null; }
+  function issuer(id) { return L().issuers[id]; }
+  function holds(state) { return !!state.letter; }
+  // The other side: Avalon's letter answers to Frisia, and back.
+  function otherSide(faction) { return faction === "avalon" ? "frisia" : faction === "frisia" ? "avalon" : null; }
+
+  // Does the letter cover a ship of this flag? Pirates are always fair game
+  // and clean whatever the letter (§22.4), but never "covered" for Standing.
+  function covers(state, flag) {
+    var l = letter(state);
+    return !!(l && issuer(l.issuer).covers.indexOf(flag) >= 0);
+  }
+  // Is her cargo (and her hull) clean?
+  function legitimate(state, flag) { return flag === "Pirate" || covers(state, flag); }
+
+  // Can the captain take this issuer's letter now (§28.2)? Key's: Avalon 0+
+  // and not Distrusted (or worse) by Key.
+  function canTake(state, id) {
+    var is = issuer(id);
+    if (!is) return { ok: false, why: "No such letter" };
+    if (state.letter && state.letter.issuer === id) return { ok: false, why: "You already hold it" };
+    if ((state.meters.standing[is.faction] || 0) < is.minStanding) return { ok: false, why: "Needs " + is.factionName + " Standing " + is.minStanding + " or better" };
+    if (is.legendary) {
+      var b = band(state, is.legendary);
+      if (b === "Distrusted" || b === "Sworn enemy") return { ok: false, why: is.name + " won't issue it to a captain he " + (b === "Sworn enemy" ? "has sworn against" : "distrusts") };
+    }
+    return { ok: true };
+  }
+
+  // Take a letter (binding, §17.4.10): the other side's Standing -10 and held
+  // at -10 or below. A second letter is treason, so a new one replaces the
+  // old (destroying it: +5 with the new issuer, -5 with the old, §28.3).
+  function take(state, id, opts) {
+    opts = opts || {};
+    var c = canTake(state, id);
+    if (!c.ok && !opts.force) throw new Error(c.why);
+    var is = issuer(id), lines = [];
+    if (state.letter && state.letter.issuer !== id) {
+      var old = issuer(state.letter.issuer);
+      PC.meters.addStanding(state, is.faction, L().DESTROY_NEW);
+      PC.meters.addStanding(state, old.faction, -L().DESTROY_OLD);
+      lines.push("You burn " + old.name + "'s letter.");
+      state.letter = null;
+    }
+    var other = otherSide(is.faction);
+    if (other) PC.meters.addStanding(state, other, -L().ACCEPT_OTHER);
+    state.letter = { issuer: id, faction: is.faction, since: PC.state.stamp(state), covered: {} };
+    capOther(state);
+    PC.state.addLog(state, "Took " + is.name + "'s letter of marque.");
+    lines.push("You now sail under " + is.name + "'s letter of marque.");
+    return { lines: lines };
+  }
+  // Give the letter up: the other side's cap lifts.
+  function giveUp(state) {
+    if (!state.letter) return null;
+    var is = issuer(state.letter.issuer);
+    state.letter = null;
+    PC.state.addLog(state, "Gave up " + is.name + "'s letter of marque.");
+    return is;
+  }
+
+  // While a letter is held, the other side's Standing can't rise above -10.
+  function capFor(state, f) {
+    var l = letter(state);
+    return l && otherSide(l.faction) === f ? L().OTHER_CAP : 100;
+  }
+  function capOther(state) {
+    var l = letter(state);
+    if (!l) return;
+    var o = otherSide(l.faction);
+    if (o && state.meters.standing[o] > L().OTHER_CAP) state.meters.standing[o] = L().OTHER_CAP;
+  }
+
+  // A covered prize: the issuer +1 Standing, at most +4 a season (§28.3).
+  function coveredPrize(state) {
+    var l = letter(state);
+    if (!l) return 0;
+    var st = PC.state.stamp(state);
+    if (l.coveredStamp !== st) { l.coveredStamp = st; l.coveredGain = 0; }
+    if (l.coveredGain >= L().ISSUER_SEASON_CAP) return 0;
+    l.coveredGain += 1;
+    return PC.meters.addStanding(state, l.faction, L().ISSUER_PER_PRIZE);
+  }
+
+  // Port fees at the issuer's ports are halved (§20.4).
+  function feeMult(state, nodeFaction) {
+    var l = letter(state);
+    return l && l.faction === nodeFaction ? L().FEE_MULT : 1;
+  }
+
+  // The issuer's cut, at the till, on every clean sale (§29.12). Returns
+  // { gross, cut, net, who }.
+  function cut(state, gross) {
+    var l = letter(state);
+    if (!l || gross <= 0) return { gross: gross, cut: 0, net: gross, who: null };
+    var c = Math.round(gross * issuer(l.issuer).cut);
+    return { gross: gross, cut: c, net: gross - c, who: issuer(l.issuer).name };
+  }
+
+  // Key's hunt (§28.4, §17.4.10): Avalon's pirate-hunter chance reads Avalon
+  // Heat 20 higher while the captain holds a Frisian letter, is Key's Sworn
+  // enemy, or broke Key's pardon within the year (PR 5).
+  function huntHeat(state, f) {
+    var h = state.meters.heat[f] || 0;
+    if (f !== "avalon") return h;
+    var l = letter(state), on = (l && l.faction === "frisia") || band(state, "key") === "Sworn enemy";
+    var until = (state.meterState || {}).keyHuntUntil;
+    if (until && state.time.year * 4 + state.time.season < until) on = true;
+    return on ? h + L().KEY_HUNT : h;
+  }
+
+  PC.letters = {
+    regard: regard, regardBand: regardBand, band: band, meet: meet, addRegard: addRegard,
+    letter: letter, issuer: issuer, holds: holds, otherSide: otherSide, covers: covers, legitimate: legitimate,
+    canTake: canTake, take: take, giveUp: giveUp, capFor: capFor, coveredPrize: coveredPrize, feeMult: feeMult, cut: cut, huntHeat: huntHeat,
+  };
+})();
+</script>
+  <script>
 /* Pirate Chronicle — game state, saving and loading.
  *
  * The whole game lives in one plain object ("the world is the save file").
@@ -1279,7 +1456,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 8;
+  var SAVE_VERSION = 9;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -1510,6 +1687,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // Milestone 7: voyages and the season loop; Ocracoke's Trade Master.
       addMilestone7Fields(data);
       data.saveVersion = 8;
+    }
+    if (data.saveVersion === 8) {
+      // Milestone 8: letters of marque and Legendary regard (PR 4).
+      data.regard = data.regard || {};
+      data.letter = data.letter || null;
+      data.saveVersion = 9;
     }
     return data;
   }
@@ -3117,7 +3300,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var gold = Math.round(each * units);
     if (what === "treasure") state.cargo.treasure[k] -= units;
     else { PC.crew.removeGood(state, what, units, dirty); s.sold[what] = (s.sold[what] || 0) + units; }
-    state.money.crew += gold;
+    // The issuer's cut comes off every clean sale at the till (§29.12).
+    var ct = dirty ? { cut: 0, net: gold } : takeCut(state, buyer, gold);
+    state.money.crew += ct.net;
     markDealt(state, who);
     noteSale(state, buyer, gold);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
@@ -3126,7 +3311,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var gain = Math.min(E().PROSPERITY_SEASON_CAP, Math.floor(s.soldGold / E().PROSPERITY_PER_SOLD)) - s.prosperityGained;
     if (gain > 0) { s.prosperityGained += gain; state.nodes[id].prosperity = clamp(state.nodes[id].prosperity + gain, 0, 100); }
     var label = what === "treasure" ? (dirty ? "dirty " : "") + "treasure" : (dirty ? "dirty " : "") + what;
-    PC.state.addLog(state, "Sold " + units + " " + label + " to " + PC.npcs.get(state, who).full + " for " + gold + " crew gold.");
+    PC.state.addLog(state, "Sold " + units + " " + label + " to " + PC.npcs.get(state, who).full + " for " + gold + " gold" + (ct.cut ? " (" + ct.cut + " to " + ct.who + "'s cut)" : "") + ".");
     var line;
     if (dirty) {
       ladderTick(state, who, "deal") && (line = L.rungUp);
@@ -3138,6 +3323,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     return { units: units, gold: gold, line: line, partial: units < n };
   }
+
+  // The issuer's cut on a clean sale (§29.12), noted for the buyer's card.
+  function takeCut(state, buyer, gold) {
+    var c = PC.letters ? PC.letters.cut(state, gold) : { cut: 0, net: gold };
+    if (c.cut) { var cs = (state.location.cuts = state.location.cuts || {}); cs[buyer] = (cs[buyer] || 0) + c.cut; }
+    return c;
+  }
+  function visitCut(state, buyer) { return ((state.location.cuts || {})[buyer]) || 0; }
 
   // This visit's sales to a buyer, for the running total on his card (R6).
   function noteSale(state, buyer, gold) {
@@ -3160,7 +3353,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (units <= 0) return { line: L.capReached, units: 0, gold: 0 };
     var gold = Math.round(each * units);
     state.provisions -= units;
-    state.money.crew += gold;
+    state.money.crew += takeCut(state, "provisioner", gold).net;
     season(state).provisionerPaid += gold;
     noteSale(state, "provisioner", gold);
     PC.state.addLog(state, "Sold " + units + " provisions lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
@@ -3239,7 +3432,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       out.locked = "Level " + gate.level + " needs " + (gate.faction === "avalon" ? "Avalon" : gate.faction) + " Standing " + gate.standing + " or better";
       out.gated = true;
     }
-    out.cost = Math.round(E().UPGRADE[next] * E().SIZE_UPGRADE[state.ship.size] * craftMult(state));
+    // Key's regard at Norfolk's level 4 (§17.4.7): never for a captain he
+    // distrusts or has sworn against; 15% off at Trusted.
+    var kb = gate && next >= gate.level && PC.letters ? PC.letters.band(state, "key") : null;
+    if (kb === "Distrusted" || kb === "Sworn enemy") { out.locked = "Not for a captain the Admiral " + (kb === "Distrusted" ? "distrusts" : "has sworn against"); out.gated = true; }
+    out.cost = Math.round(E().UPGRADE[next] * E().SIZE_UPGRADE[state.ship.size] * craftMult(state) * (kb === "Trusted" ? 1 - PC.data.letterRules.KEY_TRUSTED_YARD : 1));
     out.effect = track === "hull" ? "Max hull +" + (hullMaxAt(state, next) - state.ship.hullMax)
       : track === "rigging" ? (next === 3 ? "+1 Speed" : next === 5 ? "+1 Handling" : (state.ship.rigging === "frayed" ? "Fixes the frayed rigging" : "No change until level 3"))
       : (next === 3 || next === 5 ? "+1 Gunnery" : "No change until level 3");
@@ -3287,7 +3484,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[size] * Math.max(0, f.hullMax - f.hull));
     var hull = Math.max(0, Math.round(H.HULL_VALUE[f.cls] * (dirty ? H.HULL_SALE.dirty : H.HULL_SALE.clean) * mult) - repair);
     var guns = Math.round(f.guns * E().GUN * H.LOOSE_GUN_SALE * mult);
-    return { ok: true, hull: hull, guns: guns, total: hull + guns, dirty: dirty, repair: repair };
+    // A clean hull pays the issuer's cut; loose guns don't (§29.12).
+    var cut = dirty || !PC.letters ? 0 : PC.letters.cut(state, hull).cut;
+    return { ok: true, hull: hull, guns: guns, cut: cut, total: hull - cut + guns, dirty: dirty, repair: repair };
   }
 
   // What selling her does to the pooled hold (A9): the space she takes
@@ -3306,6 +3505,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (shipwrightGreeting(state).refuse) return { line: nodeData(here(state)).lines.shipwright.refuse };
     var p = hullSalePrice(state, f);
     if (!p.ok) throw new Error(p.why);
+    if (p.cut) { var cs = (state.location.cuts = state.location.cuts || {}); cs.yard = (cs.yard || 0) + p.cut; }
     state.money.crew += p.total;
     state.records.hullsSold = (state.records.hullsSold || 0) + 1; // the end screen (R5)
     state.fleet = state.fleet.filter(function (x) { return x !== f; });
@@ -3324,7 +3524,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // What no longer fits in the smaller hold goes over the side (A9).
     var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
-    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+    return { gold: p.total, cut: p.cut, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
   // ---- Laying a ship up at anchor (§22.7, §20.4, §28.2; Milestone 8, PR 3) ----
@@ -3389,6 +3589,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (!c.ok) throw new Error(c.why);
     var l = c.rec, f = l.ship;
     if (l.owed) PC.crew.payFrom(state, l.owed);
+    if (l.rungDown) PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), 1); // the debt is cleared
     state.laidUp = state.laidUp.filter(function (x) { return x !== l; });
     var tiers = PC.hunt.takeHands(state, f.crewMin || 0);
     f.crewTiers = tiers; f.crew = f.crewMin || 0;
@@ -3413,7 +3614,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var nd0 = nodeData(l.node), g = PC.meters.officialGate(state, l.node);
       var due = Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
       if (PC.crew.canPay(state, due)) { PC.crew.payFrom(state, due); lines.push("Anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + due + " gold."); }
-      else { l.owed += due; lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed."); }
+      else {
+        l.owed += due;
+        lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed.");
+        // The shipwright holding her thinks less of you until it's paid (the author's ruling).
+        if (!l.rungDown) { l.rungDown = true; PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), -1); lines.push(PC.npcs.get(state, slotNpc(l.node, "shipwright")).first + " won't forget it until you pay."); }
+      }
     });
     return lines;
   }
@@ -3612,7 +3818,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function portFee(state, id) {
     id = id || here(state);
     var nd = nodeData(id);
-    return Math.round(nd.portFeeBase * state.ship.size * standingBand(state, nd.faction).fee);
+    // Halved at the letter issuer's ports (§20.4).
+    return Math.round(nd.portFeeBase * state.ship.size * standingBand(state, nd.faction).fee * (PC.letters ? PC.letters.feeMult(state, nd.faction) : 1));
   }
 
   // The harbor due and its shortfall (§17.2). Crew gold pays first and
@@ -3792,7 +3999,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     salePrice: salePrice,
     shopPrice: shopPrice,
     demandOf: demandOf,
-    standingBand: standingBand, docksConditions: docksConditions,
+    standingBand: standingBand, docksConditions: docksConditions, takeCut: takeCut, visitCut: visitCut,
     layUpPrice: layUpPrice, canLayUp: canLayUp, layUp: layUp, laidUpHere: laidUpHere, layUpSlots: layUpSlots, canRecover: canRecover, recover: recover, layUpSeason: layUpSeason,
     purchaseMult: purchaseMult,
     slotNpc: slotNpc,
@@ -7345,7 +7552,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function hunterChances(state, waters) {
     var m = state.meters, W = H().WATERS[waters], out = {};
     var admiralty = W.ports.filter(function (p) { return p.admiralty; }).length;
-    var av = heatChance(m.heat.avalon || 0);
+    var av = heatChance(PC.letters ? PC.letters.huntHeat(state, "avalon") : (m.heat.avalon || 0)); // Key's hunt reads +20 (§28.4)
     if ((m.heat.avalon || 0) >= 20) av += H().AVALON_HUNTER_PER_ADMIRALTY_PORT * admiralty;
     out.Avalon = av;
     var fr = heatChance(m.heat.frisia || 0) * (H().FRISIAN_HUNTER_POSTURE[state.world.posture] || 1);
@@ -9274,7 +9481,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (loot.chest) chips.push(mchip("gold", "chest:" + pot, loot.chest, "Ship's chest: {n} gold to " + (pot === "purse" ? "your purse" : "crew gold"), "mid"));
     // Her cargo into the pooled hold: what the player picked (A7), or the
     // densest first when nothing was picked (the sim, §22.7).
-    var dirty = e.flag !== "Pirate";
+    var dirty = !PC.letters.legitimate(state, e.flag); // clean if a pirate or covered by your letter (§22.4)
     var taken = ch.cargo ? loadPicked(state, loot, dirty, ch.cargo) : loadCargo(state, loot, dirty);
     // Goods leave the chip list (they were picked on the screen); provisions stay (A10).
     taken.forEach(function (t) { if (t.prov) chips.push(mchip("prov", "prov", t.prov, "+{n} provisions")); });
@@ -9310,7 +9517,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var hf = e.flag === "Avalon" ? "avalon" : e.flag === "Frisia" ? "frisia" : null;
       if (hf && !executed) { PC.scenes.applyEffect(state, { heat: { faction: hf, delta: H().HUNTER_TAKEN_HEAT } }); out.push(mchip("heat", "heat:" + hf, H().HUNTER_TAKEN_HEAT, e.flag + " Heat {+n}", hf)); }
     } else {
+      // A covered prize (§28.3): the issuer +1 (at most +4 a season) and
+      // charges nothing; the other side still charges in full (§31.1).
+      var l = PC.letters.letter(state), covered = PC.letters.covers(state, e.flag);
+      if (covered) {
+        var g1 = PC.letters.coveredPrize(state), isf = PC.letters.issuer(l.issuer);
+        if (g1) out.push(mchip("standing", "standing:" + l.faction, g1, isf.factionName + " Standing {+n} (a lawful prize)", l.faction));
+      }
       ["Avalon", "Frisia"].forEach(function (fac) {
+        if (covered && fac.toLowerCase() === l.faction) return;
         var side = H().SIDES[fac][e.flag];
         if (!side) return;
         var kind = e.role === "War" ? "navy" : "merchant";
@@ -9381,7 +9596,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var tiers = takeHands(state, e.crewMin);
     var rec = { id: e.id, kind: kind, cls: e.cls, name: e.name, flag: e.flag, role: e.role, size: e.size, hull: Math.max(1, e.hull), hullMax: e.hullMax,
       guns: e.guns, gunsMax: e.gunsMax, crew: e.crewMin, crewMin: e.crewMin, crewMax: e.crewMax, cargo: e.cargo, speed: e.speed,
-      handling: e.handling, rating: 3, dirty: e.flag !== "Pirate", crewTiers: tiers, wounded: 0 };
+      handling: e.handling, rating: 3, dirty: !PC.letters.legitimate(state, e.flag), crewTiers: tiers, wounded: 0 };
     if (kind === "fleet") {
       var o = (state.officers || []).filter(function (x) { return x.id === officerId && !x.gone; })[0]
         || (state.officers || []).filter(function (x) { return !x.gone && (x.aboard || "flagship") === "flagship" && !x.mentor; })[0];
@@ -9409,7 +9624,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     state.ship = {
       name: e.name || e.cls, type: e.cls, hull: Math.max(1, Math.round(e.hull)), hullMax: c.hull, baseHull: c.hull, guns: e.guns, gunsMax: c.guns,
       cargo: c.cargo, size: c.size, crewMin: c.crewMin, crewMax: c.crewMax, speed: c.speed, speedMax: c.speed, handling: c.handling,
-      rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: e.flag !== "Pirate", prizeOf: e.flag,
+      rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: !PC.letters.legitimate(state, e.flag), prizeOf: e.flag,
     };
   }
 
@@ -9518,7 +9733,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
           draft: s.draft, cue: s.cue, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
-          legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s, state) };
+          legit: legitLine(state, s) };
       }),
     };
   }
@@ -9537,6 +9752,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (d > gap) { gap = d; best = k; }
     });
     return best;
+  }
+
+  // The scouting card's line on whether she's a lawful prize (§22.4).
+  function legitLine(state, s) {
+    if (s.flag === "Pirate") return "A pirate: always fair game, and her cargo is clean.";
+    var l = PC.letters.letter(state);
+    if (l && PC.letters.covers(state, s.flag)) {
+      var is = PC.letters.issuer(l.issuer);
+      var other = (is.faction === "avalon" && (s.flag === "Frisia" || s.flag === "Ireland")) ? " Frisia doesn't honor your letter: taking her still costs Frisian Standing and Heat." : "";
+      return "Your letter covers her: a lawful prize, and her cargo is clean. " + is.factionName + " Standing +1." + other;
+    }
+    return (l ? "Your letter doesn't cover her" : "You hold no letter") + ": her cargo will be dirty, and " + meterNote(s, state);
   }
 
   // A prize against a faction you stand at 40+ with is a betrayal (§28.6):
@@ -9607,7 +9834,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
         return o;
       }),
-      dirty: e.flag !== "Pirate",
+      dirty: !PC.letters.legitimate(state, e.flag),
       // The hold as it stands, for the cargo picker's stacked bar (A7, B42).
       hold: { cap: PC.crew.holdCapacity(state), provisions: state.provisions, goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), per: PC.data.economy.TREASURE_PER_SLOT },
     };
@@ -11560,7 +11787,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (cap - units <= 0) return;
       var n = Math.min(s.n, cap - units);
       var mult = s.dirty ? D().DIRTY_MULT : errand ? D().DS_MULT : D().AFTER_MULT;
-      gold += Math.round(n * PC.node.salePrice(state, "norfolk", s.good) * mult);
+      var g0 = Math.round(n * PC.node.salePrice(state, "norfolk", s.good) * mult);
+      gold += s.dirty ? g0 : PC.node.takeCut(state, "horace", g0).net; // the issuer's cut on clean sales (§29.12)
       PC.crew.removeGood(state, s.good, n, s.dirty);
       units += n;
       if (s.dirty) anyDirty = true; else anyClean = true;
@@ -11630,8 +11858,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   F.addCond("hasAp", function (state) { return state.ap.left >= 1; });
   F.addCond("seasonedHand", function (state) { return (state.crew.tiers.Seasoned || 0) + (state.crew.tiers.Veteran || 0) > 0; });
 
-  var payChip = function (amt) { return { icon: "gold", text: "−" + amt + " gold (crew gold first, then your purse)", ink: "mid" }; };
-  function pay(state, amt) { var p = PC.crew.payFrom(state, amt, true); return (p.crew ? p.crew + " crew gold" : "") + (p.crew && p.purse ? ", " : "") + (p.purse ? p.purse + " purse gold" : ""); }
+  var payChip = function (amt) { return { icon: "gold", text: "−" + amt + " gold (your purse first, then crew gold)", ink: "mid" }; };
+  // Bribes come from the purse first, crew gold second (the author's ruling;
+  // port fees are the other way round).
+  function pay(state, amt) {
+    amt = Math.round(amt);
+    var fromPurse = Math.min(state.money.purse, amt); state.money.purse -= fromPurse;
+    var fromCrew = Math.min(state.money.crew, amt - fromPurse); state.money.crew -= fromCrew;
+    return (fromPurse ? fromPurse + " purse gold" : "") + (fromPurse && fromCrew ? ", " : "") + (fromCrew ? fromCrew + " crew gold" : "");
+  }
 
   F.addHook("nor_port_fee", {
     apply: function (state) { var r = PC.node.payPortFee(state, "norfolk"); return r.lines.join(" "); },
@@ -12871,6 +13106,32 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     lines: {
       laidUp: "PLACEHOLDER: The yard's boatmen tow her out to the anchorage and set a watchman aboard.",
       recovered: "PLACEHOLDER: Your hands row out, the watchman climbs down, and she's yours again.",
+    },
+  };
+
+  // Letters of marque (§22.4, §29.12, §28.3) and Legendary regard (§39.6,
+  // §17.4.7). Numbers are placeholders; the Tuning Table lists them.
+  PC.data.letterRules = {
+    issuers: {
+      key: { name: "Admiral Key", faction: "avalon", factionName: "Avalon", legendary: "key", minStanding: 0, cut: 0.10,
+        covers: ["France", "Sicily", "Spain", "Frisia", "Ireland"] },   // Blue and Orange (§22.4)
+    },
+    ACCEPT_OTHER: 10,          // accepting a letter: -10 with the other side (§28.3)
+    OTHER_CAP: -10,            // ...held at -10 or below while the letter is held
+    DESTROY_NEW: 5, DESTROY_OLD: 5,
+    ISSUER_PER_PRIZE: 1, ISSUER_SEASON_CAP: 4,
+    FEE_MULT: 0.5,             // port fees at the issuer's ports (§20.4)
+    KEY_HUNT: 20,              // Key's hunt: Avalon Heat read 20 higher for hunters (§28.4)
+    KEY_TRUSTED_YARD: 0.15,    // Norfolk's level 4 at -15% for a captain Key trusts (§17.4.7)
+    // One journal line when regard crosses into a band (§39.6). PLACEHOLDERs.
+    regardLines: {
+      key: {
+        "Sworn enemy": "PLACEHOLDER: Admiral Key has sworn to see you hanged.",
+        "Distrusted": "PLACEHOLDER: Admiral Key doesn't trust you.",
+        "Neutral": "PLACEHOLDER: Admiral Key has no strong opinion of you.",
+        "Respected": "PLACEHOLDER: Admiral Key seems to respect you.",
+        "Trusted": "PLACEHOLDER: Admiral Key trusts you.",
+      },
     },
   };
 
@@ -20316,7 +20577,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
             return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
               : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
           })() + "</div>" +
-          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
+          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + (p.cut ? ", less " + gold(p.cut) + " to your letter's issuer" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
             // Her effect on the hold (A9).
             " The hold goes from " + hh.capBefore + " to " + hh.capAfter + " (" + hh.used + " used)" + (hh.over ? '; <b style="color:#8f2a1c">' + hh.over + " slots won't fit and go over the side</b>" : "") + ".</p>" : "");
       }).join("") + "</div>";
@@ -20565,7 +20826,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // R6: this visit's running total, and Sell all he'll take.
     var sold = N().visitSales(state, buyer);
     var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his) +
-      (sold ? '<p class="small"><b>This visit: +' + gold(sold) + " crew gold</b></p>" : "");
+      (sold ? '<p class="small"><b>This visit: +' + gold(sold - N().visitCut(state, buyer)) + " crew gold</b>" +
+        // The issuer's cut, deducted at the till (§29.12).
+        (N().visitCut(state, buyer) ? ' <span class="note">(after ' + gold(N().visitCut(state, buyer)) + " to " + esc(PC.letters.issuer(PC.letters.letter(state).issuer).name) + "'s cut)</span>" : "") + "</p>" : "") +
+      (buyer !== "fence" && PC.letters.letter(state) ? '<p class="note">' + esc(PC.letters.issuer(PC.letters.letter(state).issuer).name) + " takes " + Math.round(PC.letters.issuer(PC.letters.letter(state).issuer).cut * 100) + "% of every clean sale.</p>" : "");
     if (!rows.length) return html + '<p class="note">Nothing aboard ' + (buyer === "fence" ? "for him" : "to sell here") + ".</p></div>";
     html += '<div class="actions" style="margin:4px 0 8px"><button class="secondary" data-act="sellall" data-buyer="' + buyer + '"' + (capLeft <= 0 ? " disabled" : "") + ">Sell all " + (his === "Her" ? "she" : "he") + "'ll take</button></div>";
     return html + '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Pays</th><th>Sell</th></tr>' + rows.map(function (r) {
@@ -21551,6 +21815,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // The full captain sheet (§41.12).
+  // The letter of marque, shown as a state, not a tag (§28.7).
+  function letterLine() {
+    var l = PC.letters.letter(state);
+    if (!l) return '<p class="small" style="margin-top:10px"><b>Letter of marque:</b> none. Every prize but a pirate is dirty.</p>';
+    var is = PC.letters.issuer(l.issuer);
+    return '<p class="small" style="margin-top:10px"><b>Letter of marque:</b> ' + esc(is.name) + "'s. Covers " + esc(is.covers.join(", ")) + " ships: their cargo is clean, and " + esc(is.factionName) +
+      " gains +1 Standing a prize (at most +4 a season). " + esc(is.name) + " takes " + Math.round(is.cut * 100) + "% of every clean sale; " + esc(is.factionName) + "'s port fees are halved; " +
+      esc(is.factionName === "Avalon" ? "Frisian" : "Avalon") + " Standing stays at −10 or below while you hold it.</p>";
+  }
+
   // How the meters move, in plain words (§28; the author asked that the
   // offense and betrayal rules be clear to the player).
   function meterHelp() {
@@ -21590,7 +21864,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", state.provisions + " lots · " + esc(seaTime(state.provisions))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
-      meters(true) + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+      meters(true) + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -21642,7 +21916,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         '<p class="small">This season\'s outlook: ' + ["north", "south"].map(function (z) { return (z === "north" ? "North " : " · South ") + ["Fair", "Unsettled", "Foul"].map(function (o) {
           return '<button class="' + (PC.weather.outlook(state, z) === o ? "primary" : "secondary") + '" data-act="devoutlook" data-zone="' + z + '" data-o="' + o + '">' + o + "</button>"; }).join(""); }).join("") + "</p>" +
         '<div class="small">The last voyage\'s slots:' + devReadout() + "</div>" +
-        '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>") : "") +
+        '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>" +
+        // Milestone 8: the letter and Key's regard (hidden in play).
+        '<p class="small">Key\'s letter: ' + (PC.letters.letter(state) ? "held " + b("devletter", "Take it away", ' data-on="0"') : "none " + b("devletter", "Give it", ' data-on="1"')) +
+        " · Key's regard (" + (state.regard && state.regard.key ? state.regard.key.v + ", " + PC.letters.band(state, "key") : "unmet") + "): " + [-5, -2, 0, 2, 4].map(function (v) { return b("devregard", String(v), ' data-v="' + v + '"'); }).join("") + "</p>") : "") +
       (state.location ? grp("Money and cargo", '<div class="actions">' + b("devgold", "+500 crew gold") + b("devpurse", "+500 purse") + b("devtreasure", "+10 clean treasure", ' data-dirty="0"') +
         b("devtreasure", "+10 dirty treasure", ' data-dirty="1"') + b("devdamage", "Damage the hull (−5)") + b("devarrive", "The arrival popup (back from a hunt, 4 wounded)") + "</div>") : "") +
       (state.location ? grp("Story", (PC.devtools && PC.devtools.skipQuests ? '<div class="actions">' + b("devskip", "Skip the mandatory quests") + "</div>" : "") +
@@ -22851,6 +23128,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       w.devOutlook[el.dataset.zone] = el.dataset.o;
     },
     "devfreesail": function () { devFreeSail = !devFreeSail; },
+    "devletter": function (el) { if (el.dataset.on === "1") PC.letters.take(state, "key", { force: true }); else PC.letters.giveUp(state); },
+    "devregard": function (el) { PC.letters.meet(state, "key"); state.regard.key.v = Number(el.dataset.v); },
     "devstanding": function (el) { state.meters.standing[el.dataset.f] = Number(el.dataset.v); },
     "devarrive": function () {
       var n = Math.min(4, state.crew.tiers.Green || 0);
