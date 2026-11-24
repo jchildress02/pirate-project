@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/norfolk.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -1846,11 +1846,11 @@ test("Card Sharp comes at 500 gold net at Liar's Dice; losses count against it",
   ok(g.won); ok(s.captain.tags.indexOf("Card Sharp") >= 0);
 });
 
-test("a version 4 save loads (now as version 7) with the minigame and hunt fields", function () {
+test("a version 4 save loads (now as the current version) with the minigame and hunt fields", function () {
   var old = JSON.parse(PC.state.serialize(opened()));
   old.saveVersion = 4; delete old.minigames; delete old.minigame;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 7); ok(back.minigames); eq(back.minigame, null); ok(Array.isArray(back.fleet));
+  eq(back.saveVersion, PC.state.SAVE_VERSION); ok(back.minigames); eq(back.minigame, null); ok(Array.isArray(back.fleet));
 });
 
 test("a save made mid-dive round-trips", function () {
@@ -2453,6 +2453,209 @@ test("N4: a battle lists every roll with its outcome word and what it did", func
 test("N5: Variant A's drinking lead names a shipwright, not a carpenter", function () {
   ok(/shipwright with a birthmark/.test(PC.data.quests.what_was_lost.leads.drinking.A) || JSON.stringify(PC.data.quests).indexOf("a shipwright with a birthmark") >= 0);
   ok(JSON.stringify(PC.data.quests).indexOf("carpenter with a birthmark") < 0);
+});
+
+
+console.log("Milestone 7, PR 2: the map, voyages, the season loop and Norfolk (§4, §17.4, §26.9, §27.7)");
+
+function m7(seed) {
+  var s = huntReady(seed || "m7");
+  s.money.crew = 2000; s.provisions = 30;
+  return s;
+}
+
+test("§4's table: Ocracoke-Norfolk 1, Norfolk-the Bahama Channel 2, the two ocean nodes 2 apart", function () {
+  eq(PC.world.apCost("ocracoke", "norfolk"), 1); eq(PC.world.apCost("norfolk", "bahama"), 2);
+  eq(PC.world.apCost("hatteras", "bahama"), 2); eq(PC.world.apCost("bahama", "hatteras"), 2); eq(PC.world.apCost("norfolk", "nassau"), 3);
+});
+
+test("a voyage costs its AP, burns crew ÷ 5 × AP and arrives with the port fee", function () {
+  var s = m7("voy"), ap = s.ap.left, prov = s.provisions, crew = s.money.crew;
+  var heads = PC.world.headsAtSea(s);
+  PC.world.sail(s, "norfolk");
+  eq(s.location.node, "norfolk"); eq(s.ap.left, ap - 1);
+  eq(s.provisions, prov - Math.ceil(heads / 5));
+  eq(crew - s.money.crew, 75); // 75 × Size 1 × Neutral
+  ok(/Arrival at Norfolk/.test(s.location.popup.title));
+});
+
+test("an ocean node has no port fee; Uncharted places can't be sailed to", function () {
+  var s = m7("ocean"), crew = s.money.crew;
+  PC.world.sail(s, "bahama");
+  eq(s.location.node, "bahama"); eq(s.money.crew, crew); eq(s.ap.left, 5);
+  ok(!PC.world.canSail(s, "nassau").ok);
+});
+
+test("too few actions: the voyage is locked, and the captain stays as the season turns", function () {
+  var s = m7("few"); s.ap.left = 1;
+  ok(!PC.world.canSail(s, "bahama").ok, "2 AP needed");
+  PC.world.endSeason(s);
+  eq(s.location.node, "ocracoke"); eq(PC.state.seasonName(s), "Summer");
+});
+
+test("running short never blocks: -10 morale and a Go Without check", function () {
+  var s = m7("short"); s.provisions = 0; var m = s.crew.morale;
+  PC.world.sail(s, "norfolk");
+  eq(s.location.node, "norfolk"); eq(s.crew.morale <= m - 10, true);
+});
+
+test("Winter burns +50%; rationing -25%", function () {
+  var s = m7("winter"); s.time.season = 3; s.crew.rationing = false;
+  var heads = PC.world.headsAtSea(s);
+  var b = PC.world.burn(s, 1, {});
+  eq(b.need, Math.ceil(heads / 5 * 1.5));
+  s.time.season = 0; s.crew.rationing = true;
+  var b2 = PC.world.burn(s, 2, {});
+  eq(b2.need, Math.ceil(heads / 5 * 2 * 0.75));
+});
+
+test("idle upkeep burns crew ÷ 5 at the season's end; morale bands move Pressure", function () {
+  var s = m7("upkeep"); var prov = s.provisions;
+  s.crew.morale = 10; s.crew.pressure = 0;
+  PC.world.endSeason(s);
+  eq(prov - s.provisions, Math.ceil(s.crew.count / 5));
+  eq(s.crew.pressure, 2); // Mutinous: +2
+});
+
+test("the start of Winter opens the split; holding adds Pressure by the implied share", function () {
+  var s = m7("hold"); s.time.season = 2; s.money.crew = 3000; s.crew.morale = 50; s.crew.pressure = 0;
+  PC.world.endSeason(s);
+  eq(s.current.screen, "split"); ok(s.split && s.split.step === "ask");
+  var share = PC.world.impliedShare(s);
+  ok(share > 50);
+  PC.world.holdSplit(s);
+  eq(s.crew.pressure, share > 200 ? 2 : 1);
+});
+
+test("a forced split at Pressure 4 can't be declined", function () {
+  var s = m7("forced"); s.time.season = 2; s.money.crew = 3000; s.crew.morale = 50; s.crew.pressure = 4;
+  PC.world.endSeason(s);
+  ok(s.split.forced);
+  var threw = false; try { PC.world.holdSplit(s); } catch (e) { threw = true; }
+  ok(threw);
+});
+
+test("the split: 10% carried over, the captain's share to the purse, prize ships sold, morale 50, Pressure 0", function () {
+  var s = m7("split"); s.time.season = 2; s.money.crew = 1000; s.money.purse = 0; s.crew.pressure = 3; s.crew.morale = 80;
+  s.fleet.push({ id: "p1", kind: "prize", cls: "Barque", name: "Hope", size: 2, hull: 45, hullMax: 45, guns: 0, crew: 8, crewMin: 8, crewTiers: { Green: 8 }, cargo: 250, dirty: false });
+  PC.world.endSeason(s);
+  var pay = PC.world.doSplit(s);
+  ok(pay.sold.length === 1 && pay.sold[0].gold > 0);
+  eq(pay.carry, Math.round(pay.pool * 0.1));
+  eq(s.money.crew, pay.carry);
+  eq(s.money.purse, pay.captain);
+  eq(s.crew.morale, 50); eq(s.crew.pressure, 0); eq(s.ap.left, 0);
+  eq(s.fleet.filter(function (f) { return f.kind === "prize"; }).length, 0);
+  ok(!PC.world.canSail(s, "norfolk").ok, "no voyage in a split Winter");
+  ok(PC.node.places(s).filter(function (p) { return p.id === "tavern"; })[0].locked, "no port business");
+});
+
+test("departures leave a skeleton crew; re-signers by the morale band; the Articles are re-signed", function () {
+  var s = m7("depart"); s.time.season = 2; s.crew.morale = 90;
+  PC.world.endSeason(s); PC.world.doSplit(s);
+  var before = s.crew.count;
+  var d = PC.world.departures(s);
+  ok(s.crew.count >= (s.ship.crewMin || 5) && s.crew.count <= before);
+  eq(d.left + d.back + (s.ship.crewMin || 5), before);
+  eq(s.articles, null);
+  PC.articles.sign(s, PC.articles.defaults());
+  PC.world.afterResign(s);
+  eq(s.split.step, "winter");
+  var ids = PC.world.winterOptions(s).map(function (o) { return o.id; });
+  ok(ids.indexOf("careening") >= 0 && ids.indexOf("courting") < 0 && ids.indexOf("home") < 0, "Ocracoke: careening, no courting, no home");
+  s.ship.hull = 1;
+  PC.world.spendWinter(s, "careening");
+  eq(s.ship.hull, s.ship.hullMax); ok(s.captain.tags.indexOf("Careened") >= 0);
+});
+
+test("after Winter 1754 the run ends on the end-of-year screen", function () {
+  var s = m7("yearend"); s.time.season = 3;
+  var o = PC.world.endSeason(s);
+  ok(o.yearEnd); eq(s.current.screen, "end"); eq(s.ended.how, "year");
+  PC.summary.keepPlaying(s);
+  eq(s.time.year, 1755); eq(PC.state.seasonName(s), "Spring"); eq(s.current.screen, "node");
+});
+
+test("Norfolk: Horace keeps the Tavern, Christoph the yard; level 4 needs Avalon 20+", function () {
+  var s = m7("nor"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  eq(PC.npcs.get(s, PC.node.slotNpc("norfolk", "keeper")).first, "Horace");
+  s.money.crew = 99999;
+  s.ship.upgrades.hull = 3;
+  var u = PC.node.upgradeInfo(s, "hull");
+  ok(u.locked && u.gated, "gated at Avalon 0");
+  eq(PC.node.upgrade(s, "hull").line, PC.data.nodes.norfolk.lines.shipwright.gateLocked);
+  s.meters.standing.avalon = 25;
+  ok(!PC.node.upgradeInfo(s, "hull").locked);
+  eq(PC.node.upgrade(s, "hull").line, PC.data.nodes.norfolk.lines.shipwright.upgradeTop);
+});
+
+test("Norfolk: the crew pool closes below Avalon 0; Enemy captains are turned away", function () {
+  var s = m7("norpool"); PC.world.sail(s, "norfolk");
+  ok(PC.node.poolAvailable(s).Able > 0);
+  s.meters.standing.avalon = -5;
+  eq(PC.node.recruit(s, "Able", 1).line, PC.data.nodes.norfolk.lines.crew.closed);
+  s.meters.standing.avalon = -80;
+  PC.world.sail(s, "ocracoke");
+  ok(!PC.world.canSail(s, "norfolk").ok);
+});
+
+test("Norfolk's stock: tobacco 20-40 at ×0.6; no fence; dirty hulls refused", function () {
+  var s = m7("norstock"); PC.world.sail(s, "norfolk");
+  var st = PC.node.season(s).stock;
+  ok(st.Tobacco >= 20 && st.Tobacco <= 40);
+  eq(PC.node.shopPrice(s, "norfolk", "Tobacco", null) <= 12.01, true);
+  ok(!PC.node.fenceOpen(s));
+  var p = PC.node.hullSalePrice(s, { cls: "Sloop", size: 1, hull: 20, hullMax: 20, guns: 0, dirty: true });
+  ok(!p.ok);
+});
+
+test("rumors stay at their node: Norfolk's lines never show at Ocracoke, nor Ocracoke's legends at Norfolk", function () {
+  var s = m7("rum");
+  ok(PC.rumors.candidatesOf(s, "Legend").every(function (c) { return c.line.node !== "norfolk"; }));
+  PC.world.sail(s, "norfolk");
+  var leg = PC.rumors.candidatesOf(s, "Legend");
+  ok(leg.length && leg.every(function (c) { return c.line.node === "norfolk"; }));
+});
+
+test("Norfolk's drinker is a Colonial Officer from the six-trait pool", function () {
+  var s = m7("drink"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  PC.drinking.start(s);
+  ok(PC.data.minigames.drinking.pools.norfolk.traits.indexOf(s.minigame.opp.trait) >= 0);
+  ok(/navy officer/.test(s.minigame.log[0]));
+});
+
+test("the trade ship: enroll a kept prize (buyout to crew gold, fee), earn each season, collect on arrival", function () {
+  var s = m7("trade"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  s.money.purse = 10000;
+  PC.crew.removeHands(s, "Green", 10); // berths for her prize crew
+  s.fleet.push({ id: "b1", kind: "prize", cls: "Barque", name: "Hope", size: 2, hull: 45, hullMax: 45, guns: 0, crew: 8, crewMin: 8, crewTiers: { Green: 8 }, cargo: 250, dirty: false });
+  var o = PC.world.tradeOptions(s)[0];
+  eq(o.fee, 3000); eq(o.buyout, Math.round(5550 * 0.15));
+  var crew = s.money.crew;
+  PC.world.enroll(s, "b1");
+  eq(s.money.purse, 10000 - o.cost); eq(s.money.crew, crew + o.buyout);
+  ok(s.tradeShip && !s.fleet.some(function (f) { return f.id === "b1"; }));
+  var real = PC.rng.fromKey;
+  PC.rng.fromKey = function (k) { return /trade-loss/.test(k) ? function () { return 0.99; } : real(k); };
+  try { PC.world.endSeason(s); } finally { PC.rng.fromKey = real; }
+  eq(s.tradeShip.ledger, Math.round(1.25 * 250));
+  PC.world.sail(s, "ocracoke"); PC.world.sail(s, "norfolk");
+  eq(s.tradeShip.ledger, 0); eq(s.money.purse, 10000 - o.cost + 313);
+});
+
+test("a hunt from an ocean node stays at sea; Norfolk hunts the Hatteras Banks", function () {
+  var s = m7("oceanhunt"); PC.world.sail(s, "bahama"); s.location.popup = null;
+  var g = PC.hunt.start(s);
+  eq(g.waters, "south");
+  g.phase = "batchEnd"; PC.hunt.sailHome(s, g); PC.minigames.leave(s);
+  eq(s.location.node, "bahama");
+});
+
+test("a version 7 save loads as version 8 with the trade ship and season-loop fields, and Ocracoke's Trade Master", function () {
+  var s = m7("mig"); var old = JSON.parse(PC.state.serialize(s));
+  old.saveVersion = 7; delete old.tradeShip; delete old.split; delete old.yearStart; delete old.generated.ocr_trademaster;
+  var back = PC.state.deserialize(JSON.stringify(old));
+  eq(back.saveVersion, 8); eq(back.tradeShip, null); ok(back.yearStart); ok(back.generated.ocr_trademaster);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

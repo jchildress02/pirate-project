@@ -133,7 +133,7 @@
       if (n.leader && !d.npcs[n.leader]) err(w, "leader unknown: " + n.leader);
       Object.keys((n.market || {}).demand || {}).forEach(function (g) { if (!d.goods[g]) warn(w, "demand for a good with no price: " + g); });
       Object.keys(((n.market || {}).bulk || {}).weights || {}).forEach(function (g) { if (!d.goods[g]) err(w, "stock weight for unknown good: " + g); });
-      if (!d.economy.TIERS[n.tier]) err(w, "unknown prosperity tier " + n.tier);
+      if (n.kind !== "ocean" && !d.economy.TIERS[n.tier]) err(w, "unknown prosperity tier " + n.tier);
     });
 
     return { errors: errors, warnings: warnings };

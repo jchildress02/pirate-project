@@ -118,6 +118,8 @@
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
   add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
   // The minigames' tags and items (§14.5, §14.4, §32.12).
+  // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
+  add("Careened", { edge: plus(["Outrun"], 1) });
   add("Hangover", { edge: plus(["Keep Watch", "Notice Danger", "Read People"], -1) });
   add("Waterlogged", { edge: plus(["Endure"], -1) }); // placeholder (§14.5)
   add("Card Sharp", { reroll: reroll(["Cards & Dice"]) });

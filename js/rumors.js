@@ -133,7 +133,7 @@
       });
     }
     if (type === "Reputation") {
-      var lines = R().pool.filter(function (l) { return l.type === "Reputation" && !live(state, l.id); });
+      var lines = R().pool.filter(function (l) { return l.type === "Reputation" && !live(state, l.id) && (!l.node || l.node === node); });
       var deeds = lines.filter(function (l) { return l.deed && PC.scenes.test(state, l.when); });
       if (deeds.length) return deeds.map(function (l) { return { line: l }; });
       var d = state.meters.dread;
@@ -145,6 +145,7 @@
     }
     R().pool.forEach(function (l) {
       if (l.type !== type || live(state, l.id)) return;
+      if (l.node && l.node !== node) return; // a node's own lines stay at that node
       if (l.posture && l.posture !== state.world.posture) return;
       if (l.when && !PC.scenes.test(state, l.when)) return;
       if (l.spot) {
@@ -208,7 +209,9 @@
     return tell(state, c, source);
   }
 
-  function keeperMix() { return (R().tierMix || {}).keeper; }
+  // The tavern keeper's tier mix: the node's own (Norfolk's, §17.4.1) or
+  // the shared one.
+  function keeperMix(state) { var m = R().tierMix || {}; var n = state && PC.node.here(state); return (n && m[n]) || m.keeper; }
 
   // ---- The tavern keeper (§30.4) ------------------------------------------------
 
@@ -250,11 +253,11 @@
     var n = Math.max(1, 1 + sl);
     var key = [state.world.seed, stamp(state), node, "keeper-rumor"].join("|");
     var out = [];
-    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix() }); if (r) out.push(r); }
+    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix(state) }); if (r) out.push(r); }
     var chk = talkCheck(state);
     var res = PC.checks.resolve(state, chk, key + "|talk", { conditions: ["Harbor"] });
     var extra = null;
-    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper", null, { mix: keeperMix() });
+    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper", null, { mix: keeperMix(state) });
     PC.node.tavernActionDone(state);
     return { line: L.askRumors, rumors: out, talk: { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, dr: chk.dr }, extra: extra,
       extraLine: extra ? L.talkClean : null, out: L.outOfRumors };
@@ -273,6 +276,7 @@
   // The unheard loss-quest lead at this node that a clean result can give
   // (§30.6). At Ocracoke: the one-armed pirate's lead for A and C.
   function fallbackLead(state) {
+    if (PC.node.here(state) !== "ocracoke") return null;
     var loss = state.captain.loss;
     if ((loss === "A" || loss === "C") && !PC.quests.hasLead(state, "what_was_lost", "trident")) return "trident";
     return null;
@@ -300,7 +304,7 @@
       out.picks = out.pick.length ? (res.outcome === "clean" ? 2 : 1) : 0;
       state.location.gatherPick = out.picks ? { key: key, left: out.picks, n: 0 } : null;
     } else {
-      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|setback", "gather intelligence", null, { mix: keeperMix() });
+      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|setback", "gather intelligence", null, { mix: keeperMix(state) });
       state.flags.gi_asked = stamp(state); // the next Reputation rumor here is about the questions
     }
     PC.node.tavernActionDone(state);

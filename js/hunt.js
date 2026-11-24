@@ -35,7 +35,7 @@
     opts = opts || {};
     var c = canHunt(state);
     if (!c.ok) throw new Error(c.why);
-    var waters = H().HOME_WATERS[state.location.node] || "north";
+    var waters = H().HOME_WATERS[state.location.node] || PC.node.nodeData(state.location.node).waters || "north";
     var game = {
       kind: "hunt", key: "hunt-" + (state.rolls.hunt = (state.rolls.hunt || 0) + 1), waters: waters,
       apUsed: 0, batch: null, phase: "setout", sighting: null, battle: null, after: null,
@@ -57,12 +57,12 @@
 
   // Provisions burn by the hunt's actions: crew ÷ 5 lots an action (§20.6).
   // Short of provisions, the crew go hungry (DEFAULT: −10 morale).
+  // Milestone 7: the same burn as a voyage (§20.6): Winter +50%, rationing
+  // -25% with its Ration Stores check, and hunger's Go Without check.
   function burn(state, game) {
-    var need = Math.ceil(provisionHeads(state) / 5);
-    if (state.provisions >= need) { state.provisions -= need; return; }
-    state.provisions = 0;
-    PC.crew.addMorale(state, -10);
-    M().say(state, game, "PLACEHOLDER: The last of the provisions are gone. The hands go hungry and grumble.");
+    var b = PC.world.burn(state, 1, {});
+    b.lines.forEach(function (l) { M().say(state, game, l); });
+    return b;
   }
 
   function newBatch(state, game) {
@@ -566,15 +566,48 @@
     // Fleet ships' wounded come home with the rest (DEFAULT: they join the
     // flagship's wounded for the arrival).
     fleet(state).forEach(function (f) { if (f.wounded) { state.crew.wounded += f.wounded; state.crew.woundedTiers = state.crew.woundedTiers || {}; state.crew.woundedTiers.Green = (state.crew.woundedTiers.Green || 0) + f.wounded; f.wounded = 0; } });
-    M().say(state, game, L().home);
+    // Ocracoke's own line; elsewhere the port's return line (§17.4.9).
+    var hn = PC.node.nodeData(game.home);
+    M().say(state, game, game.home === "ocracoke" ? L().home : hn.kind === "ocean" ? "PLACEHOLDER: You call off the hunt and heave to on the open sea." : (hn.lines.arrival || {}).back || L().home);
     game.phase = "home"; game.over = true;
     PC.state.addLog(state, "Back at " + PC.node.nodeData(game.home).name + " from the hunt: " + plural(game.prizesTaken, "prize") + " taken.");
   }
 
+  // The hunt ends: home to the port it left from (an arrival: the popup and
+  // the port fee), back on the open sea at an ocean node, or sailing on to
+  // another place from the hunting grounds (§4, §22.1).
   function exit(state, game) {
     if (game.phase === "gameover") { state.gameOver = game.gameOver; return "node"; }
+    if (game.sailOn) {
+      var from = OCEAN_OF[game.waters] || "hatteras";
+      state.minigame = null;
+      PC.world.sail(state, game.sailOn, { from: from });
+      return null; // the voyage has set the screen
+    }
+    if (PC.node.isOcean(game.home)) {
+      state.location.popup = { title: PC.node.nodeData(game.home).title, lines: [], chips: [{ icon: "port", text: "PLACEHOLDER: The hunt is over. You're still out on " + PC.node.nodeData(game.home).name + "." }] };
+      return "node";
+    }
     PC.node.arrive(state, game.home, { fromHunt: true });
     return "node";
+  }
+  var OCEAN_OF = { north: "hatteras", south: "bahama" };
+
+  // Sail on from the hunting grounds instead of going home (§22.1): the
+  // voyage starts at the waters' ocean node (assumption, flagged).
+  function sailOnOptions(state, game) {
+    var from = OCEAN_OF[game.waters] || "hatteras";
+    return PC.data.world.live.filter(function (id) { return id !== game.home && id !== from; }).map(function (id) {
+      var cost = PC.world.apCost(from, id);
+      return { id: id, name: PC.world.placeName(id), cost: cost, ok: state.ap.left >= cost, why: state.ap.left >= cost ? null : "Needs " + plural(cost, "action") };
+    });
+  }
+  function sailOn(state, game, dest) {
+    if (["batchEnd", "empty", "scout"].indexOf(game.phase) < 0) throw new Error("Not the moment for that.");
+    var o = sailOnOptions(state, game).filter(function (x) { return x.id === dest; })[0];
+    if (!o || !o.ok) throw new Error(o ? o.why : "You can't sail there.");
+    sailHome(state, game);
+    game.sailOn = dest;
   }
 
   // ---- The view ----------------------------------------------------------------------
@@ -713,7 +746,7 @@
 
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
-    doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome,
+    doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
   };

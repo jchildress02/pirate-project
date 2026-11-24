@@ -135,7 +135,8 @@
     if (!game.over) throw new Error("The game isn't over yet.");
     var e = engine(game);
     var to = e.exit ? e.exit(state, game) : game.back;
-    state.minigame = null;
+    if (state.minigame === game) state.minigame = null;
+    if (to === null) return; // the exit set the screen itself (a voyage, Milestone 7)
     if (to && to !== "node" && to !== "hub") return PC.scenes.enterScene(state, to);
     state.current = { screen: "node" };
     var next = PC.node.nextQueued(state);

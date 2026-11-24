@@ -594,6 +594,21 @@ details.stats > summary { cursor: pointer; color: var(--faded); font-style: ital
 .sliderwrap .ticks i b { display: block; width: 1.5px; height: 7px; margin: 0 auto 3px; background: #6b5030; }
 /* Liar's Dice: the opponent's name, smaller (B20). */
 h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
+
+/* ---- The chart (Milestone 7, §38.8): a placeholder map drawn in code ---- */
+.mapwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 6px 0 12px; border: 1px solid var(--rule); box-shadow: 0 0 0 4px var(--parchment), 0 0 0 5px var(--rule-soft); }
+.mapbox { position: relative; min-width: 860px; aspect-ratio: 3 / 2; }
+.mapbox .mapsvg, .mapbox .mapimg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.mapnode { all: unset; position: absolute; transform: translate(-50%, -50%); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; z-index: 2; }
+.mapnode .dot { width: 18px; height: 18px; border-radius: 50%; background: #7a2416; border: 2px solid #efe3c6; box-shadow: 0 0 0 1.5px #4a3418; }
+.mapnode .lab { font-family: var(--sc); font-size: 17px; letter-spacing: .04em; color: var(--ink); background: rgba(239,227,198,.85); padding: 0 6px; border-radius: 2px; white-space: nowrap; }
+.mapnode.ocean .dot { width: 14px; height: 14px; background: var(--sea); border-radius: 3px; transform: rotate(45deg); }
+.mapnode.uncharted { opacity: .45; }
+.mapnode.uncharted .dot { background: #8c7a5a; }
+.mapnode.here .dot { box-shadow: 0 0 0 1.5px #4a3418, 0 0 0 6px rgba(201,159,69,.55); }
+.mapnode.live:hover .lab, .mapnode.sel .lab, .mapnode:focus-visible .lab { background: #f6ecd4; outline: 2px solid var(--gilt); }
+.destcard { max-width: 680px; }
+.destcard .flag { width: 18px; height: 12px; vertical-align: -1px; margin-right: 6px; }
 </style>
 </head>
 <body>
@@ -929,7 +944,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 7;
+  var SAVE_VERSION = 8;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -971,8 +986,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     addMilestone3Fields(state);
     addMilestone4Fields(state);
     addMilestone5Fields(state);
+    addMilestone7Fields(state);
     if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
+  }
+
+  // Milestone 7: the map, voyages and the season loop (§4, §26.9, §27.7).
+  function addMilestone7Fields(state) {
+    if (state.tradeShip === undefined) state.tradeShip = null;   // §27.7
+    if (state.split === undefined) state.split = null;           // the Winter split in progress (§26.9)
+    if (state.splitWinter === undefined) state.splitWinter = null;
+    if (state.voyage === undefined) state.voyage = null;
+    state.yearStart = state.yearStart || { year: state.time.year, purse: state.money.purse, crew: state.money.crew, prizes: (state.records && state.records.prizes) || 0 };
+    if (state.crew && state.crew.pressure == null) state.crew.pressure = 0;
+    // A node's later-added slots (the Trade Master) fill now.
+    if (state.location && state.location.node && PC.node) PC.node.initNode(state, state.location.node);
   }
 
   // UI pass 1 (the Creator chat, §11.4, §14.2): five skills cut or merged,
@@ -1083,6 +1111,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (state.time.season >= SEASONS.length) { state.time.season = 0; state.time.year += 1; }
     state.ap.left = state.ap.max;
     state.rerollsUsed = {};
+    if (state.time.season === 0) state.yearStart = { year: state.time.year, purse: state.money.purse, crew: state.money.crew, prizes: (state.records && state.records.prizes) || 0 };
     addLog(state, "— " + seasonName(state) + " " + state.time.year + " begins. —");
   }
 
@@ -1141,6 +1170,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // Milestone 5: the fleet, captives aboard, prize records, grudges.
       addMilestone5Fields(data);
       data.saveVersion = 7;
+    }
+    if (data.saveVersion === 7) {
+      // Milestone 7: voyages and the season loop; Ocracoke's Trade Master.
+      addMilestone7Fields(data);
+      data.saveVersion = 8;
     }
     return data;
   }
@@ -1507,6 +1541,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // ID plus a replacement counter. Locked once drawn.
   function fillSlot(state, slot) {
     state.generated = state.generated || {};
+    // A Named NPC in a slot (Horace at Norfolk's Tavern) is authored, not drawn.
+    if (slot.fixed) { state.npcs[slot.id] = state.npcs[slot.id] || {}; return PC.data.npcs[slot.id]; }
     if (state.generated[slot.id]) return state.generated[slot.id];
     var d = (state.npcs[slot.id] = state.npcs[slot.id] || {});
     var rec = generate(state, {
@@ -2234,11 +2270,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- The node's state ---------------------------------------------------
 
+  // Safe to call again: a node's later-added slots (the Trade Master,
+  // Milestone 7) fill on the next visit.
   function initNode(state, id) {
     var nd = nodeData(id);
     state.nodes[id] = state.nodes[id] || { prosperity: nd.prosperity, season: null };
     (nd.slots || []).forEach(function (s) { PC.npcs.fillSlot(state, s); });
   }
+  function isOcean(id) { return nodeData(id).kind === "ocean"; }
 
   // Everything that resets each season: the stock, the crew pool, the
   // buyers' caps, what's been sold (§20.3, §24.7, §29.4).
@@ -2280,7 +2319,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     });
     if (m.bulk) {
       var w = JSON.parse(JSON.stringify(m.bulk.weights));
-      for (var i = 0; i < m.bulk.count && Object.keys(w).length; i++) {
+      // A fixed count (Ocracoke: 3) or a range (Norfolk: 2-4 more, §17.4.5).
+      var count = m.bulk.count != null ? m.bulk.count : m.bulk.countMin + Math.floor(r() * (m.bulk.countMax - m.bulk.countMin + 1));
+      for (var i = 0; i < count && Object.keys(w).length; i++) {
         var g = PC.npcs.weighted(r, w);
         delete w[g];
         out[g] = m.bulk.min + Math.floor(r() * (m.bulk.max - m.bulk.min + 1));
@@ -2398,10 +2439,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // A greeting by rung, or the refusal (Enemy and Rival refuse, §15.6).
+  // A person met for the first time on this visit says their first-meeting
+  // line instead (Christoph at the Dockyard, Part 4 §9).
   function greeting(state, id, who, linesKey) {
     var L = nodeData(id).lines[linesKey];
     var sl = PC.npcs.serviceLevel(state, who);
     if (sl == null) return { refuse: true, line: L.refuse };
+    if (L.first && state.location && state.location.firstMeet === who && linesKey !== "keeper") return { refuse: false, line: L.first, first: true };
     return { refuse: false, line: L.greet[String(sl)] || L.greet["0"] };
   }
 
@@ -2436,13 +2480,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function flag(state, f) { return state.flags[f] === true; }
 
+  // The node's places in menu order. Ocracoke's first-visit locks are its
+  // own (§17.2); a place with a locked line shows as a locked row (the
+  // Admiralty House in Milestone 7); a split Winter closes the town (§26.9).
   function places(state) {
     var id = here(state), nd = nodeData(id);
-    var firstVisit = !flag(state, F.tavernDone);
-    return ["tavern", "docks", "merchant", "graveyard", "ship"].map(function (p) {
-      var out = { id: p, name: nd.locations[p].name, locked: false, why: null };
-      if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Come back after your first visit"; }
-      else if (p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.hidden = true; out.why = "Come back after A Dying Pirate's Wish"; }
+    var ocr = id === "ocracoke";
+    var firstVisit = ocr && !flag(state, F.tavernDone);
+    var split = PC.world && PC.world.splitWinter(state);
+    return (nd.placeOrder || ["tavern", "docks", "merchant", "graveyard", "ship"]).map(function (p) {
+      var loc = nd.locations[p];
+      var out = { id: p, name: loc.name, locked: false, why: null };
+      if (loc.locked) { out.locked = true; out.why = loc.locked; }
+      else if (split && p !== "ship") { out.locked = true; out.why = "The split takes the whole Winter"; }
+      else if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Come back after your first visit"; }
+      else if (ocr && p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.hidden = true; out.why = "Come back after A Dying Pirate's Wish"; }
       return out;
     });
   }
@@ -2459,10 +2511,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     state.location.visit = (state.location.visit || 0) + 1;
     state.location.sales = {}; // this visit's sales by buyer (R6)
     var id = here(state);
-    // The persistent Minors count as met once the captain walks into their place.
-    var meet = { tavern: "keeper", docks: "shipwright", merchant: "provisioner" }[place];
-    if (meet) { var mid = slotNpc(id, meet); (state.npcs[mid] = state.npcs[mid] || {}).met = true; }
-    if (place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
+    // The persistent Minors count as met once the captain walks into their
+    // place; one met just now says a first-meeting line if he has one.
+    state.location.firstMeet = null;
+    (nodeData(id).slots || []).forEach(function (sl) {
+      if (sl.place !== place) return;
+      var d = (state.npcs[sl.id] = state.npcs[sl.id] || {});
+      if (!d.met) state.location.firstMeet = sl.id;
+      d.met = true;
+    });
+    if (id === "ocracoke" && place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
+    // A node's own first-entry scenes (Norfolk's beat 2, PR 5).
+    var fe = (nodeData(id).firstEntry || {})[place];
+    if (fe && !state.seen[fe] && PC.scenes.canEnter(state, fe).ok) return fe;
     return null;
   }
 
@@ -2473,8 +2534,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var place = state.location.place;
     state.location.place = null;
     state.location.say = null;
+    state.location.firstMeet = null;
     var queue = [];
-    if (place === "tavern" && !flag(state, F.tavernDone)) {
+    if (here(state) === "ocracoke" && place === "tavern" && !flag(state, F.tavernDone)) {
       state.flags[F.tavernDone] = true;
       if (!flag(state, F.underworld) && !(state.location.queue || []).length) queue.push("ocr_uw_1");
       if (!flag(state, F.dyingWish)) queue.push("ocr_dpw_1");
@@ -2495,6 +2557,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // The first Tavern action triggers Welcome to the Underworld right after
   // it resolves (§17.2).
   function tavernActionDone(state) {
+    if (here(state) !== "ocracoke") return;
     if (flag(state, F.tavernDone) || flag(state, F.tavernAction)) return;
     state.flags[F.tavernAction] = true;
     if (!flag(state, F.underworld)) state.location.queue = (state.location.queue || []).concat(["ocr_uw_1"]);
@@ -2514,8 +2577,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // Officer recruitment and Gather Intelligence open after the first visit.
+  function firstTavernDone(state) {
+    var f = nodeData(here(state)).firstTavernFlag;
+    if (f === undefined) f = F.tavernDone; // Ocracoke's
+    return !f || flag(state, f);
+  }
+
   function tavernServiceCheck(state, ap) {
-    if (!flag(state, F.tavernDone)) return { ok: false, why: "Not on your first visit" };
+    if (!firstTavernDone(state)) return { ok: false, why: "Not on your first visit" };
     if (ap && state.ap.left < ap) return { ok: false, why: "Not enough time this season" };
     return { ok: true };
   }
@@ -2562,7 +2631,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function lodgingCost(state, ap) { return tierOf(state).lodging * state.crew.count * ap; }
 
   function lodgingCheck(state, ap) {
-    if (!flag(state, F.tavernDone)) return { ok: false, why: "Not on your first visit" };
+    if (!firstTavernDone(state)) return { ok: false, why: "Not on your first visit" };
     var who = slotNpc(here(state), "keeper");
     if (PC.npcs.serviceLevel(state, who) == null) return { ok: false, why: "The tavern keeper won't serve you" };
     if (PC.crew.usedThisSeason(state, "lodging")) return { ok: false, why: "Once a season" };
@@ -2645,7 +2714,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     s.stock[good] -= n;
     PC.crew.addGood(state, good, n, false);
     PC.state.addLog(state, "Bought " + n + " " + good + " for " + cost + " crew gold.");
-    return { cost: cost, line: noteTrade(state, who, cost, L) || L.goods };
+    var prod = nodeData(id).market.produces && nodeData(id).market.produces[good];
+    return { cost: cost, line: noteTrade(state, who, cost, L) || (prod && L.tobacco && good === "Tobacco" ? L.tobacco : L.goods) };
   }
 
   // What a buyer pays for one unit. "provisioner": clean only, with the
@@ -2805,6 +2875,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var out = { track: track, name: TRACKS[track], level: cur, next: next };
     if (next > 5) { out.locked = "At the top level"; return out; }
     if (next > cap) { out.locked = "This yard tops out at level " + cap; out.atCap = true; return out; }
+    // Norfolk's level 4 needs Avalon 20+ (§17.4.1).
+    var gate = nd.yardGate;
+    if (gate && next >= gate.level && (state.meters.standing[gate.faction] || 0) < gate.standing) {
+      out.locked = "Level " + gate.level + " needs " + (gate.faction === "avalon" ? "Avalon" : gate.faction) + " Standing " + gate.standing + " or better";
+      out.gated = true;
+    }
     out.cost = Math.round(E().UPGRADE[next] * E().SIZE_UPGRADE[state.ship.size] * craftMult(state));
     out.effect = track === "hull" ? "Max hull +" + (hullMaxAt(state, next) - state.ship.hullMax)
       : track === "rigging" ? (next === 3 ? "+1 Speed" : next === 5 ? "+1 Handling" : (state.ship.rigging === "frayed" ? "Fixes the frayed rigging" : "No change until level 3"))
@@ -2817,10 +2893,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function upgrade(state, track) {
-    var id = here(state), L = nodeData(id).lines.shipwright;
+    var id = here(state), nd = nodeData(id), L = nd.lines.shipwright;
     if (shipwrightGreeting(state).refuse) return { line: L.refuse };
     var u = upgradeInfo(state, track);
-    if (u.locked) return { line: u.atCap ? L.atCap : u.locked, failed: true };
+    if (u.locked) return { line: u.atCap ? L.atCap : u.gated && L.gateLocked ? L.gateLocked : u.locked, failed: true };
     if (state.money.crew < u.cost) return { line: L.broke, failed: true };
     state.money.crew -= u.cost;
     var sh = state.ship;
@@ -2836,7 +2912,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     ladderTick(state, slotNpc(id, "shipwright"), "commission");
     PC.state.addLog(state, "Bought " + u.name + " level " + u.next + " for " + u.cost + " crew gold.");
-    return { cost: u.cost, line: L.upgrade };
+    return { cost: u.cost, line: u.next >= (nd.yardMax || 2) && L.upgradeTop ? L.upgradeTop : L.upgrade };
   }
 
   // ---- Selling a prize hull (§22.7, Milestone 5 plan) -------------------------
@@ -2847,7 +2923,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function hullSalePrice(state, f) {
     var id = here(state), nd = nodeData(id), H = PC.data.hunt;
     var dirty = !!f.dirty;
-    if (dirty && nd.control !== "No control") return { ok: false, why: "This yard won't touch a dirty hull" };
+    if (dirty && nd.control !== "No control") return { ok: false, why: "This yard won't touch a dirty hull", line: (nd.lines.shipwright || {}).dirtyHull };
     var mult = tierOf(state).goods;
     var size = f.size || 1;
     var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[size] * Math.max(0, f.hullMax - f.hull));
@@ -2890,7 +2966,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // What no longer fits in the smaller hold goes over the side (A9).
     var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
-    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
@@ -2938,8 +3014,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return PC.articles.currentReputation(state).pool;
   }
 
+  // A node can close its crew pool below a Standing (Norfolk: Avalon 0+).
+  function poolClosed(state) {
+    var g = nodeData(here(state)).crewGate;
+    return !!(g && (state.meters.standing[g.faction] || 0) < g.min);
+  }
+
   function poolAvailable(state) {
     var s = season(state);
+    if (poolClosed(state)) return { Green: 0, Able: 0, Seasoned: 0, Veteran: 0 };
     var m = poolMult(state);
     var out = {};
     Object.keys(s.pool).forEach(function (t) { out[t] = Math.max(0, Math.floor(s.pool[t] * m) - s.hired[t] - ((s.lost || {})[t] || 0)); });
@@ -3040,6 +3123,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var L = nodeData(here(state)).lines.crew;
     n = Math.floor(n);
     if (n <= 0) throw new Error("Sign at least one hand.");
+    if (poolClosed(state)) return { line: L.closed || L.empty, failed: true };
     var avail = poolAvailable(state)[tier] || 0;
     if (!avail) return { line: L.empty, failed: true };
     if (PC.crew.berths(state) <= 0) return { line: L.full, failed: true };
@@ -3130,7 +3214,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
     var lines = [];
+    var pre = [];
+    if (opts.voyage) pre = opts.voyage.lines.slice();
     if (opts.fromHunt) lines.push(L.back);
+    else if (L.arrive) lines.push(L.arrive);
     var c = state.crew;
     if (c.wounded > 0) {
       var cook = (state.officers || []).some(function (o) { return !o.gone && o.type === "Cook" && o.aboard === "flagship"; });
@@ -3174,13 +3261,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       lines.push("PLACEHOLDER: You set " + state.captives + " captive" + (state.captives === 1 ? "" : "s") + " ashore, free. Their thanks come with " + reward + " gold.");
       state.captives = 0;
     }
-    // Holdings come after the prototype.
+    // Holdings come in M9; the trade ship's earnings are collected here (§27.7).
+    var ledger = PC.world ? PC.world.collectLedger(state, id) : null;
+    if (ledger) lines.push("PLACEHOLDER: The Trade Master hands over your trade ship's earnings: " + ledger + " gold, into your purse.");
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
     // P16: the lines carry which pot paid in brackets, so the old pay chips
     // under them (which repeated the lines) are gone.
-    var chips = lines.map(function (l) { return { icon: "port", text: l }; });
-    state.location.popup = { title: "Arrival at " + nd.name, lines: lines, chips: chips };
+    var all = pre.concat(lines);
+    var chips = all.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []);
+    state.location.popup = { title: "Arrival at " + nd.name, lines: all, chips: chips };
     return state.location.popup;
   }
 
@@ -3216,6 +3306,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     recruitBatch: recruitBatch,
     trimPlan: trimPlan,
     initNode: initNode,
+    isOcean: isOcean,
+    poolClosed: poolClosed,
+    firstTavernDone: firstTavernDone,
     season: season,
     tierOf: tierOf,
     nodeData: nodeData,
@@ -3324,6 +3417,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       return Array.isArray(cond.season) ? cond.season.indexOf(s) >= 0 : cond.season === s;
     }
     if (cond.gold) return (state.money[cond.gold.pot] || 0) >= cond.gold.atLeast;
+    if (cond.minYear) return state.time.year >= cond.minYear;
+    if (cond.maxYear) return state.time.year <= cond.maxYear;
+    if (cond.node) return !!(state.location && state.location.node === cond.node);
     throw new Error("Unknown condition: " + JSON.stringify(cond));
   }
 
@@ -3996,6 +4092,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- Generated candidates (§25.1, §25.7) ---------------------------------
 
+  // A node can lean its candidates toward some types (Norfolk: Gunner and
+  // Navigator at double weight, ex-navy, §17.4.4).
+  function officerType(node, r, one) {
+    var w = node && PC.data.nodes[node] && PC.data.nodes[node].officerTypeWeights;
+    if (!w) return one(C().OFFICER_TYPES).id;
+    var weights = {};
+    C().OFFICER_TYPES.forEach(function (t) { weights[t.id] = w[t.id] || 1; });
+    return PC.npcs.weighted(r, weights);
+  }
+
   function generate(state, node, key, id) {
     var rec = PC.npcs.generate(state, { id: id, role: "Officer", pool: "master", node: null, key: key, persistent: false });
     var r = PC.rng.fromKey(key + "|officer");
@@ -4010,7 +4116,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var o = {
       id: id, first: rec.first, last: rec.last, nickname: rec.nickname || null, full: rec.full, gender: rec.gender,
       age: 20 + Math.floor(r() * 41), // 20-60 (§25.1)
-      type: one(C().OFFICER_TYPES).id, level: 1,
+      type: officerType(node, r, one), level: 1,
       voice: voice, secondary: secondary,
       drive: one(C().DRIVES), fear: one(C().FEARS),
       approval: 0, aboard: "flagship", wounded: false, sacrificeUsed: false,
@@ -4445,7 +4551,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       });
     }
     if (type === "Reputation") {
-      var lines = R().pool.filter(function (l) { return l.type === "Reputation" && !live(state, l.id); });
+      var lines = R().pool.filter(function (l) { return l.type === "Reputation" && !live(state, l.id) && (!l.node || l.node === node); });
       var deeds = lines.filter(function (l) { return l.deed && PC.scenes.test(state, l.when); });
       if (deeds.length) return deeds.map(function (l) { return { line: l }; });
       var d = state.meters.dread;
@@ -4457,6 +4563,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     R().pool.forEach(function (l) {
       if (l.type !== type || live(state, l.id)) return;
+      if (l.node && l.node !== node) return; // a node's own lines stay at that node
       if (l.posture && l.posture !== state.world.posture) return;
       if (l.when && !PC.scenes.test(state, l.when)) return;
       if (l.spot) {
@@ -4520,7 +4627,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return tell(state, c, source);
   }
 
-  function keeperMix() { return (R().tierMix || {}).keeper; }
+  // The tavern keeper's tier mix: the node's own (Norfolk's, §17.4.1) or
+  // the shared one.
+  function keeperMix(state) { var m = R().tierMix || {}; var n = state && PC.node.here(state); return (n && m[n]) || m.keeper; }
 
   // ---- The tavern keeper (§30.4) ------------------------------------------------
 
@@ -4562,11 +4671,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var n = Math.max(1, 1 + sl);
     var key = [state.world.seed, stamp(state), node, "keeper-rumor"].join("|");
     var out = [];
-    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix() }); if (r) out.push(r); }
+    for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix(state) }); if (r) out.push(r); }
     var chk = talkCheck(state);
     var res = PC.checks.resolve(state, chk, key + "|talk", { conditions: ["Harbor"] });
     var extra = null;
-    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper", null, { mix: keeperMix() });
+    if (res.outcome === "clean") extra = drawOne(state, weights, key + "|talk-extra", "tavern keeper", null, { mix: keeperMix(state) });
     PC.node.tavernActionDone(state);
     return { line: L.askRumors, rumors: out, talk: { outcome: res.outcome, dice: res.dice, edge: res.assessment.edge, dr: chk.dr }, extra: extra,
       extraLine: extra ? L.talkClean : null, out: L.outOfRumors };
@@ -4585,6 +4694,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // The unheard loss-quest lead at this node that a clean result can give
   // (§30.6). At Ocracoke: the one-armed pirate's lead for A and C.
   function fallbackLead(state) {
+    if (PC.node.here(state) !== "ocracoke") return null;
     var loss = state.captain.loss;
     if ((loss === "A" || loss === "C") && !PC.quests.hasLead(state, "what_was_lost", "trident")) return "trident";
     return null;
@@ -4612,7 +4722,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       out.picks = out.pick.length ? (res.outcome === "clean" ? 2 : 1) : 0;
       state.location.gatherPick = out.picks ? { key: key, left: out.picks, n: 0 } : null;
     } else {
-      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|setback", "gather intelligence", null, { mix: keeperMix() });
+      out.rumor = drawOne(state, PC.node.nodeData(PC.node.here(state)).rumorWeights, key + "|setback", "gather intelligence", null, { mix: keeperMix(state) });
       state.flags.gi_asked = stamp(state); // the next Reputation rumor here is about the questions
     }
     PC.node.tavernActionDone(state);
@@ -4813,7 +4923,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (n.leader && !d.npcs[n.leader]) err(w, "leader unknown: " + n.leader);
       Object.keys((n.market || {}).demand || {}).forEach(function (g) { if (!d.goods[g]) warn(w, "demand for a good with no price: " + g); });
       Object.keys(((n.market || {}).bulk || {}).weights || {}).forEach(function (g) { if (!d.goods[g]) err(w, "stock weight for unknown good: " + g); });
-      if (!d.economy.TIERS[n.tier]) err(w, "unknown prosperity tier " + n.tier);
+      if (n.kind !== "ocean" && !d.economy.TIERS[n.tier]) err(w, "unknown prosperity tier " + n.tier);
     });
 
     return { errors: errors, warnings: warnings };
@@ -5422,7 +5532,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (!game.over) throw new Error("The game isn't over yet.");
     var e = engine(game);
     var to = e.exit ? e.exit(state, game) : game.back;
-    state.minigame = null;
+    if (state.minigame === game) state.minigame = null;
+    if (to === null) return; // the exit set the screen itself (a voyage, Milestone 7)
     if (to && to !== "node" && to !== "hub") return PC.scenes.enterScene(state, to);
     state.current = { screen: "node" };
     var next = PC.node.nextQueued(state);
@@ -5995,7 +6106,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function opening(state, game) {
     var t = traitOf(game.opp);
-    M().say(state, game, D().lines.setup + (t.hint || "PLACEHOLDER (setup hint)."));
+    var pool = D().pools[game.node] || {};
+    M().say(state, game, (pool.setup || D().lines.setup) + (t.hint || "PLACEHOLDER (setup hint)."));
     if (game.hairOfTheDog) M().say(state, game, "Your head is still pounding from last time.");
   }
 
@@ -6167,7 +6279,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (game.over) return game;
     game.round += 1;
     var t = traitOf(game.opp);
-    if (t.quitsAtDoneFor && game.opp.tolerance <= 1) { M().say(state, game, D().lines.timidQuits); return finish(state, game, "win"); }
+    if (t.quitsAtDoneFor && game.opp.tolerance <= 1) { M().say(state, game, t.doneFor || D().lines.timidQuits); return finish(state, game, "win"); }
     showTell(state, game);
     if (game.opp.strongRound && game.round === game.opp.strongRound && !game.mustStrong) {
       M().say(state, game, D().lines.heCallsStrong);
@@ -6332,12 +6444,23 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function D() { return PC.data.minigames.dice; }
   function M() { return PC.minigames; }
   var COND = ["Harbor"];
+  // A node's table can have its own lines (Norfolk's Colonial Officer,
+  // Part 4 §12); anything it leaves out falls back to the shared ones.
+  function LN(node) {
+    var p = D().pools[node] || {};
+    if (!p.lines) return D().lines;
+    var out = {};
+    Object.keys(D().lines).forEach(function (k) { out[k] = D().lines[k]; });
+    Object.keys(p.lines).forEach(function (k) { out[k] = p.lines[k]; });
+    return out;
+  }
 
   function stakes(state, node) { return D().STAKES[PC.node.nodeData(node || PC.node.here(state)).tier] || [25, 50]; }
 
-  function canPlay(state) {
+  // opts.free: the Gaming Tables Winter (§26.10), no action spent.
+  function canPlay(state, opts) {
     var id = PC.node.here(state);
-    var c = PC.node.tavernServiceCheck(state, 1);
+    var c = PC.node.tavernServiceCheck(state, opts && opts.free ? 0 : 1);
     if (!c.ok) return c;
     if (!D().pools[id]) return { ok: false, why: "No one's gambling here" };
     // Stakes come from the purse, never crew gold (§18.1): say so plainly,
@@ -6356,10 +6479,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return out;
   }
 
-  function start(state) {
-    var c = canPlay(state);
+  function start(state, opts) {
+    var free = !!(opts && opts.free);
+    var c = canPlay(state, opts);
     if (!c.ok) throw new Error(c.why);
-    PC.crew.spendAP(state, 1);
+    if (!free) PC.crew.spendAP(state, 1);
     PC.node.tavernVisit(state);
     state.minigames.diceSessions = (state.minigames.diceSessions || 0) + 1;
     var node = PC.node.here(state);
@@ -6372,7 +6496,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       sessionRerolls: (state.captain.items || []).indexOf("Loaded Dice") >= 0 ? [{ name: "Loaded Dice", types: ["Cards & Dice"], op: "cheat" }] : [],
     };
     M().start(state, game, "node");
-    M().say(state, game, D().lines.sit);
+    M().say(state, game, LN(game.node).sit);
     return game;
   }
 
@@ -6391,7 +6515,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var lim = stakes(state, game.node);
     stake = Math.round(stake);
     if (stake < lim[0] || stake > lim[1]) throw new Error("Stakes here are " + lim[0] + "-" + lim[1] + " gold.");
-    if (state.money.purse < stake) throw new Error(D().lines.broke);
+    if (state.money.purse < stake) throw new Error(LN(game.node).broke);
     state.money.purse -= stake;
     game.games += 1;
     game.round = { stake: stake, myN: D().DICE, hisN: D().DICE, opener: "me", peeked: [], cheated: false, history: [] };
@@ -6462,8 +6586,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (push && valid(g, best.q + 1, best.f)) best = { q: best.q + 1, f: best.f, p: hisOdds(game, best.q + 1, best.f) };
     g.bid = { q: best.q, f: best.f, by: "him", bluff: best.p < 0.5 };
     var line = game.opp.name.split(" ")[0] + " bids " + faces(best.q, best.f) + ".";
-    if (g.bid.bluff && game.sized === "clean") line += " " + D().lines.tell;
-    else if (g.bid.bluff && game.sized === "partial" && r() < 0.6) line += " " + D().lines.vague;
+    if (g.bid.bluff && game.sized === "clean") line += " " + LN(game.node).tell;
+    else if (g.bid.bluff && game.sized === "partial" && r() < 0.6) line += " " + LN(game.node).vague;
     g.history.push(line);
     g.turn = "me";
     return game;
@@ -6526,7 +6650,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // Card Sharp: 500 gold net over the captain's life, wins less losses
       // (ruled November 18). Once earned it's never taken away.
       state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) + g.stake;
-      M().say(state, game, D().lines.win);
+      M().say(state, game, LN(game.node).win);
       if (state.minigames.diceWinnings >= D().CARD_SHARP_AT && state.captain.tags.indexOf("Card Sharp") < 0) {
         state.captain.tags.push("Card Sharp");
         M().say(state, game, "New tag: Card Sharp.");
@@ -6535,7 +6659,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     } else {
       game.lost += 1; game.net -= g.stake;
       state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) - g.stake; // net (Card Sharp)
-      M().say(state, game, D().lines.lose);
+      M().say(state, game, LN(game.node).lose);
     }
     return game;
   }
@@ -6570,14 +6694,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function settle(state, game, p) {
     if (p.op === "size") {
       game.sized = p.outcome;
-      M().say(state, game, D().lines.size[p.outcome]);
+      M().say(state, game, LN(game.node).size[p.outcome]);
       return game;
     }
     if (p.op === "cheat") {
       var g = game.round;
       if (p.outcome === "setback") return caught(state, game, "setback");
       g.peeked.push(p.data.index);
-      M().say(state, game, D().lines.cheat[p.outcome]);
+      M().say(state, game, LN(game.node).cheat[p.outcome]);
       if (p.outcome === "partial") {
         game.marks += 1;
         if (game.marks >= D().MARKS_TO_CATCH) return caught(state, game, "marks");
@@ -6591,7 +6715,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // faction drops (black Standing at Ocracoke, §18.3).
   function caught(state, game, why) {
     var g = game.round;
-    M().say(state, game, (D().lines.caughtWhy && D().lines.caughtWhy[why] ? D().lines.caughtWhy[why] + " " : "") + D().lines.caught);
+    M().say(state, game, (D().lines.caughtWhy && D().lines.caughtWhy[why] ? D().lines.caughtWhy[why] + " " : "") + LN(game.node).caught);
     g.caughtWhy = why || null;
     var faction = PC.node.nodeData(game.node).faction;
     PC.scenes.applyEffect(state, { standing: { faction: faction, delta: D().CAUGHT_STANDING } });
@@ -6610,7 +6734,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var g = game.round;
       g.over = true; g.won = false; g.forfeit = true;
       game.lost += 1; game.net -= g.stake;
-      M().say(state, game, D().lines.forfeit);
+      M().say(state, game, LN(game.node).forfeit);
     }
     game.round = null;
     game.over = true;
@@ -8109,7 +8233,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     opts = opts || {};
     var c = canHunt(state);
     if (!c.ok) throw new Error(c.why);
-    var waters = H().HOME_WATERS[state.location.node] || "north";
+    var waters = H().HOME_WATERS[state.location.node] || PC.node.nodeData(state.location.node).waters || "north";
     var game = {
       kind: "hunt", key: "hunt-" + (state.rolls.hunt = (state.rolls.hunt || 0) + 1), waters: waters,
       apUsed: 0, batch: null, phase: "setout", sighting: null, battle: null, after: null,
@@ -8131,12 +8255,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // Provisions burn by the hunt's actions: crew ÷ 5 lots an action (§20.6).
   // Short of provisions, the crew go hungry (DEFAULT: −10 morale).
+  // Milestone 7: the same burn as a voyage (§20.6): Winter +50%, rationing
+  // -25% with its Ration Stores check, and hunger's Go Without check.
   function burn(state, game) {
-    var need = Math.ceil(provisionHeads(state) / 5);
-    if (state.provisions >= need) { state.provisions -= need; return; }
-    state.provisions = 0;
-    PC.crew.addMorale(state, -10);
-    M().say(state, game, "PLACEHOLDER: The last of the provisions are gone. The hands go hungry and grumble.");
+    var b = PC.world.burn(state, 1, {});
+    b.lines.forEach(function (l) { M().say(state, game, l); });
+    return b;
   }
 
   function newBatch(state, game) {
@@ -8640,15 +8764,48 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Fleet ships' wounded come home with the rest (DEFAULT: they join the
     // flagship's wounded for the arrival).
     fleet(state).forEach(function (f) { if (f.wounded) { state.crew.wounded += f.wounded; state.crew.woundedTiers = state.crew.woundedTiers || {}; state.crew.woundedTiers.Green = (state.crew.woundedTiers.Green || 0) + f.wounded; f.wounded = 0; } });
-    M().say(state, game, L().home);
+    // Ocracoke's own line; elsewhere the port's return line (§17.4.9).
+    var hn = PC.node.nodeData(game.home);
+    M().say(state, game, game.home === "ocracoke" ? L().home : hn.kind === "ocean" ? "PLACEHOLDER: You call off the hunt and heave to on the open sea." : (hn.lines.arrival || {}).back || L().home);
     game.phase = "home"; game.over = true;
     PC.state.addLog(state, "Back at " + PC.node.nodeData(game.home).name + " from the hunt: " + plural(game.prizesTaken, "prize") + " taken.");
   }
 
+  // The hunt ends: home to the port it left from (an arrival: the popup and
+  // the port fee), back on the open sea at an ocean node, or sailing on to
+  // another place from the hunting grounds (§4, §22.1).
   function exit(state, game) {
     if (game.phase === "gameover") { state.gameOver = game.gameOver; return "node"; }
+    if (game.sailOn) {
+      var from = OCEAN_OF[game.waters] || "hatteras";
+      state.minigame = null;
+      PC.world.sail(state, game.sailOn, { from: from });
+      return null; // the voyage has set the screen
+    }
+    if (PC.node.isOcean(game.home)) {
+      state.location.popup = { title: PC.node.nodeData(game.home).title, lines: [], chips: [{ icon: "port", text: "PLACEHOLDER: The hunt is over. You're still out on " + PC.node.nodeData(game.home).name + "." }] };
+      return "node";
+    }
     PC.node.arrive(state, game.home, { fromHunt: true });
     return "node";
+  }
+  var OCEAN_OF = { north: "hatteras", south: "bahama" };
+
+  // Sail on from the hunting grounds instead of going home (§22.1): the
+  // voyage starts at the waters' ocean node (assumption, flagged).
+  function sailOnOptions(state, game) {
+    var from = OCEAN_OF[game.waters] || "hatteras";
+    return PC.data.world.live.filter(function (id) { return id !== game.home && id !== from; }).map(function (id) {
+      var cost = PC.world.apCost(from, id);
+      return { id: id, name: PC.world.placeName(id), cost: cost, ok: state.ap.left >= cost, why: state.ap.left >= cost ? null : "Needs " + plural(cost, "action") };
+    });
+  }
+  function sailOn(state, game, dest) {
+    if (["batchEnd", "empty", "scout"].indexOf(game.phase) < 0) throw new Error("Not the moment for that.");
+    var o = sailOnOptions(state, game).filter(function (x) { return x.id === dest; })[0];
+    if (!o || !o.ok) throw new Error(o ? o.why : "You can't sail there.");
+    sailHome(state, game);
+    game.sailOn = dest;
   }
 
   // ---- The view ----------------------------------------------------------------------
@@ -8787,7 +8944,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
-    doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome,
+    doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
   };
@@ -8808,14 +8965,24 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var go = state.gameOver || null;
     state.ended = { how: how || (go ? (go.how === "died" ? "died" : "captured") : "stopped"), from: state.current, at: { year: state.time.year, season: state.time.season } };
     state.current = { screen: "end" };
-    PC.state.addLog(state, state.ended.how === "stopped" ? "— The end of the prototype. —" : "— Your story ends here. —");
+    PC.state.addLog(state, state.ended.how === "stopped" ? "— The end of the prototype. —" : state.ended.how === "year" ? "— The end of the year. —" : "— Your story ends here. —");
     return state.ended;
   }
 
   // Developer mode's Keep playing: back to where the run stopped, with the
   // season's actions topped up. A captured or dead captain can't go on.
   function keepPlaying(state) {
-    if (!state.ended || state.ended.how !== "stopped") throw new Error("This captain's story is over.");
+    if (!state.ended || (state.ended.how !== "stopped" && state.ended.how !== "year")) throw new Error("This captain's story is over.");
+    // Past the end of 1754 (Milestone 7): on into Spring 1755.
+    if (state.ended.how === "year") {
+      state.keepPlaying = true;
+      PC.state.advanceSeason(state);
+      state.splitWinter = null;
+      state.ended = null;
+      state.current = { screen: "node" };
+      if (state.location) state.location.place = null;
+      return;
+    }
     state.current = state.ended.from && state.ended.from.screen !== "end" ? state.ended.from : { screen: "node" };
     state.ended = null;
     state.ap.left = state.ap.max;
@@ -8829,6 +8996,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var c = PC.rumors.candidatesOf(state, "Reputation").filter(function (x) { return !x.line.newcomer && x.line.id !== "rep_asking"; })[0];
     if (c) return PC.rumors.render(state, c.line, c.ctx);
     return PC.data.endLines ? PC.data.endLines.nobody : "";
+  }
+
+  function yearRecap(state) {
+    var y = state.yearStart || {};
+    return { year: state.time.year, prizes: (state.records.prizes || 0) - (y.prizes || 0), purse: state.money.purse - (y.purse || 0),
+      split: !!state.splitDone, tradeShip: state.tradeShip ? (state.tradeShip.ship.name || state.tradeShip.ship.cls) : null,
+      visited: Object.keys(state.nodes || {}).filter(function (n) { return PC.data.nodes[n] && PC.data.nodes[n].kind !== "ocean"; }).map(function (n) { return PC.data.nodes[n].name; }) };
   }
 
   function summary(state) {
@@ -8847,14 +9021,664 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       prizes: state.records.prizes || 0, hullsSold: state.records.hullsSold || 0,
       dread: state.meters.dread,
       standing: state.meters.standing, heat: state.meters.heat,
-      tags: start ? tags.filter(function (t) { return start.indexOf(t) < 0; }) : tags.slice(),
+      // Temporary tags (Careened, a Hangover) aren't earned.
+      tags: (start ? tags.filter(function (t) { return start.indexOf(t) < 0; }) : tags.slice()).filter(function (t) { return !((state.captain.tagsUntil || {})[t]); }),
       tagsAreNew: !!start,
       leads: { loss: leadCount(state, "what_was_lost"), lossNeeded: PC.data.quests.what_was_lost.needed, haven: leadCount(state, "hidden_haven"), havenNeeded: PC.data.quests.hidden_haven.needed },
       reputation: reputationLine(state),
+      // The year's numbers for the end-of-year screen (Milestone 7).
+      year: yearRecap(state),
     };
   }
 
   PC.summary = { end: end, keepPlaying: keepPlaying, summary: summary };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — the world map, voyages and the season loop (§4, §20.6,
+ * §24.13, §26.9-§26.10, §27.7; Milestone 7, §37.12).
+ *
+ * Voyages: 1-3 AP by §4's table; provisions burn crew ÷ 5 × AP; running
+ * short never blocks (a morale hit and a Go Without check, §20.6).
+ * The season turn: the hurricane strike (weather, PR 3), idle upkeep, the
+ * mutiny Pressure drift, the trade ship, then the new season; at the start
+ * of Winter, the split popup; after Winter 1754, the end-of-year screen.
+ * The trade ship (§27.7): the Trade Master enrolls one kept prize.
+ *
+ * Every function changes the state and returns what happened, so the
+ * screen can show it; nothing here touches the screen.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function W() { return PC.data.world; }
+  function E() { return PC.data.economy; }
+  function nodeData(id) { return PC.node.nodeData(id); }
+  function here(state) { return state.location && state.location.node; }
+  function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
+  function fill(line, map) { return String(line || "").replace(/\[(\w+)\]/g, function (m, k) { return map[k] != null ? map[k] : m; }); }
+  function stamp(state) { return PC.state.stamp(state); }
+  function seasonName(state) { return PC.state.seasonName(state); }
+  function rng(state, what) { return PC.rng.fromKey([state.world.seed, stamp(state), what, state.rolls[what] = (state.rolls[what] || 0) + 1].join("|")); }
+
+  // ---- The map ------------------------------------------------------------
+
+  function isLive(id) { return W().live.indexOf(id) >= 0; }
+  function isOcean(id) { var n = PC.data.nodes[id]; return !!(n && n.kind === "ocean"); }
+  function place(id) { return W().places.filter(function (p) { return p.id === id; })[0] || null; }
+  function placeName(id) { var n = PC.data.nodes[id]; return n ? n.name : (place(id) || {}).label || id; }
+  function zoneOf(id) { var p = place(id); return p ? p.zone : (PC.data.nodes[id] || {}).zone || "north"; }
+
+  // §4's table. Unknown pairs cost 2 (assumption; not reachable this build).
+  function apCost(from, to) {
+    if (!from || !to || from === to) return 0;
+    var o = W().order, i = o.indexOf(from), j = o.indexOf(to);
+    if (i < 0 || j < 0) return 2;
+    return W().ap[i][j];
+  }
+
+  // ---- Provisions (§20.6) ---------------------------------------------------
+
+  // Who eats at sea: every hand aboard any of the captain's ships, the
+  // wounded and the captives (as the hunt counts them). Idle upkeep counts
+  // only the crew (§20.6); an enrolled trade ship's crew never count.
+  function headsAtSea(state) {
+    var n = state.crew.count + (state.crew.wounded || 0) + (state.captives || 0);
+    (state.fleet || []).forEach(function (f) { if (!f.out) n += f.crew || 0; });
+    return n;
+  }
+
+  // The season's Ration Stores check (§20.6): rolled at the first voyage or
+  // hunt made on rations each season; the result sets the morale cost per
+  // AP sailed on rations (clean none, partial -3, setback -5 and +1 Pressure).
+  var RATION_DR = 2; // DEFAULT: §20.6 names Command but no DR
+  function rationCheck(state) {
+    var u = state.used.rationCheck;
+    if (u && u.stamp === stamp(state)) return { outcome: u.outcome, first: false };
+    var key = [state.world.seed, stamp(state), "ration-stores"].join("|");
+    var r = PC.checks.resolve(state, { type: "Ration Stores", dr: RATION_DR }, key, { conditions: [] });
+    state.used.rationCheck = { stamp: stamp(state), outcome: r.outcome };
+    if (r.outcome === "setback") state.crew.pressure = (state.crew.pressure || 0) + 1;
+    return { outcome: r.outcome, first: true };
+  }
+
+  var GO_WITHOUT = [[0.25, 2], [0.5, 3], [1.01, 4]]; // shortfall share → DR (§20.6)
+
+  // Burn provisions for ap actions at sea (a voyage, a hunt's batch) or for
+  // idle upkeep (opts.upkeep). Winter burns +50% (§4, §20.6); rationing
+  // -25% on voyages and hunts, never below half. Returns what happened:
+  // { need, used, short, lines, chips, rationing, goWithout }.
+  function burn(state, ap, opts) {
+    opts = opts || {};
+    var heads = opts.upkeep ? state.crew.count : headsAtSea(state);
+    var mult = seasonName(state) === "Winter" ? 1.5 : 1;
+    var out = { need: 0, used: 0, short: 0, lines: [], chips: [], rationing: null, goWithout: null };
+    if (!opts.upkeep && state.crew.rationing) {
+      var rc = rationCheck(state);
+      out.rationing = rc.outcome;
+      mult *= 0.75;
+      var cost = rc.outcome === "partial" ? 3 * ap : rc.outcome === "setback" ? 5 * ap : 0;
+      if (cost) PC.crew.addMorale(state, -cost);
+      out.chips.push({ icon: "prov", text: "On rations: burn −25%" + (rc.first ? " · Ration Stores " + rc.outcome : "") + (cost ? " · morale −" + cost : ""), ink: cost ? "bad" : null });
+      if (rc.first && rc.outcome === "setback") out.chips.push({ icon: "pressure", text: "The crew resent the short rations", ink: "bad" });
+    }
+    mult = Math.max(0.5, mult);
+    var need = Math.ceil(heads / 5 * ap * mult);
+    out.need = need;
+    var used = Math.min(state.provisions, need);
+    state.provisions -= used;
+    out.used = used;
+    out.short = need - used;
+    if (used) out.chips.push({ icon: "prov", text: "−" + plural(used, "provisions lot") + (mult > 1 && seasonName(state) === "Winter" ? " (Winter: +50%)" : ""), ink: "mid" });
+    if (out.short > 0) {
+      // Hunger (§20.6): -10 morale and a Go Without check, DR by the shortfall.
+      PC.crew.addMorale(state, -10);
+      var share = out.short / Math.max(1, need), dr = 4;
+      for (var i = 0; i < GO_WITHOUT.length; i++) if (share <= GO_WITHOUT[i][0]) { dr = GO_WITHOUT[i][1]; break; }
+      var key = [state.world.seed, stamp(state), "go-without", state.rolls.goWithout = (state.rolls.goWithout || 0) + 1].join("|");
+      var r = PC.checks.resolve(state, { type: "Go Without", dr: dr }, key, { conditions: [seasonName(state)] });
+      out.goWithout = { outcome: r.outcome, dr: dr };
+      out.lines.push(opts.upkeep ? W().lines.upkeepShort : W().lines.hungry);
+      out.chips.push({ icon: "morale", text: "Short " + out.short + " lots: morale −10 · Go Without " + r.outcome, ink: "bad" });
+      if (r.outcome === "setback") {
+        // 10% of the crew go on the wounded ledger as sick (§20.6).
+        var sick = Math.max(1, Math.round(state.crew.count * 0.10));
+        sick = Math.min(sick, Math.max(0, state.crew.count - 1));
+        if (sick) {
+          sicken(state, sick);
+          out.lines.push(fill(W().lines.sick, { number: sick }));
+          out.chips.push({ icon: "officer", text: plural(sick, "hand") + " sick", ink: "bad" });
+        }
+        state.flags.desertionPlus = stamp(state); // +10% desertion at the next departure (not built yet)
+      }
+      state.flags.soreFlag = true; // provisions ran short: the sore flag (§44.9)
+    }
+    return out;
+  }
+
+  // Move hands to the wounded ledger, lowest tiers first.
+  function sicken(state, n) {
+    var c = state.crew;
+    c.woundedTiers = c.woundedTiers || {};
+    E().TIER_ORDER.forEach(function (t) {
+      var k = Math.min(n, c.tiers[t] || 0);
+      if (!k) return;
+      c.tiers[t] -= k; c.count -= k; c.wounded = (c.wounded || 0) + k;
+      c.woundedTiers[t] = (c.woundedTiers[t] || 0) + k;
+      n -= k;
+    });
+  }
+
+  // ---- Voyages (§4) -----------------------------------------------------------
+
+  function splitWinter(state) { return state.splitWinter === stamp(state); }
+
+  // Can the captain sail from here to `to` now?
+  function canSail(state, to, opts) {
+    opts = opts || {};
+    var from = opts.from || here(state);
+    if (!from) return { ok: false, why: "Only from a port or the open sea" };
+    if (!isLive(to)) return { ok: false, why: W().lines.uncharted, uncharted: true };
+    if (to === from) return { ok: false, why: "You're already here" };
+    if (!state.articles) return { ok: false, why: "Sign the Articles before you sail", articles: true };
+    if (splitWinter(state)) return { ok: false, why: "The split takes the whole Winter" };
+    if (state.crew.count < (state.ship.crewMin || 5)) return { ok: false, why: "Not enough hands to sail her" };
+    var n = PC.data.nodes[to];
+    if (n && n.closedAt && PC.node.standingBand(state, n.faction).name === n.closedAt) return { ok: false, why: (n.lines.arrival || {}).turnedAway || "They won't let you in", closed: true };
+    var cost = opts.free ? 0 : apCost(from, to);
+    if (state.ap.left < cost) return { ok: false, why: "Needs " + plural(cost, "action") + "; you have " + state.ap.left + " left this season", cost: cost };
+    return { ok: true, cost: cost };
+  }
+
+  // Sail. opts.free: the Developer's 0 AP voyage. opts.from: a hunt sailing
+  // on from its waters (the voyage starts at that ocean node). Returns the
+  // popup the screen shows on arrival.
+  function sail(state, to, opts) {
+    opts = opts || {};
+    var from = opts.from || here(state);
+    var c = canSail(state, to, opts);
+    if (!c.ok) throw new Error(c.why);
+    var cost = opts.free ? 0 : apCost(from, to);
+    var lines = [fill(W().lines.sailFor, { Place: placeName(to) })];
+    var chips = [];
+    if (cost) { PC.crew.spendAP(state, cost); chips.push({ icon: "ap", text: plural(cost, "action") + " at sea" }); }
+    var b = burn(state, Math.max(1, cost), {});
+    lines = lines.concat(b.lines);
+    chips = chips.concat(b.chips);
+    var voyage = { from: from, to: to, ap: cost, lines: lines, chips: chips, events: [] };
+    // Voyage events: one slot per AP (§44; PR 4 hooks in here).
+    if (PC.voyageEvents) PC.voyageEvents.voyage(state, voyage);
+    PC.state.addLog(state, "Sailed from " + placeName(from) + " to " + placeName(to) + " (" + plural(cost, "action") + ").");
+    state.voyage = voyage;
+    if (voyage.pending) return voyage; // an event is waiting; arrive() when it's done
+    return arriveFrom(state, voyage);
+  }
+
+  // The voyage is over: move the ship and open the arrival.
+  function arriveFrom(state, voyage) {
+    var to = voyage.to;
+    state.voyage = null;
+    if (state.gameOver) return null;
+    state.location = { node: to, place: null, queue: [] };
+    state.current = { screen: "node" };
+    PC.node.initNode(state, to);
+    if (isOcean(to)) {
+      var lines = voyage.lines.concat([fill(W().lines.reachOcean, { Place: placeName(to) })]);
+      state.location.popup = { title: PC.data.nodes[to].title || placeName(to), lines: lines, chips: chipsFor(lines).concat(voyage.chips) };
+      return state.location.popup;
+    }
+    return PC.node.arrive(state, to, { voyage: voyage });
+  }
+
+  function chipsFor(lines) { return lines.map(function (l) { return { icon: "port", text: l }; }); }
+
+  // The destinations the map lists, with their cost and lock.
+  function destinations(state) {
+    return W().places.map(function (p) {
+      var c = canSail(state, p.id);
+      return { id: p.id, label: p.label, x: p.x, y: p.y, zone: p.zone, ocean: !!p.ocean, live: isLive(p.id), here: p.id === here(state),
+        cost: apCost(here(state), p.id), ok: c.ok, why: c.ok ? null : c.why, closed: !!c.closed };
+    });
+  }
+
+  // ---- The season turn (§4, §20.6, §24.13) ----------------------------------
+
+  // What the season-turn steps the other milestones add can hang on:
+  // { hurricane: fn(state, out) } (weather, PR 3).
+  var hooks = { beforeUpkeep: [], afterTurn: [] };
+  function hook(name, fn) { hooks[name].push(fn); }
+
+  // End the season. Returns { lines, chips, yearEnd, winter } for the
+  // season-turn popup. After Winter 1754 the run ends on the end-of-year
+  // screen (§37.12 P2).
+  function endSeason(state) {
+    var out = { lines: [], chips: [], from: seasonName(state) + " " + state.time.year };
+    hooks.beforeUpkeep.forEach(function (fn) { fn(state, out); });
+    // Idle upkeep (§20.6): crew ÷ 5, once, wherever the ship is; Winter
+    // +50%; nothing in a split Winter.
+    if (!splitWinter(state)) {
+      var b = burn(state, 1, { upkeep: true });
+      if (b.used) out.lines.push(fill(W().lines.upkeep, { lots: b.used }));
+      out.lines = out.lines.concat(b.lines);
+      out.chips = out.chips.concat(b.chips);
+    }
+    // Mutiny Pressure drifts by the morale band at season end (§24.13).
+    var band = PC.crew.band(state.crew.morale);
+    var dp = band === "Mutinous" ? 2 : band === "Sullen" ? 1 : band === "Eager" || band === "Devoted" ? -1 : 0;
+    state.crew.pressure = clamp((state.crew.pressure || 0) + dp, 0, 5);
+    // The trade ship's season (§27.7).
+    var ts = tradeShipSeason(state);
+    out.lines = out.lines.concat(ts.lines);
+    out.chips = out.chips.concat(ts.chips);
+    var wasWinter = seasonName(state) === "Winter";
+    var yearEnd = wasWinter && state.time.year >= 1754 && !state.keepPlaying;
+    if (yearEnd) {
+      PC.state.addLog(state, "— The end of " + state.time.year + ". —");
+      out.yearEnd = true;
+      out.recap = recap(state);
+      PC.summary.end(state, "year");
+      return out;
+    }
+    PC.state.advanceSeason(state);
+    state.splitWinter = null;
+    out.to = seasonName(state) + " " + state.time.year;
+    hooks.afterTurn.forEach(function (fn) { fn(state, out); });
+    // Ear to the Ground (§26.10): a free rumor at the start of Spring.
+    if (seasonName(state) === "Spring" && state.flags.earToGround) {
+      out.earPick = state.flags.earToGround;
+      state.flags.earToGround = null;
+    }
+    if (state.location) state.location.place = null;
+    state.current = { screen: "node" };
+    if (seasonName(state) === "Winter") out.winter = startWinter(state);
+    return out;
+  }
+
+  // The year's numbers for the recap (PH7: the author writes its words).
+  function recap(state) {
+    var y = state.yearStart || { purse: 0, crew: 0, prizes: 0 };
+    return { year: state.time.year, prizes: (state.records.prizes || 0) - (y.prizes || 0), purse: state.money.purse - (y.purse || 0), crew: state.money.crew - (y.crew || 0),
+      split: !!state.splitDone };
+  }
+
+  // ---- The Winter split (§26.9) -------------------------------------------------
+
+  // The implied share per head of crew gold: what one share would be if the
+  // crew split today (crew gold less the carryover, ÷ the weighted shares).
+  // Prize ships aren't counted: they're only sold at the split (assumption).
+  function impliedShare(state) {
+    return Math.round(state.money.crew * (1 - W().CARRYOVER) / Math.max(1, totalShares(state)));
+  }
+
+  function holdPressure(state) {
+    var s = impliedShare(state);
+    return s < 50 ? 0 : s <= 200 ? 1 : 2;
+  }
+
+  // The Quartermaster's reading (§26.9): only from an officer at Neutral or
+  // better (or the Acting Quartermaster); a ringleader always says "hold".
+  function qmReading(state) {
+    var qm = PC.officers.quartermaster ? PC.officers.quartermaster(state) : null;
+    if (!qm) return null;
+    if (qm.rung != null && qm.rung < 0) return null;
+    var proj = (state.crew.pressure || 0) + holdPressure(state);
+    var k = qm.ringleader ? "hold" : proj >= 4 ? "trouble" : proj >= 2 ? "grumbling" : "hold";
+    return { who: (qm.first + " " + (qm.last || "")).trim() || qm.full, key: k, line: W().split.reading[k] };
+  }
+
+  function startWinter(state) {
+    var forced = (state.crew.pressure || 0) >= 4 && impliedShare(state) >= 50;
+    state.split = { step: "ask", forced: forced, at: here(state), bandBefore: PC.crew.band(state.crew.morale) };
+    state.current = { screen: "split" };
+    return state.split;
+  }
+
+  // Hold: no split. Pressure by the implied share (§24.13).
+  function holdSplit(state) {
+    var sp = state.split;
+    if (!sp || sp.step !== "ask") throw new Error("No split to decide.");
+    if (sp.forced) throw new Error("The crew won't take no for an answer.");
+    var dp = holdPressure(state);
+    state.crew.pressure = clamp((state.crew.pressure || 0) + dp, 0, 5);
+    PC.state.addLog(state, "No split this Winter" + (dp ? " (the crew's patience wears thinner)" : "") + ".");
+    state.split = null;
+    state.current = { screen: "node" };
+    return { pressure: dp, line: W().split.held };
+  }
+
+  // The weighted shares: hands 1 each, officers and fleet captains by the
+  // Articles, the captain by his share (a percentage share is taken off the
+  // top instead, §26.3).
+  function totalShares(state) {
+    var hands = state.crew.count + (state.crew.wounded || 0);
+    (state.fleet || []).forEach(function (f) { if (!f.out) hands += f.crew || 0; });
+    var oa = PC.crew.articleOption(state, "officers");
+    var off = 0;
+    (state.officers || []).forEach(function (o) { if (!o.gone) off += o.aboard && o.aboard !== "flagship" ? oa.fleet : oa.officer; });
+    var cap = PC.crew.articleOption(state, "share");
+    return hands + off + (cap.shares || 0);
+  }
+
+  // A hull sold at the split node's yard: 15% clean, 8% dirty (or no
+  // buyer), × the node's sale multiplier, less her missing HP (§26.9).
+  function splitHullValue(state, f) {
+    var H = PC.data.hunt, at = here(state), n = PC.data.nodes[at] || {};
+    var yard = n.kind !== "ocean" && n.tier;
+    var dirty = !!f.dirty;
+    var buyerForDirty = n.control === "No control";
+    var rate = !yard ? H.HULL_SALE.dirty : dirty && !buyerForDirty ? H.HULL_SALE.dirty : dirty ? H.HULL_SALE.dirty : H.HULL_SALE.clean;
+    var mult = yard ? E().TIERS[n.tier].goods : 1;
+    var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[f.size || 1] * Math.max(0, f.hullMax - f.hull));
+    return Math.max(0, Math.round(H.HULL_VALUE[f.cls] * rate * mult) - repair) + Math.round((f.guns || 0) * E().GUN * H.LOOSE_GUN_SALE * mult);
+  }
+
+  // Split: prize ships sold, the pool paid out (§26.9).
+  function doSplit(state) {
+    var sp = state.split;
+    if (!sp || sp.step !== "ask") throw new Error("No split to make.");
+    var sold = [];
+    (state.fleet || []).filter(function (f) { return f.kind === "prize"; }).forEach(function (f) {
+      var g = splitHullValue(state, f);
+      state.money.crew += g;
+      sold.push({ name: f.name || f.cls, cls: f.cls, gold: g });
+      // Her hands come home first (they share as hands).
+      E().TIER_ORDER.forEach(function (t) { var n = (f.crewTiers || {})[t] || 0; if (n) { state.crew.tiers[t] += n; state.crew.count += n; } });
+      if (!f.crewTiers && f.crew) { state.crew.tiers.Green += f.crew; state.crew.count += f.crew; }
+      (state.officers || []).forEach(function (o) { if (o.aboard === f.id) o.aboard = "flagship"; });
+    });
+    state.fleet = (state.fleet || []).filter(function (f) { return f.kind !== "prize"; });
+    var pool = state.money.crew;
+    var carry = Math.round(pool * W().CARRYOVER);
+    var shareable = pool - carry;
+    var cap = PC.crew.articleOption(state, "share");
+    var capPct = cap.percent ? Math.round(shareable * cap.percent / 100) : 0;
+    var rest = shareable - capPct;
+    var shares = totalShares(state);
+    var one = shares ? rest / shares : 0;
+    var oa = PC.crew.articleOption(state, "officers");
+    var capGold = capPct + Math.round(one * (cap.shares || 0));
+    var offGold = 0;
+    (state.officers || []).forEach(function (o) { if (!o.gone) offGold += Math.round(one * (o.aboard && o.aboard !== "flagship" ? oa.fleet : oa.officer)); });
+    var handsN = state.crew.count + (state.crew.wounded || 0);
+    (state.fleet || []).forEach(function (f) { if (!f.out) handsN += f.crew || 0; });
+    var handGold = Math.round(one * handsN);
+    state.money.purse += capGold;
+    state.money.crew = carry;
+    // Morale to 50 plus the floor, Pressure to 0, officers' approval (§26.9).
+    state.crew.morale = clamp(50 + (state.crew.floor || 0), 0, 100);
+    state.crew.pressure = 0;
+    (state.officers || []).forEach(function (o) { if (!o.gone) o.approval = (o.approval || 0) + W().SPLIT_APPROVAL; });
+    sp.payout = { sold: sold, pool: pool, carry: carry, one: Math.round(one), captain: capGold, officers: offGold, hands: handGold, handsN: handsN };
+    sp.perHead = Math.round(one);
+    sp.step = "payout";
+    state.splitWinter = stamp(state);
+    state.splitDone = true;
+    state.ap.left = 0; // the split takes all 7 AP (§26.9)
+    PC.state.addLog(state, "The Winter split: " + Math.round(one) + " gold a share; your share " + capGold + " to your purse; " + carry + " carried over.");
+    return sp.payout;
+  }
+
+  // Departures and re-signers (§26.9): a skeleton crew stays (the minimum
+  // to sail the flagship and every fleet ship, chosen at random) with all
+  // officers; everyone else leaves; some re-sign by the morale band before
+  // the split.
+  function departures(state) {
+    var sp = state.split;
+    if (!sp || sp.step !== "payout") throw new Error("Not the moment for that.");
+    var r = rng(state, "split-departures");
+    var rate = W().RESIGN[sp.bandBefore] || 0;
+    var left = 0, back = 0;
+    function shuffleOut(tiers, keep) {
+      var men = [];
+      E().TIER_ORDER.forEach(function (t) { for (var i = 0; i < (tiers[t] || 0); i++) men.push(t); });
+      for (var i = men.length - 1; i > 0; i--) { var j = Math.floor(r() * (i + 1)); var x = men[i]; men[i] = men[j]; men[j] = x; }
+      var stay = men.slice(0, keep), go = men.slice(keep);
+      var res = {};
+      E().TIER_ORDER.forEach(function (t) { res[t] = 0; });
+      stay.forEach(function (t) { res[t]++; });
+      go.forEach(function (t) { if (r() < rate) { res[t]++; back++; } else left++; });
+      return res;
+    }
+    var flag = shuffleOut(state.crew.tiers, state.ship.crewMin || 5);
+    state.crew.tiers = flag;
+    state.crew.count = E().TIER_ORDER.reduce(function (a, t) { return a + flag[t]; }, 0);
+    (state.fleet || []).forEach(function (f) {
+      if (f.out) return;
+      var t = f.crewTiers || { Green: f.crew };
+      var res = shuffleOut(t, f.crewMin || 0);
+      f.crewTiers = res;
+      f.crew = E().TIER_ORDER.reduce(function (a, k) { return a + res[k]; }, 0);
+    });
+    sp.departed = { left: left, back: back, aboard: state.crew.count };
+    // The articles are re-signed now (§26.1): harder terms are allowed again.
+    sp.oldTerms = state.articles ? state.articles.terms : null;
+    state.articles = null;
+    sp.step = "resign";
+    PC.state.addLog(state, left + " hands leave with their shares; " + back + " sign on again.");
+    return sp.departed;
+  }
+
+  // After the re-signing: the Quartermaster stands for re-election (§26.11).
+  function afterResign(state) {
+    var sp = state.split;
+    if (!sp || sp.step !== "resign" || !state.articles) throw new Error("Sign the Articles first.");
+    var v = null;
+    if (PC.officers.runVote && (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship"; })) {
+      v = PC.officers.runVote(state, null, [state.world.seed, stamp(state), "split-vote"].join("|"));
+    }
+    sp.vote = v ? { winner: (v.winner.first + " " + (v.winner.last || "")).trim() } : null;
+    sp.step = "winter";
+    return sp.vote;
+  }
+
+  // How did you spend the Winter? (§26.10). Which options this node offers.
+  function winterOptions(state) {
+    var id = sp_at(state), n = PC.data.nodes[id] || {};
+    var hasTavern = !!(n.locations && n.locations.tavern);
+    var shallow = !!n.freePort || n.draft === "Shallow";
+    var faction = n.faction === "avalon" || n.faction === "frisia";
+    return W().winterOptions.map(function (o) {
+      var ok = !o.needs || (o.needs === "tavern" && hasTavern) || (o.needs === "shallow" && shallow) || (o.needs === "faction" && faction);
+      if (o.needs === "home") return null; // no romance or homes yet (hidden, §37.12)
+      return ok ? { id: o.id, label: o.label } : null;
+    }).filter(Boolean);
+  }
+  function sp_at(state) { return (state.split && state.split.at) || here(state); }
+
+  function spendWinter(state, id, opts) {
+    opts = opts || {};
+    var sp = state.split;
+    if (!sp || sp.step !== "winter") throw new Error("Not the moment for that.");
+    if (!winterOptions(state).some(function (o) { return o.id === id; })) throw new Error("That isn't open here.");
+    var o = W().winterOptions.filter(function (x) { return x.id === id; })[0];
+    var n = PC.data.nodes[sp_at(state)] || {};
+    var chips = [];
+    if (id === "carousing") {
+      var m = 5 + (n.freePort ? 5 : 0);
+      PC.crew.addMorale(state, m);
+      chips.push({ icon: "morale", text: "Crew morale +" + m, ink: "good" });
+    } else if (id === "careening") {
+      state.ship.hull = state.ship.hullMax;
+      if (state.ship.rigging === "frayed") { state.ship.rigging = "sound"; state.ship.speed = state.ship.speedMax; }
+      var t = state.captain.tags;
+      if (t.indexOf("Careened") < 0) t.push("Careened");
+      // +1 Outrun for the Spring season: the tag lapses at Spring's end.
+      state.captain.tagsUntil = state.captain.tagsUntil || {};
+      state.captain.tagsUntil.Careened = (state.time.year + 1) + "-0";
+      chips.push({ icon: "hull", text: "Hull fully repaired · +1 Outrun in Spring", ink: "good" });
+    } else if (id === "officers") {
+      (state.officers || []).forEach(function (x) { if (!x.gone) x.approval = (x.approval || 0) + 1; });
+      chips.push({ icon: "person", text: "Every officer warms to you a little" });
+    } else if (id === "ear") {
+      state.flags.earToGround = opts.type || "World State";
+      chips.push({ icon: "rumor", text: "A rumor of your choosing at the start of Spring" });
+    } else if (id === "courting") {
+      state.meters.standing[n.faction] = (state.meters.standing[n.faction] || 0) + 3;
+      chips.push({ icon: "standing", text: (n.faction === "avalon" ? "Avalon" : "Frisian") + " Standing +3", ink: "good" });
+    } else if (id === "gaming") {
+      state.flags.winterTables = stamp(state);
+      chips.push({ icon: "ap", text: "One Liar's Dice session from your purse" });
+    } else if (id === "rest") {
+      ["Wounded", "Fevered", "Hangover"].forEach(function (tg) { var i = state.captain.tags.indexOf(tg); if (i >= 0) state.captain.tags.splice(i, 1); });
+      chips.push({ icon: "person", text: "Wounds, fever and hangovers cleared", ink: "good" });
+    }
+    sp.spent = { id: id, label: o.label, line: o.line, chips: chips };
+    sp.step = "done";
+    PC.state.addLog(state, "Spent the Winter: " + o.label + ".");
+    return sp.spent;
+  }
+
+  function finishSplit(state) {
+    state.split = null;
+    state.current = { screen: "node" };
+    if (state.location) state.location.place = null;
+  }
+
+  // ---- The trade ship (§27.7) -----------------------------------------------------
+
+  var TRADE = { FEE: { "Very poor": 1500, "Poor": 2250, "Modest": 3000, "Wealthy": 4500 }, PER_SLOT: 1.25,
+    PROSPERITY: { "Very poor": 0.7, "Poor": 0.85, "Modest": 1.0, "Wealthy": 1.15 }, LOSS: 0.02, LOSS_HURRICANE: 0.05, LOSS_HEAT: 0.03, HEAT_AT: 50 };
+
+  function tradeFee(state, id) { return TRADE.FEE[nodeData(id || here(state)).tier] || 3000; }
+
+  // Her buyout: her hull sale value (15% clean, 8% dirty, §22.7) at this
+  // node's sale multiplier, less her missing HP; paid from the purse into
+  // crew gold as a gift.
+  function buyout(state, f) {
+    var H = PC.data.hunt, n = nodeData(here(state));
+    var rate = f.dirty ? H.HULL_SALE.dirty : H.HULL_SALE.clean;
+    var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[f.size || 1] * Math.max(0, f.hullMax - f.hull));
+    return Math.max(0, Math.round(H.HULL_VALUE[f.cls] * rate * E().TIERS[n.tier].goods) - repair);
+  }
+
+  function tradeIncome(ship, nodeId) { return Math.round(TRADE.PER_SLOT * (ship.cargo || 0) * (TRADE.PROSPERITY[nodeData(nodeId).tier] || 1)); }
+
+  function tradeOptions(state) {
+    var id = here(state);
+    var who = PC.node.slotNpc(id, "trademaster");
+    var refuse = who ? PC.npcs.serviceLevel(state, who) == null : true;
+    var prizes = (state.fleet || []).filter(function (f) { return f.kind === "prize" && !f.out; });
+    var ts = state.tradeShip;
+    var paidBefore = ts ? ts.paid : 0;
+    return prizes.map(function (f) {
+      var b = buyout(state, f), fee = tradeFee(state), cost = b + fee;
+      var swap = !!ts;
+      var due = swap ? Math.max(0, cost - paidBefore) : cost;
+      var lock = refuse ? "He won't deal with you" : ts && ts.node !== id ? "Your trade ship is enrolled at " + placeName(ts.node) + "; swap her there" : state.money.purse < due ? "Needs " + due + " gold in your purse" : null;
+      if (!lock && swap && !(state.crew.count - (state.ship.crewMin || 5) >= (ts.ship.crewMin || 0))) lock = "Not enough hands to bring your old trade ship back";
+      return { id: f.id, name: f.name || f.cls, cls: f.cls, cargo: f.cargo, dirty: !!f.dirty, buyout: b, fee: fee, cost: cost, due: due, swap: swap, income: tradeIncome(f, id), lock: lock };
+    });
+  }
+
+  function enroll(state, fid) {
+    var id = here(state), L = nodeData(id).lines.trademaster || PC.data.nodes.norfolk.lines.trademaster;
+    var opt = tradeOptions(state).filter(function (o) { return o.id === fid; })[0];
+    if (!opt) throw new Error("No such ship.");
+    if (opt.lock) return { line: /purse/.test(opt.lock) ? L.broke : L.refuse, failed: true, why: opt.lock };
+    var f = state.fleet.filter(function (x) { return x.id === fid; })[0];
+    var ts = state.tradeShip;
+    var buyPart = opt.swap ? Math.min(opt.due, Math.max(0, opt.buyout - (ts.buyout || 0))) : opt.buyout;
+    var feePart = opt.due - buyPart;
+    state.money.purse -= opt.due;
+    var morale = 0;
+    if (buyPart > 0) {
+      morale = PC.crew.giftMorale(state, buyPart);
+      state.money.crew += buyPart;
+      var st = stamp(state);
+      if (state.used.giftStamp !== st) { state.used.giftStamp = st; state.used.giftMorale = 0; }
+      state.used.giftMorale += morale;
+      PC.crew.addMorale(state, morale);
+    }
+    // Her prize crew come home to the flagship; any without a berth are paid off.
+    var home = 0, paid = 0;
+    E().TIER_ORDER.forEach(function (t) {
+      var n = (f.crewTiers || { Green: f.crew })[t] || 0;
+      var k = Math.min(n, PC.crew.berths(state));
+      if (k) { state.crew.tiers[t] += k; state.crew.count += k; home += k; }
+      paid += n - k;
+    });
+    if (paid) PC.crew.payFrom(state, paid * PC.crew.payOffEach(state), true);
+    state.fleet = state.fleet.filter(function (x) { return x !== f; });
+    var old = null;
+    if (ts) {
+      // The old trade ship rejoins the fleet as a prize ship (assumption:
+      // needs a free prize-ship slot, which her replacement just freed).
+      old = ts.ship;
+      var tiers = {}, need = old.crewMin || 0;
+      E().TIER_ORDER.forEach(function (t) { var k = Math.min(need, state.crew.tiers[t] || 0); if (k) { state.crew.tiers[t] -= k; state.crew.count -= k; tiers[t] = k; need -= k; } });
+      old.crew = old.crewMin || 0; old.crewTiers = tiers; old.kind = "prize";
+      state.fleet.push(old);
+    }
+    var ship = JSON.parse(JSON.stringify(f));
+    state.tradeShip = { ship: ship, node: id, buyout: (ts ? ts.buyout : 0) + buyPart, paid: (ts ? ts.paid : 0) + opt.due, ledger: ts ? ts.ledger : 0, since: stamp(state), lostChance: null };
+    PC.state.addLog(state, (ts ? "Swapped the trade ship for the " : "Enrolled the ") + (f.name || f.cls) + " with the Trade Master at " + placeName(id) + " (" + opt.due + " gold from your purse).");
+    var who = PC.node.slotNpc(id, "trademaster");
+    if (who) PC.node.ladderTick(state, who, "visit");
+    return { line: L.enrolled, paid: opt.due, buyPart: buyPart, feePart: feePart, morale: morale, home: home, paidOff: paid, old: old ? (old.name || old.cls) : null };
+  }
+
+  // Each season: her income into the ledger, then the loss roll (§27.7).
+  function tradeShipSeason(state) {
+    var ts = state.tradeShip, out = { lines: [], chips: [] };
+    if (!ts) return out;
+    var inc = tradeIncome(ts.ship, ts.node);
+    var heat = Math.max(state.meters.heat.avalon || 0, state.meters.heat.frisia || 0);
+    var p = (seasonName(state) === "Hurricane" ? TRADE.LOSS_HURRICANE : TRADE.LOSS) + (heat >= TRADE.HEAT_AT ? TRADE.LOSS_HEAT : 0);
+    if (rng(state, "trade-loss")() < p) {
+      out.lines.push("PLACEHOLDER (PH8): Word comes that the " + (ts.ship.name || ts.ship.cls) + " has been lost at sea. Everything you put into her, and her earnings waiting at " + placeName(ts.node) + ", are gone.");
+      out.chips.push({ icon: "hull", text: "Trade ship lost" + (ts.ledger ? " · " + ts.ledger + " gold uncollected" : ""), ink: "bad" });
+      PC.state.addLog(state, "The trade ship " + (ts.ship.name || ts.ship.cls) + " was lost at sea.");
+      state.tradeShip = null;
+      return out;
+    }
+    ts.ledger += inc;
+    out.chips.push({ icon: "gold", text: "Your trade ship earned " + inc + " gold, waiting at " + placeName(ts.node) });
+    return out;
+  }
+
+  // Collected on arrival at her node (the arrival popup; holdings in M9).
+  function collectLedger(state, id) {
+    var ts = state.tradeShip;
+    if (!ts || ts.node !== id || !ts.ledger) return null;
+    var g = ts.ledger;
+    ts.ledger = 0;
+    state.money.purse += g;
+    PC.state.addLog(state, "Collected " + g + " gold of trade-ship earnings at " + placeName(id) + ".");
+    return g;
+  }
+
+  // ---- Developer (§37.12) ------------------------------------------------------------
+
+  // Skip ahead to a season of this year (or the next one): every turn runs
+  // as normal, and a Winter on the way is held (no split).
+  function devSkipTo(state, seasonIndex) {
+    for (var guard = 0; guard < 8; guard++) {
+      if (state.split) holdSplitQuiet(state);
+      var o = endSeason(state);
+      if (state.split) holdSplitQuiet(state);
+      if (o.yearEnd || state.time.season === seasonIndex) return o;
+    }
+    return null;
+  }
+  function holdSplitQuiet(state) {
+    if (state.split && state.split.step === "ask") { state.split.forced = false; holdSplit(state); }
+    else finishSplit(state);
+  }
+
+  PC.world = {
+    TRADE: TRADE,
+    isLive: isLive, isOcean: isOcean, place: place, placeName: placeName, zoneOf: zoneOf, apCost: apCost,
+    headsAtSea: headsAtSea, burn: burn,
+    canSail: canSail, sail: sail, arriveFrom: arriveFrom, destinations: destinations,
+    hook: hook, endSeason: endSeason, splitWinter: splitWinter,
+    impliedShare: impliedShare, holdPressure: holdPressure, qmReading: qmReading, startWinter: startWinter, holdSplit: holdSplit,
+    doSplit: doSplit, departures: departures, afterResign: afterResign, winterOptions: winterOptions, spendWinter: spendWinter, finishSplit: finishSplit,
+    totalShares: totalShares, splitHullValue: splitHullValue,
+    tradeFee: tradeFee, buyout: buyout, tradeIncome: tradeIncome, tradeOptions: tradeOptions, enroll: enroll, collectLedger: collectLedger,
+    devSkipTo: devSkipTo,
+  };
 })();
 </script>
   <script>
@@ -9138,6 +9962,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
   add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
   // The minigames' tags and items (§14.5, §14.4, §32.12).
+  // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
+  add("Careened", { edge: plus(["Outrun"], 1) });
   add("Hangover", { edge: plus(["Keep Watch", "Notice Danger", "Read People"], -1) });
   add("Waterlogged", { edge: plus(["Endure"], -1) }); // placeholder (§14.5)
   add("Card Sharp", { reroll: reroll(["Cards & Dice"]) });
@@ -10145,7 +10971,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       { key: "keeper", id: "ocr_keeper", role: "Tavern Keeper", label: "the tavern keeper", place: "tavern", node: "ocracoke" },
       { key: "shipwright", id: "ocr_shipwright", role: "Craftsman", label: "the shipwright", place: "docks", node: "ocracoke" },
       { key: "provisioner", id: "ocr_provisioner", role: "Merchant", label: "the provisioner", place: "merchant", node: "ocracoke" },
+      // Milestone 7: the Trade Master (§17.2, §27.7). Norfolk's lines serve as his role lines.
+      { key: "trademaster", id: "ocr_trademaster", role: "Merchant", label: "the Trade Master", place: "merchant", node: "ocracoke" },
     ],
+    placeOrder: ["tavern", "docks", "merchant", "graveyard", "ship"],
+    firstTavernFlag: "ocr_first_tavern_done",
+    zone: "north",
+    draft: "Shallow",              // a shallow harbor (§42.7)
 
     locations: {
       tavern: { name: "Tavern", blurb: "The tavern consists of three shacks nailed together. With only a simple bar and a wide assortment of tables and chairs, the tavern hosts the most pathetic group of sad sacks this side of the Atlantic." },
@@ -13213,9 +14045,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
     pool: [
       // Legend
-      { id: "legend_lantern", type: "Legend", text: "\"They say that you can see a lantern burning out on the wrecks at night. I don't know who could be lighting it.\"" },
-      { id: "legend_voice", type: "Legend", text: "\"Fisherman swears he heard a voice coming from the Graveyard last night. Said it kept saying the same thing over and over again. Wouldn't tell me what.\"" },
-      { id: "legend_giant_shark", type: "Legend", text: "\"Heard some sailors say they saw a shark the length of a frigate. Sharks can't grow that big, can they?\"" },
+      { id: "legend_lantern", node: "ocracoke", type: "Legend", text: "\"They say that you can see a lantern burning out on the wrecks at night. I don't know who could be lighting it.\"" },
+      { id: "legend_voice", node: "ocracoke", type: "Legend", text: "\"Fisherman swears he heard a voice coming from the Graveyard last night. Said it kept saying the same thing over and over again. Wouldn't tell me what.\"" },
+      { id: "legend_giant_shark", node: "ocracoke", type: "Legend", text: "\"Heard some sailors say they saw a shark the length of a frigate. Sharks can't grow that big, can they?\"" },
 
       // Danger (they name a real danger spot this season, §30.9)
       { id: "danger_patrol", type: "Danger", spot: "Patrol", text: "\"They're saying the guards at [Node] are cracking down on smuggling. Best not to have any dirty goods in your hold when you dock there.\"" },
@@ -13228,18 +14060,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       { id: "ws_opportunist_2", type: "World State", posture: "Opportunist", text: "\"Business is booming in Nassau. Prices are higher for just about everything.\"" },
       { id: "ws_hunter_1", type: "World State", posture: "Hunter", text: "\"Seems like Frisian warships are everywhere down south. They're hanging pirates in St. Augustine by the dozen.\"" },
       { id: "ws_hunter_2", type: "World State", posture: "Hunter", text: "\"Frisians seem mad about something. Mad enough to scour the seas looking for pirates to hang.\"" },
-      { id: "ws_loyalists", type: "World State", text: "\"Lot of speculation from these boys about where Amber Jack is hiding and whether he'll come back for them. I think he's long gone.\"" },
+      { id: "ws_loyalists", node: "ocracoke", type: "World State", text: "\"Lot of speculation from these boys about where Amber Jack is hiding and whether he'll come back for them. I think he's long gone.\"" },
 
       // Reputation (§30.11: a recent deed, then the Dread band, then the newcomer)
-      { id: "rep_tp_humiliated", type: "Reputation", deed: true, when: { flag: "tp_humiliated" }, text: "\"Did you hear about the newcomer that pushed Twopenny over? Whole beach is still laughing about it.\"" },
-      { id: "rep_tp_beat_you", type: "Reputation", deed: true, when: { flag: "tp_beat_you" }, text: "\"Twopenny's been telling everyone he whipped the new captain in a fight. It's a bit hard to believe.\"" },
-      { id: "rep_shark_killed", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain {captain.last} killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
+      { id: "rep_tp_humiliated", node: "ocracoke", type: "Reputation", deed: true, when: { flag: "tp_humiliated" }, text: "\"Did you hear about the newcomer that pushed Twopenny over? Whole beach is still laughing about it.\"" },
+      { id: "rep_tp_beat_you", node: "ocracoke", type: "Reputation", deed: true, when: { flag: "tp_beat_you" }, text: "\"Twopenny's been telling everyone he whipped the new captain in a fight. It's a bit hard to believe.\"" },
+      { id: "rep_shark_killed", node: "ocracoke", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain {captain.last} killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
       { id: "rep_asking", type: "Reputation", deed: true, when: { seasonFlag: "gi_asked" }, text: "PLACEHOLDER (line to write, §30.4): the next Reputation rumor here is about the captain asking questions." },
       { id: "rep_dread_20", type: "Reputation", dread: [20, 39], text: "\"[Player] is definitely not someone you want to cross.\"" },
       { id: "rep_dread_40", type: "Reputation", dread: [40, 69], text: "\"Merchants from here to Havana are terrified of the [Ship].\"" },
       { id: "rep_dread_70", type: "Reputation", dread: [70, 100], text: "\"Even just hearing the name [Player] strikes fear in the hearts of sailors.\"" },
-      { id: "rep_newcomer_1", type: "Reputation", newcomer: true, text: "\"Did you see that new sloop in the cove? Doesn't look all that fast to me.\"" },
-      { id: "rep_newcomer_2", type: "Reputation", newcomer: true, text: "\"New fellow that just arrived is looking for someone. Him and everyone else here.\"" },
+      { id: "rep_newcomer_1", node: "ocracoke", type: "Reputation", newcomer: true, text: "\"Did you see that new sloop in the cove? Doesn't look all that fast to me.\"" },
+      { id: "rep_newcomer_2", node: "ocracoke", type: "Reputation", newcomer: true, text: "\"New fellow that just arrived is looking for someone. Him and everyone else here.\"" },
 
       // Prize (rare): the special ship joins the next hunt in her waters (Milestone 5)
       { id: "prize_licorne", type: "Prize", ship: "Licorne", waters: "northern", text: "\"Heard the *Licorne* is still running loose up the banks, full of Charleston silver.\"" },
@@ -13968,6 +14800,408 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* The world map, the voyage table and the season loop's text (§4, §20.6,
+ * §26.9-§26.10, §37.12).
+ *
+ * The map is a PLACEHOLDER drawn in code from the author's layout guide
+ * (north to the left, the guide's arrow). Hotspots are data: x and y are
+ * fractions of the 1800 × 1200 map, so the author's art drops in by
+ * replacing the picture (mapArt) and nudging these numbers.
+ *
+ * Live places this build (§37.12, P1): Ocracoke, Norfolk, the Hatteras
+ * Banks and the Bahama Channel. Everything else is Uncharted: drawn, not
+ * sailable. Lilyhook's islet and the Hidden Haven are secret and not drawn.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+  PC.data.nodes = PC.data.nodes || {};
+
+  // ---- The ocean nodes (§4): Hunt for Prizes only; no merchant, fee,
+  // lodging or crew. Each is the seat of a weather zone (§42.2).
+  PC.data.nodes.hatteras = {
+    id: "hatteras", name: "the Hatteras Banks", title: "The Hatteras Banks", kind: "ocean", zone: "north", waters: "north",
+    control: "Open water", faction: null,
+    blurb: "PLACEHOLDER: Open water off the Outer Banks, the graveyard of the Atlantic. Nothing here but the sea, the sandbars and whatever ships are passing.",
+    locations: { ship: { name: "The Ship", blurb: "Your ship rides the swell, out of sight of land." } },
+    placeOrder: ["ship"],
+    present: { places: { town: { heading: "The Hatteras Banks", banner: "open water off the Outer Banks" }, ship: { heading: "The Ship", hint: "Your ship, crew and cargo" } }, huntHint: "Hunt the Banks for prizes" },
+    lines: {},
+  };
+  PC.data.nodes.bahama = {
+    id: "bahama", name: "the Bahama Channel", title: "The Bahama Channel", kind: "ocean", zone: "south", waters: "south",
+    control: "Open water", faction: null,
+    blurb: "PLACEHOLDER: The warm blue channel between Florida and the Bahamas, where every ship bound for Europe from the Caribbean has to pass.",
+    locations: { ship: { name: "The Ship", blurb: "Your ship rides the swell under a hot sun, out of sight of land." } },
+    placeOrder: ["ship"],
+    present: { places: { town: { heading: "The Bahama Channel", banner: "the Bahama Channel" }, ship: { heading: "The Ship", hint: "Your ship, crew and cargo" } }, huntHint: "Hunt the Channel for prizes" },
+    lines: {},
+  };
+
+  PC.data.world = {
+    // §37.12 P1: what can be sailed to in this build.
+    live: ["ocracoke", "norfolk", "hatteras", "bahama"],
+
+    // The places on the chart (layout guide, November 23). kind: port,
+    // ocean or secret. zone: the weather zone (§42.2).
+    places: [
+      { id: "norfolk", label: "Norfolk", x: 0.065, y: 0.450, zone: "north" },
+      { id: "edenton", label: "Edenton", x: 0.175, y: 0.575, zone: "north" },
+      { id: "ocracoke", label: "Ocracoke", x: 0.280, y: 0.360, zone: "north" },
+      { id: "wilmington", label: "Wilmington", x: 0.455, y: 0.600, zone: "north" },
+      { id: "talanee", label: "Talanee", x: 0.555, y: 0.700, zone: "north", note: "upriver" },
+      { id: "charleston", label: "Charleston", x: 0.670, y: 0.655, zone: "south" },
+      { id: "beaufort", label: "Beaufort", x: 0.742, y: 0.710, zone: "south" },
+      { id: "savannah", label: "Savannah", x: 0.786, y: 0.735, zone: "south" },
+      { id: "staugustine", label: "St. Augustine", x: 0.885, y: 0.700, zone: "south" },
+      { id: "nassau", label: "Nassau", x: 0.895, y: 0.285, zone: "south" },
+      { id: "hatteras", label: "The Hatteras Banks", x: 0.250, y: 0.170, zone: "north", ocean: true },
+      { id: "bahama", label: "The Bahama Channel", x: 0.850, y: 0.520, zone: "south", ocean: true },
+    ],
+    // The author's art, once it exists: a path in assets/ (the hotspots stay).
+    mapArt: null,
+    mapSize: [1800, 1200],
+
+    // §4's voyage table, in AP (symmetric; the diagonal is 0).
+    order: ["norfolk", "edenton", "ocracoke", "wilmington", "talanee", "charleston", "beaufort", "savannah", "staugustine", "nassau", "haven", "hatteras", "bahama"],
+    ap: [
+      // Nor Ede Ocr Wil Tal Cha Bea Sav StA Nas Hav Hat Bah
+      [0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 1, 2], // Norfolk
+      [1, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 1, 2], // Edenton
+      [1, 1, 0, 1, 1, 1, 2, 2, 2, 2, 2, 1, 2], // Ocracoke
+      [1, 1, 1, 0, 1, 1, 1, 2, 2, 2, 2, 1, 1], // Wilmington
+      [2, 2, 1, 1, 0, 1, 1, 1, 2, 2, 2, 2, 1], // Talanee
+      [2, 2, 1, 1, 1, 0, 1, 1, 2, 2, 2, 2, 1], // Charleston
+      [2, 2, 2, 1, 1, 1, 0, 1, 1, 2, 2, 2, 1], // Beaufort
+      [2, 2, 2, 2, 1, 1, 1, 0, 1, 1, 2, 2, 1], // Savannah
+      [3, 3, 2, 2, 2, 2, 1, 1, 0, 1, 1, 2, 1], // St. Augustine
+      [3, 3, 2, 2, 2, 2, 2, 1, 1, 0, 1, 2, 1], // Nassau
+      [3, 3, 2, 2, 2, 2, 2, 2, 1, 1, 0, 2, 1], // the Hidden Haven
+      [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 0, 2], // the Hatteras Banks
+      [2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 0], // the Bahama Channel
+    ],
+
+    // ---- Lines --------------------------------------------------------------
+    lines: {
+      uncharted: "Uncharted. Not on your charts yet.", // PH9, Claude's stand-in
+      sailFor: "You weigh anchor and set sail for [Place].",
+      reachOcean: "You reach [Place].",
+      hungry: "PLACEHOLDER: The provisions run out at sea. The hands go hungry, and they grumble about it.",
+      sick: "PLACEHOLDER: Hunger turns to sickness. [number] hands take to their hammocks.",
+      upkeep: "The crew eat through [lots] lots of provisions as the season turns.",
+      upkeepShort: "PLACEHOLDER: There isn't enough food aboard to see the season out. The crew go hungry.",
+      seasonTurns: "[Season] [Year] begins.",
+      stayPut: "You stay where you are as the season turns.",
+    },
+
+    // ---- The Winter split (§26.9, §26.10). All text PLACEHOLDER (PH5).
+    split: {
+      title: "The start of Winter",
+      ask: "PLACEHOLDER: Winter is here, and the crew want to know if there'll be a split. A split shares out the crew's gold and takes the whole Winter: no voyages, no port business, all seven actions.",
+      // The Quartermaster's reading (§26.9), by projected Pressure if the
+      // captain holds. Three versions by his warmth are pinned for the
+      // author (PH5); one stands in for all three.
+      reading: { hold: "PLACEHOLDER: \"The men will hold.\"", grumbling: "PLACEHOLDER: \"There's grumbling.\"", trouble: "PLACEHOLDER: \"Trouble's coming.\"" },
+      forced: "PLACEHOLDER: The crew won't wait any longer. They want their shares, and they want them now.",
+      held: "PLACEHOLDER: You tell the crew there'll be no split this Winter. They take it about as well as you'd expect.",
+      payout: "PLACEHOLDER: The prize ships are sold off and the crew's chest is opened on the deck. The Quartermaster counts out every man's share.",
+      departures: "PLACEHOLDER: With their shares in their pockets, most of the hands go ashore for good. A few come back to sign on again.",
+      resign: "PLACEHOLDER: The skeleton crew and the men who came back gather to sign the Articles again.",
+      vote: "PLACEHOLDER: The crew vote on their Quartermaster again.",
+      winter: "How did you spend the Winter?",
+      done: "PLACEHOLDER: The Winter passes. Come Spring, you'll need a crew again.",
+    },
+    // §26.10, one pick. Each plays a short line in the node's flavor (PH5).
+    winterOptions: [
+      { id: "carousing", label: "Carousing", needs: "tavern", line: "PLACEHOLDER: You and the crew drink the Winter away. Nobody remembers much of it, which is probably for the best." },
+      { id: "careening", label: "Careening", needs: "shallow", line: "PLACEHOLDER: You haul her up on the beach, scrape her bottom clean and patch every seam. She'll be quick come Spring." },
+      { id: "officers", label: "Officers' Company", line: "PLACEHOLDER: You spend the long nights in your cabin with your officers, swapping stories over a bottle." },
+      { id: "ear", label: "Ear to the Ground", line: "PLACEHOLDER: You spend the Winter listening. Come Spring, you'll have heard something worth knowing." },
+      { id: "courting", label: "Courting Favor", needs: "faction", line: "PLACEHOLDER: You spend the Winter making yourself useful to the right people." },
+      { id: "gaming", label: "The Gaming Tables", needs: "tavern", line: "PLACEHOLDER: You find a table, a cup of dice and an opponent with a full purse." },
+      { id: "rest", label: "Rest and Recovery", line: "PLACEHOLDER: You sleep late, eat well and let your body mend." },
+      { id: "home", label: "Home and Hearth", needs: "home", line: "" }, // hidden until romance and homes exist
+    ],
+    // Re-signers by the morale band before the split (§26.9).
+    RESIGN: { Mutinous: 0, Sullen: 0.10, Steady: 0.25, Eager: 0.40, Devoted: 0.60 },
+    CARRYOVER: 0.10,
+    SPLIT_APPROVAL: 2, // DEFAULT: §25.5 names the split's approval points but no number
+
+    // ---- The year-end screen (N6, PH7) ---------------------------------------
+    yearEnd: {
+      title: "PLACEHOLDER: The End of 1754",
+      note: "PLACEHOLDER (N6): the author writes the end-of-year titles and notes after the next playthrough. This is where Milestone 7 ends: a full year in the Carolinas.",
+    },
+  };
+})();
+</script>
+  <script>
+/* Norfolk (§17.4 and its appendix): the node record the engine reads.
+ *
+ * The rules are in js/node.js and js/world.js. Every line here is the
+ * author's, from Norfolk Scene Records Part 4 (the Norfolk writing pass),
+ * except lines marked † there (Claude's, approved, to tweak in playtesting)
+ * and lines marked PLACEHOLDER here. Milestone 7 builds the Norfolk shell
+ * (§17.4.17): the Tavern, the Dockyard, the Merchant, the Ship and the
+ * Admiralty House as a locked row. Beats 1 and 2 are in
+ * content/norfolk_scenes.js.
+ *
+ * This file loads after content/rumors.js and content/minigames.js: it adds
+ * Norfolk's rumor pool, drinker pool and Liar's Dice table to theirs.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+  PC.data.npcs = PC.data.npcs || {};
+  PC.data.nodes = PC.data.nodes || {};
+
+  // ---- The Named cast (§17.4.6) -------------------------------------------
+  // Horace and Christoph fill the Tavern Keeper and shipwright slots, so
+  // the node's services read their lines. Snodgrass and Martha are
+  // persistent Minors with fixed names (name cards, no portraits).
+  var cast = {
+    horace: { first: "Horace", last: "Daley", gender: "m", role: "Tavern Keeper", startRung: "Neutral", traits: ["Candid", "Hard Drinker"], node: "norfolk", label: "the tavern keeper" },
+    christoph: { first: "Christoph", last: "Buchanan", gender: "m", role: "Craftsman", startRung: "Neutral", traits: ["Proud", "Stubborn"], node: "norfolk", label: "the Master Shipwright" },
+    // Admiral Key leads Norfolk (Legendary, §15.9). Offstage in Milestone 7:
+    // his introduction comes with letters in M8.
+    key: { first: "James", last: "Key", title: "Admiral", gender: "m", role: "Colonial Officer", node: "norfolk", label: "the Admiral", scripted: true, legendary: true },
+    howe: { first: "Lieutenant", last: "Howe", gender: "m", role: "Colonial Officer", startRung: "Neutral", traits: ["Upstanding", "Green"], node: "norfolk", label: "the flag lieutenant" },
+    snodgrass: { first: "Rupert", last: "Snodgrass", gender: "m", role: "Official", startRung: "Neutral", traits: ["Corrupt", "Greedy"], node: "norfolk", label: "the Harbormaster", minor: true },
+    martha: { first: "Martha", last: "", gender: "f", role: "Tavern staff", node: "norfolk", label: "the barmaid", minor: true, scripted: true },
+  };
+  Object.keys(cast).forEach(function (id) { PC.data.npcs[id] = cast[id]; });
+
+  var O = function () { return PC.data.nodes.ocracoke.lines; };
+
+  PC.data.nodes.norfolk = {
+    id: "norfolk",
+    name: "Norfolk",
+    control: "Admiralty control",  // locked for the Slice (§17.4.1)
+    faction: "avalon",
+    leader: "key",
+    tier: "Modest",
+    prosperity: 55,
+    freePort: false,
+    portFeeBase: 75,               // × Size × the Avalon band; halved with a letter (M8)
+    feeTakerName: "Rupert Snodgrass",
+    yardMax: 4,                    // the best yard in Avalon (§17.4.1)
+    yardGate: { level: 4, standing: 20, faction: "avalon" }, // level 4 at Avalon 20+
+    hullSales: "clean",            // clean hulls only (§17.4.4)
+    provisionerCap: 20000,
+    fence: null,                   // no fence at Norfolk
+    crewGate: { faction: "avalon", min: 0 },  // the pool is closed below Avalon 0
+    closedAt: "Enemy",             // turned away at Enemy (§17.4.1)
+    officerTypeWeights: { Gunner: 2, Navigator: 2 }, // candidates lean ex-navy (§17.4.4)
+    blurb: "A bustling navy town at the mouth of the Elizabeth River.",
+    winterBlurb: "Ice rims the docks, and the fleet sits under a dusting of snow.",
+    firstTavernFlag: null,         // beat 2 is a scene on first entering (PR 5); nothing locks behind it
+
+    slots: [
+      { key: "keeper", id: "horace", fixed: true, role: "Tavern Keeper", label: "the tavern keeper", place: "tavern", node: "norfolk" },
+      { key: "shipwright", id: "christoph", fixed: true, role: "Craftsman", label: "the Master Shipwright", place: "docks", node: "norfolk" },
+      { key: "provisioner", id: "nor_provisioner", role: "Merchant", label: "the provisioner", place: "merchant", node: "norfolk" },
+      { key: "trademaster", id: "nor_trademaster", role: "Merchant", label: "the Trade Master", place: "merchant", node: "norfolk" },
+    ],
+
+    placeOrder: ["admiralty", "tavern", "docks", "merchant", "ship"],
+    locations: {
+      admiralty: { name: "The Admiralty House", blurb: "A grand brick building flying the gold flag of Scotland. Clerks hurry in and out with armfuls of paper.",
+        winter: "A fire roars in the lounge, and Lieutenant Howe has dragged his armchair right up to it.",
+        locked: "The Admiralty House receives no visitors yet." },
+      tavern: { name: "Horace's Tavern", blurb: "Horace's is the local watering hole, popular with the navy men, much to Horace's chagrin.",
+        winter: "The soldiers and sailors have crowded in from the cold, and the windows are fogged with their breath." },
+      docks: { name: "The Dockyard", blurb: "The docks are alive with activity.",
+        winter: "The shipwrights work on through the cold, their breath steaming in the air." },
+      merchant: { name: "The Merchant", blurb: "A bustling market with provisions aplenty from every corner of the Chesapeake colony.",
+        winter: "Shopkeepers stamp their feet in their doorways to keep warm." },
+      ship: { name: "The Ship", blurb: "Your ship sits in the deep harbor at the end of a long dock.", winter: "Frost coats the rigging." },
+    },
+
+    // §17.4.1 Horace's rumor mix: tiers C 45 / B 52 / A 3; within C,
+    // World State 45, Node 30, Reputation 20, Legend 5; within B, Danger 45,
+    // Quest 30, Merchant 25; A is Prize only.
+    rumorWeights: { "World State": 45, "Node": 30, "Reputation": 20, "Legend": 5, "Danger": 45, "Quest": 30, "Merchant": 25, "Prize": 3 },
+    tierMix: { C: 45, B: 52, A: 3 },
+
+    // §24.7: Able 80%, Seasoned 20%.
+    crewPool: { min: 15, max: 25, mix: { Able: 80, Seasoned: 20 } },
+
+    // §17.4.5 The market and the provisioner's stock.
+    market: {
+      demand: { "Mahogany and logwood": "Wants", "Coffee": "Wants", "Tobacco": "Glutted" },
+      produces: { "Tobacco": { min: 20, max: 40 } },
+      bulk: { countMin: 2, countMax: 4, min: 5, max: 15, weights: { "Rice": 25, "Sugar": 20, "Cotton": 15, "Molasses": 15, "Furs and hides": 10, "Coffee": 10, "Cocoa": 5 } },
+    },
+
+    // ---- Service lines (Norfolk Scene Records Part 4, §9) ----------------
+    lines: {
+      keeper: {
+        greet: { "-1": "\"Oh. It's you.\"", "0": "\"Another day in paradise. What'll it be?\"", "1": "\"Ah, it's you. Come in and drown your sorrows. Pull up a stool.\"", "2": "\"Ah, it's you. Come in and drown your sorrows. Pull up a stool.\"", "3": "\"Finally a face I don't despise. Welcome, welcome!\"" },
+        refuse: "\"Get out. I've got enough vermin in here already.\"",
+        lodgingAsk: "My crew needs lodging.",
+        askRumors: "Heard anything interesting lately?",
+        talkClean: "\"Oh, and another thing, since you're still standing there...\"",
+        outOfRumors: "\"That's all the gossip I've got. I'm a barkeep, not the bloody town crier.\"",
+        lodgingBought: "\"Rooms are upstairs. Try not to break anything. No refunds.\"",
+        lodgingUsed: "\"Full up. If I had more room, I'd take it myself.\"",
+        rungUp: "\"Back again? If I didn't know any better, I'd think you're starting to fall in love with me.\"",
+        broke: "\"This isn't a charity. Come back with more gold, or leave me alone.\"",
+        favorOffered: "\"Hey, you. Yes, you. I've got something I could use your help with.\"",
+        favorDone: "\"Well, that could have gone worse.\"",
+        brawlAftermath: "\"Somebody's paying for that, and it won't be me. Get out before I throw you out.\"",
+        questions: [],
+      },
+      shipwright: {
+        first: "A tall man in a leather apron is shouting at two boys swordfighting with wooden planks. He sees you and sighs. \"Christoph Buchanan, Master Shipwright at your service. Forgive the circus.\"",
+        greet: { "-1": "\"Make it quick. I have real work waiting.\"", "0": "\"Good day, Captain. What can I do for you?\"", "1": "\"Ah, Captain! All is well, I hope?\"", "2": "\"Ah, Captain! All is well, I hope?\"", "3": "\"My favorite customer! Don't tell the Admiral I said that.\"" },
+        refuse: "\"I'd rather go hungry than work for you. Find someone else.\"",
+        repair: "\"Done properly. Not that you'd notice the difference.\"",
+        bigRepair: "\"She was barely seaworthy. Now she's a fine lass.\"",
+        nothingToFix: "\"Nothing wrong with her that I can see.\"",
+        upgrade: "\"Better. Not perfect, but better.\"",
+        upgradeTop: "\"Proud of that one, I am. Enjoy her, Captain.\"",
+        gateLocked: "\"My best work is for friends of the Crown, Captain. You're not one yet.\"",
+        atCap: "\"She can't take any more, I'm afraid.\"",
+        guns: "\"They'll shoot true. I didn't let my apprentices near them.\"",
+        hullSold: "\"I'll take her. The apprentices will strip her down for parts. Lord knows destroying things is all they do.\"",
+        dirtyHull: "\"Can't take that one, sorry. Find another port.\"",
+        broke: "\"The highest quality work costs the most coin. Come back when you can pay for it.\"",
+        rungUp: "\"I'm starting to look forward to your visits, Captain.\"",
+        freeRepair: "\"This one's on the house, as promised.\"",
+      },
+      crew: {
+        signed: "The new hands sling their sea bags over their shoulders and head for your ship.",
+        empty: "Key's fleet has snapped up everyone else.",
+        full: "You don't have room for any more hands.",
+        doublePrice: "They've heard about your crew, but your gold does the talking.",
+        closed: "The sailors on the docks turn their backs as you pass. No one here will sign on with you.",
+        paidOff: "You put [number] hands ashore with their due. Most of them head straight for Horace's.",
+      },
+      provisioner: null, // filled below from Ocracoke's role lines plus Norfolk's own
+      trademaster: {
+        greet: "\"Captain. Here about putting a ship to work?\"",
+        offer: "\"For a fee, I'll put one of your ships on the merchant rolls. She'll earn while you're busy elsewhere.\"",
+        enrolled: "\"She's on the rolls. You'll start seeing her earnings soon.\"",
+        already: "\"Your ship's doing honest work. Anything else?\"",
+        refuse: "\"I can't put a ship of yours on the rolls.\"",
+        broke: "\"The fee is fixed, Captain. No exceptions.\"",
+      },
+      arrival: {
+        arrive: "You pull into the harbor and drop anchor well clear of the fleet.",
+        back: "You slip up the Elizabeth River and return to port at Norfolk.",
+        duePaid: "The official counts your coin closely, then waves you ashore.",
+        dueShort: "Since you've come up short on the port fee, a few soldiers come aboard and carry off [what they take].",
+        // D3 (ruled for M7): with nothing left to take, a night in the cells and 1 AP lost.
+        stocks: "PLACEHOLDER: With nothing left to take, the soldiers march you to the Admiralty House cells for the night. They turn you loose in the morning.",
+        turnedAway: "A frigate fires a warning shot across your bow. It's clear you're not welcome here.",
+        recovered: null, maimed: null, captives: null, // Ocracoke's role lines (below)
+      },
+    },
+  };
+
+  var NL = PC.data.nodes.norfolk.lines;
+
+  // The provisioner: Norfolk's own lines over Ocracoke's role lines (Part 4, §9).
+  NL.provisioner = Object.assign({}, O().provisioner, {
+    greet: Object.assign({}, O().provisioner.greet, { "0": "\"What can I get you, Captain?\"" }),
+    dirty: "\"In this town? With half the navy watching? Not a chance.\"",
+    capReached: "\"That's all the coin I can spare this season.\"",
+    tobacco: "\"Chesapeake's finest. Grown just up the river.\"",
+  });
+  ["recovered", "maimed", "captives"].forEach(function (k) { NL.arrival[k] = O().arrival[k]; });
+
+  // ---- How Norfolk's places are presented (§38.3, §41.4; Part 4 §11) ----
+  PC.data.nodes.norfolk.present = {
+    prosperityWord: "Modest",
+    places: {
+      town: { heading: "Norfolk", banner: "Norfolk and Hampton Roads" },
+      arrival: { heading: "Hampton Roads", banner: "Hampton Roads and the fleet at anchor",
+        blurb: "Merchant ships weave between the anchored warships, careful to keep out of the *Griffon*'s shadow.",
+        winter: "The harbor is quiet, the warships' decks white with frost." },
+      admiralty: { heading: "The Admiralty House", banner: "the Admiralty House", hint: "Lieutenant Howe: letters, pardons and bounties" },
+      lounge: { heading: "The Lounge", banner: "the Admiralty House lounge", blurb: "A spacious, comfortable, and well-appointed lounge for guests of Admiral Key." },
+      tavern: { heading: "Horace's Tavern", banner: "Horace's tavern", hint: "Rumors, lodging, drinking and dice" },
+      docks: { heading: "The Dockyard", banner: "the Norfolk Dockyard", hint: "Repairs, upgrades and crew" },
+      merchant: { heading: "The Merchant", banner: "the Norfolk market", hint: "Trade, provisions and gear" },
+      ship: { heading: "The Ship", banner: "your ship at the long dock", hint: "Your ship, crew and cargo" },
+    },
+    huntHint: "Hunt the Hatteras Banks for prizes",
+    huntWinter: "The winter sea is gray and nearly empty.",
+    scenes: {},
+  };
+
+  PC.data.npcPortraits = PC.data.npcPortraits || {};
+  ["horace", "christoph"].forEach(function (id) { if (!(id in PC.data.npcPortraits)) PC.data.npcPortraits[id] = null; });
+
+  // ---- Norfolk's rumor pool (Part 4, §13) ----------------------------------
+  // Lines carry node: "norfolk". Rows whose system isn't built yet wait on a
+  // flag nothing sets in this build (bounties, letters, the revolution).
+  var R = PC.data.rumors;
+  var Y2 = { minYear: 1755 };
+  [
+    { id: "nor_jack_out_1", type: "World State", tier: "B", when: [Y2, { flag: "missed_staug_meeting" }], text: "\"Amber Jack's out there somewhere. Men like that don't vanish unless they're planning something.\"" },
+    { id: "nor_jack_out_2", type: "World State", tier: "B", when: [Y2, { flag: "missed_staug_meeting" }], text: "\"Nobody's seen or heard from anyone on Amber Jack's crew. An ominous sign, if you ask me.\"" },
+    { id: "nor_joan_1", type: "World State", when: Y2, text: "\"Sweden's found itself a girl general. They say the Frisians break and run at the sight of her banner.\"" },
+    { id: "nor_joan_2", type: "World State", when: [{ minYear: 1756 }, { flag: "frisia_seeks_peace" }], text: "\"Frisia's asking Sweden for terms. All on account of one young woman.\"" },
+    { id: "nor_two_masters_1", type: "Reputation", deed: true, when: { flag: "two_masters" }, text: "\"Word is [Player] works for the Admiralty by day and stirs up trouble by night.\"" },
+    { id: "nor_two_masters_2", type: "Reputation", deed: true, when: { flag: "two_masters" }, text: "\"[Player] is playing both sides. Sooner or later, one of them will notice.\"" },
+    { id: "nor_bounty_1", type: "Quest", when: { flag: "bounty_taken" }, text: "\"[NPC]'s been raiding near [Node]. {target.He} sails a [Ship type] called the *[Ship]*, last seen in [Waters].\"" },
+    { id: "nor_bounty_2", type: "Quest", when: { flag: "bounty_taken" }, text: "\"If you're after [NPC], try [Waters]. {target.His} [Ship type] was spotted there not two days ago.\"" },
+    { id: "nor_griffon", type: "World State", text: "\"A hundred guns on the *Griffon*. One broadside would turn a sloop into driftwood.\"" },
+    { id: "nor_crackdown", type: "World State", when: { maxYear: 1754 }, text: "\"Key's hunters keep taking pirate ships. They're stringing pirates up like garlands around here.\"" },
+    { id: "nor_pamphlets", type: "World State", text: "\"Someone's been nailing pamphlets to the church door again. The Admiral's men tear them down every morning.\"" },
+    { id: "nor_governors", type: "World State", when: Y2, text: "\"They say the rebels are being funded by some rich and powerful folk. I wonder who?\"" },
+    { id: "nor_king", type: "World State", text: "\"The King's on death's door, and his son would rather chase skirts than rule. Rough seas ahead, methinks.\"" },
+    { id: "nor_embargo", type: "World State", text: "\"Frisian goods are banned in Avalon, but you'd never know it in Charleston.\"" },
+    { id: "nor_balfour", type: "World State", text: "\"Governor Balfour of the Chesapeake colony won't sit at the same table as Governor Clarke of Carolina. Nobody remembers why.\"" },
+    { id: "nor_hunters_frisian", type: "Danger", when: { flag: "frisian_letter" }, text: "\"Key's hunters are out on the Banks, looking for anyone sailing under a Frisian letter.\"" },
+    { id: "nor_stragglers", type: "Danger", text: "\"Some of Deadman's Frenchmen never went home. They're still spotted out on the Banks on occasion.\"" },
+    { id: "nor_wine_merchant", type: "Merchant", when: [{ minYear: 1755 }, { maxYear: 1755 }, { season: "Spring" }], text: "\"A wine merchant from St. Augustine has bought a shop by the docks. Very fancy fellow.\"" },
+    { id: "nor_bells", type: "Legend", text: "\"Fishermen swear they hear church bells under the water off Cape Henry on foggy nights.\"" },
+  ].forEach(function (l) { l.node = "norfolk"; R.pool.push(l); });
+
+  // Node rumors (#19-#27): the shared trait lines serve where one is
+  // already written; Norfolk adds the two that weren't.
+  R.traits["Upstanding"] = R.traits["Upstanding"] || "\"[NPC]'s never taken a bribe in his life. Wouldn't know what to do with one.\"";
+  R.traits["Green"] = R.traits["Green"] || "\"[NPC]'s barely been to sea. Got his post on his father's name.\"";
+  R.tierMix.norfolk = PC.data.nodes.norfolk.tierMix;
+
+  // ---- Under the Table: the Colonial Officer (Part 4, §12) ------------------
+  var D = PC.data.minigames.drinking;
+  D.pools.norfolk = { role: "Colonial Officer", traits: ["Green", "Timid", "Cool-Headed", "Proud", "Jovial", "Hot-Tempered"],
+    setup: "A young navy officer in a gold-trimmed coat sits down across from you, " };
+  Object.assign(D.traits["Green"], { hint: "a fresh-faced boy with his first moustache.", steady: "He grins and wipes his mouth on his sleeve.",
+    wobbling: "His cheeks have gone bright pink.", doneFor: "He keeps asking whether the room always tilts like this." });
+  Object.assign(D.traits["Timid"], { hint: "glancing at the door as if he hopes someone will call him away.", steady: "He takes a careful sip, then another, then the rest.",
+    wobbling: "\"Perhaps that's enough for one evening?\" he asks no one in particular.", doneFor: "He pushes his cup away, mumbles an apology and calls it a night." });
+  // Cool-Headed replaces Upstanding (ruled): leaning on him is one DR harder.
+  Object.assign(D.traits["Cool-Headed"], { hint: "his face as calm as a millpond.", steady: "He drinks without a flicker of expression.",
+    wobbling: "He sets his cup down very carefully, as if it might escape.", doneFor: "He blinks slowly. \"I believe,\" he says, \"that I am quite drunk.\"" });
+
+  // ---- Liar's Dice: the Colonial Officer (Part 4, §12) ------------------------
+  var LD = PC.data.minigames.dice;
+  LD.pools.norfolk = { role: "Colonial Officer", lines: {
+    sit: "A young officer in a spotless coat sets down his cup. \"A friendly game, Captain? Navy rules.\"",
+    size: { clean: "He straightens his collar whenever he's bluffing.", partial: "He's hiding something, but you can't tell what.", setback: "\"They teach us to read the enemy at the Academy, you know.\"" },
+    tell: "He straightens his collar.",
+    cheat: { clean: "You sneak a peek while he signals for another drink.", partial: "You get your peek, but he frowns and pulls the cup closer." },
+    caught: "\"Cheat!\" He jumps to his feet, and half the tavern turns to look.",
+    win: "He pushes the coins across with a grimace.",
+    lose: "\"Bad luck, Captain. Another round?\"",
+    broke: "\"The stakes are fifty, Captain. Perhaps another time.\"",
+  } };
+
+  // ---- The hunt: Norfolk hunts the Hatteras Banks (§17.4.4) -------------------
+  PC.data.hunt.HOME_WATERS.norfolk = "north";
+  PC.data.hunt.HOME_WATERS.hatteras = "north";
+  PC.data.hunt.HOME_WATERS.bahama = "south";
+  // Ocracoke's Trade Master speaks Norfolk's lines as role lines (M7 plan).
+  PC.data.nodes.ocracoke.lines.trademaster = NL.trademaster;
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -14399,7 +15633,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   var state = null;
   var root = null;
-  var BUILD = "Prototype build 0.7 · Milestone 6";
+  var BUILD = "Build 0.8 · Milestone 7";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -14686,7 +15920,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     expiryWarning();
     var screen = state.current.screen;
     if (screen === "end") return drawEnd();
-    var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() : scenePanel();
+    var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() :
+      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
@@ -14701,7 +15936,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var v = PC.summary.summary(state);
     var c = state.captain, pic = PC.creator.captainPortrait(c);
     var L = PC.data.endLines;
-    var head = v.how === "stopped" ? L.title : L.overTitle;
+    var Y = PC.data.world.yearEnd;
+    var head = v.how === "year" ? Y.title : v.how === "stopped" ? L.title : L.overTitle;
     var meter = function (n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n); };
     var st = v.standing || {}, ht = v.heat || {};
     var rows = [
@@ -14714,26 +15950,37 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       [v.tagsAreNew ? "Tags earned" : "Tags", v.tags.length ? esc(v.tags.join(", ")) : "None"],
       ["Leads", "What Was Lost " + v.leads.loss + " of " + v.leads.lossNeeded + " · The Hidden Haven " + v.leads.haven + " of " + v.leads.havenNeeded],
     ];
-    var how = v.how === "stopped" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[v.how === "died" ? "died" : "captured"]) + "</div>";
+    // The year's recap (Milestone 7; its words are the author's to write, PH7).
+    if (v.how === "year" && v.year) rows.unshift(["This year", "Prizes taken " + v.year.prizes + " · your purse " + (v.year.purse >= 0 ? "+" : "−") + gold(Math.abs(v.year.purse)) +
+      " · " + (v.year.split ? "the crew split in Winter" : "no split") + (v.year.tradeShip ? " · trade ship: the " + esc(v.year.tradeShip) : "") + " · ports: " + esc(v.year.visited.join(", "))]);
+    var how = v.how === "stopped" || v.how === "year" ? "" : '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[v.how === "died" ? "died" : "captured"]) + "</div>";
     root.innerHTML = frame('<div class="endscreen" style="padding:18px 16px 32px;max-width:720px;margin:0 auto">' + '<p class="sc" style="margin:0">' + esc(v.season) + "</p>" +
       '<h2 class="title">' + esc(head) + "</h2>" + how +
       '<div class="person" style="margin:12px 0">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="" style="width:96px;height:auto">' : sil(72, 108)) +
       '<div class="pmain"><div class="namecard"><b>' + esc(v.captain) + '</b><span class="role">Captain of the ' + esc(v.ship.name) + " · " + esc(v.ship.type) + "</span></div>" +
       (v.reputation ? '<p class="small"><i>' + esc(v.reputation) + "</i></p>" : "") + "</div></div>" +
       '<table class="grid">' + rows.map(function (r) { return "<tr><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td></tr>"; }).join("") + "</table>" +
-      '<p class="note">' + esc(v.how === "stopped" ? L.note : L.overNote) + "</p>" +
+      '<p class="note">' + esc(v.how === "year" ? Y.note : v.how === "stopped" ? L.note : L.overNote) + "</p>" +
       '<div class="actions"><button class="primary" data-act="quit">Return to title</button>' +
-      (settings.dev && v.how === "stopped" ? '<button class="secondary" data-act="keepplaying">Developer: keep playing (actions topped up)</button>' : "") + "</div></div>") +
+      (settings.dev && v.how === "stopped" ? '<button class="secondary" data-act="keepplaying">Developer: keep playing (actions topped up)</button>' : "") +
+      (settings.dev && v.how === "year" ? '<button class="secondary" data-act="keepplaying">Developer: keep playing into ' + (state.time.year + 1) + "</button>" : "") + "</div></div>") +
       popupHtml() + menuHtml();
     wire();
   }
 
   // The banner when the season's actions are spent (R5): free actions like
   // selling still work, and the player ends the prototype when ready.
+  // Milestone 7: the season turns here (§4). Free actions still work first.
   function noActionsBanner() {
     if (!state || state.ap.left > 0 || state.current.screen !== "node") return "";
-    return '<div class="notice" style="margin:0 0 10px"><b>No actions left.</b> You can still do anything that costs no action, like selling. ' +
-      '<button class="primary" data-act="endproto" style="margin-left:6px">End the prototype</button></div>';
+    var split = PC.world.splitWinter(state);
+    return '<div class="notice" style="margin:0 0 10px"><b>' + (split ? "The split takes the whole Winter." : "No actions left.") + "</b> " +
+      (split ? "" : "You can still do anything that costs no action, like selling. ") +
+      '<button class="primary" data-act="endseason" style="margin-left:6px">' + esc(endSeasonLabel()) + "</button></div>";
+  }
+  function endSeasonLabel() {
+    var last = PC.state.seasonName(state) === "Winter" && !state.keepPlaying;
+    return last ? "End the Winter and the year" : "End the season";
   }
 
   // ---- Title screen (§41.2) ----
@@ -15109,7 +16356,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<h2 class="title">' + esc(pl.heading) + "</h2>";
   }
 
-  var CONTROL = { "No control": ["No Control", "none"], "Pirate control": ["Pirate Control", "pirates"], "Frisian control": ["Frisian Control", "frisia"], "Avalon control": ["Avalon Control", "avalon"] };
+  var CONTROL = { "Admiralty control": ["Admiralty Control", "avalon"], "Open water": ["Open Water", "sea"], "No control": ["No Control", "none"], "Pirate control": ["Pirate Control", "pirates"], "Frisian control": ["Frisian Control", "frisia"], "Avalon control": ["Avalon Control", "avalon"] };
   function flagSvg(ink) {
     return '<svg class="flag" viewBox="0 0 22 15" aria-hidden="true"><rect width="22" height="15" fill="' + (ink === "none" ? "#efe3c6" : INK[ink]) + '"/>' +
       (ink === "none" ? '<path d="M0 0L22 15M22 0L0 15" stroke="#5e4528" stroke-width=".8"/>' : "") + "</svg>";
@@ -15126,7 +16373,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if ((state.location.queue || []).some(function (q) { return !state.seen[q]; })) {
       return html + sayFor(state.location.say ? state.location.say.to : null) + '<div class="actions"><button class="primary" data-top="1" data-act="nextqueued">Continue</button></div>';
     }
-    html += '<div class="prose dropcap">' + prose(loc.blurb) + "</div>";
+    html += '<div class="prose dropcap">' + prose(isWinter() && loc.winter ? loc.winter : loc.blurb) + '</div><div style="clear:both"></div>';
     var back = function (top) { return '<div class="actions"' + (top ? ' style="margin:0 0 6px"' : "") + '><button class="secondary" data-act="leaveplace">‹ Back to ' + esc(nd.name) + "</button></div>"; };
     html = back(true) + html;
     html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu })[place]();
@@ -15134,11 +16381,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // The town screen (§41.4): the control line, then Town, Your ship, To sea.
+  // An ocean node (Milestone 7) has only the Ship and To sea.
+  function isWinter() { return PC.state.seasonName(state) === "Winter"; }
   function townPanel(nd) {
+    if (nd.kind === "ocean") return oceanPanel(nd);
     var c = CONTROL[nd.control] || [nd.control, "none"];
     var pres = nd.present || { places: {} };
     var html = '<div class="ctrl" style="color:' + INK[c[1]] + '">' + flagSvg(c[1]) + esc(c[0]) + (nd.freePort ? " · Free Port" : "") + " · " + esc(pres.prosperityWord || nd.tier) + "</div>" +
-      banner(pres.places.town ? pres.places.town.banner : nd.name) + '<h2 class="title">' + esc(nd.name) + '</h2><div class="prose dropcap">' + prose(nd.blurb) + "</div>";
+      banner(pres.places.town ? pres.places.town.banner : nd.name) + '<h2 class="title">' + esc(nd.name) + '</h2><div class="prose dropcap">' + prose(isWinter() && nd.winterBlurb ? nd.winterBlurb : nd.blurb) + '</div><div style="clear:both"></div>';
     var ps = N().places(state).filter(function (p) { return !p.hidden; });
     var row = function (p) {
       var pl = pres.places[p.id] || {};
@@ -15148,19 +16398,206 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     };
     html += '<div class="h4" style="max-width:680px">Town</div>' + opts(ps.filter(function (p) { return p.id !== "ship"; }).map(row));
     html += '<div class="h4" style="max-width:680px">Your ship</div>' + opts(ps.filter(function (p) { return p.id === "ship"; }).map(row));
-    html += '<div class="h4" style="max-width:680px">To sea</div>' + opts([
-      // Leaving Ocracoke without Articles fires the first signing (§40.5).
-      // Hunt for Prizes (§22.1, §37.3): Ocracoke's own waters, 1 action a batch.
-      (function () {
-        if (!state.articles) return opt({ act: "firstsigning", label: "Hunt for Prizes", meta: "Sign the Articles before you sail" });
-        var c = PC.hunt.canHunt(state);
-        return opt({ act: "hunt", label: "Hunt for Prizes", ap: 1, meta: "1 action a batch of sightings, up to 3 · the Hatteras Banks · back to Ocracoke for free (the harbor due again)", lock: c.ok ? null : c.why });
-      })(),
-      opt({ act: state.articles ? "nop" : "firstsigning", label: "Set Sail", meta: "The world map" + (state.articles ? "" : " · sign the Articles before you sail"), lock: state.articles ? notInPrototype() : null }),
-    ]);
-    if (!state.ap.left) html += '<p class="notice" style="margin-top:16px">No actions left this season.</p>';
+    html += '<div class="h4" style="max-width:680px">To sea</div>' + opts(toSea(nd));
+    return html + seasonFooter();
+  }
+
+  // Hunt for Prizes and Set Sail (§41.4). Leaving without Articles fires
+  // the first signing (§40.5).
+  function toSea(nd) {
+    var pres = nd.present || {};
+    var waters = PC.data.hunt.WATERS[PC.data.hunt.HOME_WATERS[nd.id] || nd.waters || "north"].name;
+    var hunt;
+    if (!state.articles) hunt = opt({ act: "firstsigning", label: "Hunt for Prizes", meta: "Sign the Articles before you sail" });
+    else {
+      var c = PC.hunt.canHunt(state);
+      var tail = nd.kind === "ocean" ? "you stay out at sea when it's done" : "back to " + nd.name + " for free (the port fee again)";
+      hunt = opt({ act: "hunt", label: "Hunt for Prizes", ap: 1, meta: esc((isWinter() && pres.huntWinter ? pres.huntWinter + " " : "") + "1 action a batch of sightings, up to 3 · " + waters + " · " + tail), lock: c.ok ? null : c.why });
+    }
+    var sail = state.articles ? opt({ act: "openmap", label: "Set Sail", meta: "The chart: Ocracoke, Norfolk and the open sea" + (PC.world.splitWinter(state) ? "" : "") ,
+      lock: PC.world.splitWinter(state) ? "The split takes the whole Winter" : null }) :
+      opt({ act: "firstsigning", label: "Set Sail", meta: "The chart · sign the Articles before you sail" });
+    return [hunt, sail];
+  }
+
+  function oceanPanel(nd) {
+    var pres = nd.present || { places: {} };
+    var html = '<div class="ctrl" style="color:' + INK.sea + '">Open Water · the ' + esc(nd.zone === "south" ? "south" : "north") + " weather zone</div>" +
+      banner(pres.places.town ? pres.places.town.banner : nd.name) + '<h2 class="title">' + esc(nd.title || nd.name) + '</h2><div class="prose dropcap">' + prose(nd.blurb) + '</div><div style="clear:both"></div>';
+    html += '<div class="h4" style="max-width:680px">Your ship</div>' + opts([opt({ act: "openmenu", attrs: 'data-menu="ship"', label: "The Ship", meta: "Your ship, crew and cargo" })]);
+    html += '<div class="h4" style="max-width:680px">To sea</div>' + opts(toSea(nd));
+    return html + seasonFooter();
+  }
+
+  // The season's end, by choice (§4: a captain with too few actions for
+  // the voyage he wants stays where he is as the season turns).
+  function seasonFooter() {
+    if (!state.ap.left) return "";
+    return '<div class="h4" style="max-width:680px">The season</div>' + opts([opt({ act: "endseason", label: endSeasonLabel(),
+      meta: "You have " + plural(state.ap.left, "action") + " left. Idle upkeep is eaten as the season turns." })]);
+  }
+  // ---- The chart (§41.4, §38.8; Milestone 7) -----------------------------------
+  // A PLACEHOLDER map drawn in code from the author's layout guide: north to
+  // the left, the coast running left to right. The hotspots are data
+  // (content/world.js), laid over the picture by fraction, so the author's
+  // art drops in by swapping the picture (PC.data.world.mapArt).
+  var mapSel = null;
+  var MAP_SVG = null;
+  function mapSvg() {
+    if (MAP_SVG) return MAP_SVG;
+    var land = "#e6d3a3", ink = "#4a3418", sea = "#c9d6cf", sound = "#dbe2d7";
+    var coast = "M0,598 L40,575 L75,552 L112,543 L138,512 L152,500 L176,507 L210,527 L236,541 L248,560 L262,585 L276,612 L283,642 L296,664 L318,674 L330,652 L342,612 L362,590 L382,580 L412,586 L440,606 L470,598 L494,590 L522,604 L556,612 L598,588 L636,576 L662,592 L702,600 L740,617 L782,632 L830,656 L878,664 L906,636 L922,666 L962,690 L1010,712 L1050,716 L1085,742 L1092,760 L1128,742 L1166,756 L1196,780 L1238,782 L1290,800 L1310,826 L1336,852 L1372,838 L1418,832 L1448,834 L1500,846 L1544,849 L1566,840 L1604,842 L1662,826 L1702,812 L1800,795 L1800,1200 L0,1200 Z";
+    var chesapeake = "M0,350 L36,368 L70,392 L100,420 L124,442 L134,474 L94,472 L40,466 L0,462 Z";
+    var soundPoly = "M0,462 L192,482 L300,430 L405,388 L460,420 L532,452 L652,560 L636,576 L598,588 L556,612 L522,604 L494,590 L470,598 L440,606 L412,586 L382,580 L362,590 L342,612 L330,652 L318,674 L296,664 L283,642 L276,612 L262,585 L248,560 L236,541 L210,527 L176,507 L152,500 L138,512 L112,543 L75,552 L40,575 L0,598 Z";
+    var banks = '<path d="M195,486 L300,431 L398,390 Q420,384 436,396 L458,418" fill="none" stroke="' + ink + '" stroke-width="15" stroke-linecap="round"/>' +
+      '<path d="M195,486 L300,431 L398,390 Q420,384 436,396 L458,418" fill="none" stroke="' + land + '" stroke-width="11" stroke-linecap="round"/>' +
+      '<path d="M468,428 L528,452" fill="none" stroke="' + ink + '" stroke-width="15" stroke-linecap="round"/><path d="M468,428 L528,452" fill="none" stroke="' + land + '" stroke-width="11" stroke-linecap="round"/>' +
+      '<path d="M546,462 L654,560" fill="none" stroke="' + ink + '" stroke-width="15" stroke-linecap="round"/><path d="M546,462 L654,560" fill="none" stroke="' + land + '" stroke-width="11" stroke-linecap="round"/>';
+    var isle = function (cx, cy, rx, ry, rot) { return '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + rx + '" ry="' + ry + '" transform="rotate(' + rot + " " + cx + " " + cy + ')" fill="' + land + '" stroke="' + ink + '" stroke-width="2"/>'; };
+    var isles = isle(1525, 158, 80, 12, 12) + isle(1676, 178, 66, 9, -14) + isle(1432, 310, 12, 64, 2) + isle(1700, 432, 26, 40, 6) + isle(1745, 308, 8, 36, -32) +
+      isle(1611, 342, 16, 6, 0) + isle(1475, 204, 7, 5, 0) + isle(1566, 239, 5, 4, 0) + isle(1637, 263, 6, 5, 0) + isle(1731, 270, 6, 5, 0) + isle(1709, 288, 5, 4, 0) + isle(1548, 383, 6, 5, 0) + isle(1741, 360, 6, 5, 0) + isle(1781, 204, 6, 5, 0);
+    var river = function (d) { return '<path d="' + d + '" fill="none" stroke="#5f8796" stroke-width="3"/>'; };
+    var rivers = river("M836,656 C832,690 806,700 808,730 C802,760 786,780 788,810 C760,830 768,840 756,852") + river("M1088,760 C1060,770 1042,800 1020,806 C1018,830 990,836 958,860 C930,876 918,900 914,930 C900,940 886,950 880,962") +
+      river("M1198,782 C1186,800 1164,830 1164,860 C1150,880 1160,900 1152,912") + river("M1222,782 C1222,820 1228,850 1258,862 L1260,900") + river("M1418,836 C1432,850 1430,870 1414,882 C1398,920 1384,960 1380,1000 C1370,1020 1344,1030 1342,1050 C1350,1060 1350,1070 1346,1080");
+    var lbl = function (x, y, t, size, style) { return '<text x="' + x + '" y="' + y + '" font-family="IM Fell English, Georgia, serif" font-size="' + (size || 22) + '" fill="' + ink + '"' + (style ? ' font-style="italic"' : "") + ' text-anchor="middle">' + t + "</text>"; };
+    MAP_SVG = '<svg class="mapsvg" viewBox="0 0 1800 1200" preserveAspectRatio="xMidYMid meet" role="img" aria-label="A placeholder chart of the Carolina coast">' +
+      '<defs><pattern id="mapwave" width="60" height="30" patternUnits="userSpaceOnUse"><path d="M0,15 Q15,5 30,15 T60,15" fill="none" stroke="#9fb4ad" stroke-width="1"/></pattern></defs>' +
+      '<rect width="1800" height="1200" fill="' + sea + '"/><rect width="1800" height="1200" fill="url(#mapwave)" opacity=".5"/>' +
+      '<path d="' + soundPoly + '" fill="' + sound + '"/>' +
+      '<path d="' + chesapeake + '" fill="' + land + '" stroke="' + ink + '" stroke-width="2.5"/>' +
+      '<path d="' + coast + '" fill="' + land + '" stroke="' + ink + '" stroke-width="2.5"/>' + banks + isles + rivers +
+      '<ellipse cx="207" cy="636" rx="60" ry="36" fill="#a29c70" opacity=".75"/>' +
+      '<ellipse cx="450" cy="204" rx="180" ry="96" fill="none" stroke="#7a2416" stroke-width="3" stroke-dasharray="10 8"/>' +
+      '<ellipse cx="1530" cy="624" rx="180" ry="96" fill="none" stroke="#7a2416" stroke-width="3" stroke-dasharray="10 8"/>' +
+      lbl(62, 505, "Chesapeake Bay", 19, true) + lbl(324, 528, "Pamlico Sound", 19, true) + lbl(423, 350, "Cape Hatteras", 18, true) + lbl(968, 620, "Cape Fear", 18, true) + lbl(207, 703, "Great Dismal Swamp", 17, true) +
+      lbl(540, 1040, "The Carolinas", 34, true) + lbl(1650, 1172, "The French gulf shore lies beyond", 17, true) +
+      '<g transform="translate(60,60)"><path d="M100,0 L0,0" stroke="' + ink + '" stroke-width="3"/><path d="M0,0 L14,-8 L14,8 Z" fill="' + ink + '"/>' + lbl(48, 44, "NORTH", 22) + "</g>" +
+      "</svg>";
+    return MAP_SVG;
+  }
+
+  function mapPanel() {
+    var here = N().here(state), nd = N().nodeData(here);
+    var dests = PC.world.destinations(state);
+    var html = '<div class="where">' + esc((nd.kind === "ocean" ? nd.title : nd.name) + " · Set Sail") + '</div><h2 class="title">The Chart</h2>' +
+      '<p class="note" style="max-width:680px">Pick where to sail. A voyage costs 1-3 actions by distance and burns provisions on the way. Uncharted places aren\'t on your charts yet.</p>';
+    var art = PC.data.world.mapArt;
+    html += '<div class="mapwrap"><div class="mapbox">' + (art ? '<img class="mapimg" src="' + assetUrl(art) + '" alt="">' : mapSvg());
+    dests.forEach(function (d) {
+      var cls = "mapnode" + (d.ocean ? " ocean" : "") + (d.live ? " live" : " uncharted") + (d.here ? " here" : "") + (mapSel === d.id ? " sel" : "");
+      html += '<button class="' + cls + '" style="left:' + (d.x * 100) + "%;top:" + (d.y * 100) + '%" data-act="mapsel" data-node="' + esc(d.id) + '" title="' + esc(d.live ? d.label : d.label + ": " + PC.data.world.lines.uncharted) + '">' +
+        '<span class="dot"></span><span class="lab">' + esc(d.label) + (d.here ? " (here)" : "") + "</span></button>";
+    });
+    html += "</div></div>";
+    var sel = mapSel && dests.filter(function (d) { return d.id === mapSel; })[0];
+    if (sel) html += destCard(sel);
+    else html += '<p class="note">Tap a place on the chart.</p>';
+    html += '<div class="actions"><button class="secondary" data-act="closemap">‹ Back to ' + esc(nd.kind === "ocean" ? nd.title : nd.name) + "</button></div>";
     return html;
   }
+
+  // The destination card: what the town screen's top line says, the cost
+  // from here, and the weather outlook (weather, PR 3).
+  function destCard(d) {
+    var html = '<div class="svc destcard"><h4>' + esc(d.label) + "</h4>";
+    if (!d.live) return html + '<p class="small">' + esc(PC.data.world.lines.uncharted) + "</p></div>";
+    var n = PC.data.nodes[d.id];
+    if (n.kind === "ocean") html += '<p class="small" style="color:' + INK.sea + '">Open water · hunting grounds · no port fee, no merchant, no crew</p>';
+    else {
+      var c = CONTROL[n.control] || [n.control, "none"];
+      html += '<p class="small" style="color:' + INK[c[1]] + '">' + flagSvg(c[1]) + esc(c[0]) + (n.freePort ? " · Free Port" : "") + " · " + esc((n.present || {}).prosperityWord || n.tier) + "</p>";
+    }
+    if (PC.weather && PC.weather.outlookLine) html += '<p class="small">' + PC.weather.outlookLine(state, d.zone) + "</p>";
+    if (d.here) return html + '<p class="small">You are here.</p></div>';
+    html += '<p class="small">' + plural(d.cost, "action") + " from here · about " + Math.ceil(PC.world.headsAtSea(state) / 5 * d.cost) + " provisions lots" + (PC.state.seasonName(state) === "Winter" ? " (more in Winter)" : "") + "</p>";
+    html += '<div class="actions" style="margin-top:6px"><button class="primary" data-act="sail" data-node="' + esc(d.id) + '"' + (d.ok ? ' data-cost-ap="' + d.cost + '"' : " disabled") + ">Sail for " + esc(n.kind === "ocean" ? n.title : n.name) + (devFreeSail ? " (free)" : "") + "</button>" +
+      (d.ok ? "" : '<span class="lock">' + esc(d.why) + "</span>") + "</div></div>";
+    return html;
+  }
+  var devFreeSail = false;
+
+  // ---- The Winter split (§26.9, §26.10) ------------------------------------------
+
+  function splitPanel() {
+    var sp = state.split, S = PC.data.world.split;
+    if (!sp) return "";
+    var nd = N().nodeData(N().here(state));
+    var html = '<div class="where">' + esc((nd.title || nd.name) + " · Winter " + state.time.year) + '</div>' + banner("the split: the crew's chest opened on the deck") + '<h2 class="title">' + esc(S.title) + "</h2>";
+    if (sp.step === "ask") {
+      html += '<div class="prose dropcap">' + prose(S.ask) + "</div>";
+      var rd = PC.world.qmReading(state), share = PC.world.impliedShare(state);
+      html += '<div class="svc"><h4>The Quartermaster</h4>' + (rd ? '<p><b>' + esc(rd.who) + ":</b> " + inline(rd.line) + "</p>" : '<p class="note">No Quartermaster to read the crew\'s mood.</p>') +
+        '<p class="small">If they split today, each share would be about <b>' + gold(share) + " gold</b> of crew gold (" + gold(state.money.crew) + " in the chest, less the 10% carried over).</p></div>";
+      if (sp.forced) html += '<p class="notice warn">' + inline(S.forced) + "</p>";
+      var hp = PC.world.holdPressure(state);
+      html += opts([
+        opt({ act: "splitgo", label: "Split the gold", meta: "Takes the whole Winter: all 7 actions, no voyage, no port business. Prize ships are sold, every man takes his share, most of the crew go ashore." }),
+        opt({ act: "splithold", label: "No split this Winter", meta: hp ? "The crew won't like waiting with this much gold in the chest." : "Not enough gold in the chest to be worth splitting.", lock: sp.forced ? "The crew won't take no for an answer" : null }),
+      ]);
+      return html;
+    }
+    if (sp.step === "payout") {
+      var p = sp.payout;
+      html += '<div class="prose">' + prose(S.payout) + "</div>";
+      html += '<table class="grid">' + (p.sold.length ? p.sold.map(function (x) { return "<tr><td>Sold the " + esc(x.name) + '</td><td>+' + gold(x.gold) + "</td></tr>"; }).join("") : "") +
+        "<tr><td>The chest</td><td>" + gold(p.pool) + "</td></tr><tr><td>Held back for next time (10%)</td><td>" + gold(p.carry) + "</td></tr>" +
+        "<tr><td>One share</td><td>" + gold(p.one) + "</td></tr><tr><td>Your share, into your purse</td><td>+" + gold(p.captain) + "</td></tr>" +
+        "<tr><td>Your officers</td><td>" + gold(p.officers) + "</td></tr><tr><td>" + plural(p.handsN, "hand") + "</td><td>" + gold(p.hands) + "</td></tr></table>";
+      html += chips([{ icon: "morale", text: "Crew morale reset to " + state.crew.morale }, { icon: "pressure", text: "The crew's grievances are settled" }, { icon: "ap", text: "The Winter's 7 actions are spent" }]);
+      return html + '<div class="actions"><button class="primary" data-act="splitdepart" data-top="1">Continue</button></div>';
+    }
+    if (sp.step === "resign") {
+      var dd = sp.departed || {};
+      html += '<div class="prose">' + prose(S.departures) + "</div>" + chips([{ icon: "officer", text: plural(dd.left || 0, "hand") + " went ashore for good", ink: "bad" }, { icon: "officer", text: plural(dd.back || 0, "hand") + " signed on again", ink: "good" }, { icon: "officer", text: plural(state.crew.count, "hand") + " aboard your flagship" }]);
+      html += '<div class="prose">' + prose(S.resign) + "</div>";
+      if (!state.articles) return html + '<div class="actions"><button class="primary" data-act="splitarticles">Draw up the Articles</button></div>';
+      return html + '<p class="note">The Articles are signed.</p><div class="actions"><button class="primary" data-act="splitvote" data-top="1">Continue</button></div>';
+    }
+    if (sp.step === "winter") {
+      if (sp.vote) html += '<div class="prose">' + prose(S.vote) + "</div>" + chips([{ icon: "officer", text: sp.vote.winner + " is your Quartermaster" }]);
+      html += '<h3 class="sc" style="margin:14px 0 6px">' + esc(S.winter) + "</h3>";
+      var types = PC.rumors.gatherTypes(state);
+      html += opts(PC.world.winterOptions(state).map(function (o) {
+        var meta = { carousing: "Crew morale +5" + (nd.freePort ? ", +5 more at a free port" : "") + ". Revelry.", careening: "The hull fully repaired, free; +1 Outrun in Spring.", officers: "Every officer warms to you a little.",
+          ear: "A free rumor at the start of Spring, of the kind you pick.", courting: "+3 Standing with " + (nd.faction === "avalon" ? "Avalon" : "Frisia") + ".", gaming: "One Liar's Dice session, stakes from your purse. Revelry.",
+          rest: "Clears Wounded, Fevered and Hangover." }[o.id] || "";
+        if (o.id === "ear") return opt({ act: "nop", label: o.label, meta: meta, html: esc(o.label) + ' <span class="note">· pick a kind:</span> ' + types.map(function (t) { return '<button class="secondary" data-act="winterpick" data-opt="ear" data-type="' + esc(t) + '">' + esc(t) + "</button>"; }).join(" ") });
+        return opt({ act: "winterpick", attrs: 'data-opt="' + o.id + '"', label: o.label, meta: meta });
+      }));
+      return html;
+    }
+    if (sp.step === "done") {
+      var w = sp.spent;
+      html += '<p class="you-chose">' + esc(w.label) + '</p><div class="prose">' + prose(w.line) + "</div>" + chips(w.chips) + '<div class="prose">' + prose(S.done) + "</div>";
+      return html + '<div class="actions"><button class="primary" data-act="splitdone" data-top="1">Continue</button></div>';
+    }
+    return html;
+  }
+
+  // ---- The Trade Master (§27.7) ------------------------------------------------------
+  function tradeMasterCard() {
+    var id = N().here(state), who = N().slotNpc(id, "trademaster");
+    if (!who) return "";
+    var L = N().nodeData(id).lines.trademaster;
+    var ts = state.tradeShip;
+    var html = mcard("m:trade", who, "Trade Master");
+    var g = PC.npcs.serviceLevel(state, who) == null ? L.refuse : ts && ts.node === id ? L.already : L.greet;
+    html += state.location.say && state.location.say.to === who ? sayFor(who) : '<div class="say">' + inline(g) + "</div>";
+    if (ts) html += '<p class="small">Your trade ship: <b>' + esc(ts.ship.name || ts.ship.cls) + "</b>, enrolled at " + esc(PC.world.placeName(ts.node)) + " · earns about " + gold(PC.world.tradeIncome(ts.ship, ts.node)) + " gold a season · " + gold(ts.ledger || 0) + " waiting to collect.</p>";
+    var list = PC.world.tradeOptions(state);
+    if (!list.length) html += '<p class="note">' + (ts ? "Bring in another kept prize to swap her." : inline(L.offer) + " You have no kept prize ship to enroll.") + "</p>";
+    else {
+      html += '<p class="small">' + (ts ? "Swap her for a kept prize: you pay only what the new ship costs over what you put into the old one, and the old one rejoins your fleet." : inline(L.offer)) + "</p>";
+      html += list.map(function (o) {
+        return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(o.name, o.dirty) + '</b> <span class="note">' + esc(o.cls + " · " + o.cargo + " cargo · earns about " + o.income + " a season") + "</span></span> " +
+          '<button class="secondary" data-act="enroll" data-ship="' + esc(o.id) + '"' + (o.lock ? " disabled" : "") + ">" + (o.swap ? "Swap · " : "Enroll · ") + gold(o.due) + " from your purse</button>" +
+          (o.lock ? '<span class="lock">' + esc(o.lock) + "</span>" : "") + "</div>" +
+          '<p class="note" style="margin:2px 0 8px">Buyout ' + gold(o.buyout) + " (into crew gold, a gift to the crew) + the fee " + gold(o.fee) + (o.swap ? "; you've put " + gold(o.cost - o.due) + " in already" : "") + ".</p>";
+      }).join("");
+    }
+    return html + '<p class="note">Earnings wait here until you come back for them. A trade ship can be lost at sea (worse in Hurricane season).</p></div></details>';
+  }
+
   function notInPrototype() { return settings.dev ? "Not in the prototype (the hunt arrives in Milestone 5)" : "Not in the prototype"; }
 
   // ---- Tavern (§41.5) ----
@@ -15169,7 +16606,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var id = N().here(state);
     var keeper = N().slotNpc(id, "keeper");
     var L = N().nodeData(id).lines.keeper;
-    var first = !state.flags[N().FLAGS.tavernDone];
+    var first = !N().firstTavernDone(state);
     var asked = PC.rumors.keeperAsked(state);
     var talk = PC.checks.assess(state, PC.rumors.talkCheck(state), { conditions: ["Harbor"] });
     var html = '<div class="block">' + nameCard(keeper, "Tavern Keeper") + sayFor(keeper);
@@ -15195,7 +16632,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var list2 = [];
     if (N().oneArmedHere(state)) list2.push(opt({ act: "oneArmed", label: "Talk to the one-armed pirate", meta: "He sits with his mates, drinking." }));
     var dk = PC.drinking.canDrink(state);
-    list2.push(opt({ act: "drink", label: "Under the Table " + apText(1), ap: 1, meta: "Drink with a pirate. Once a season; the loser pays the " + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.", lock: dk.ok ? null : dk.why }));
+    list2.push(opt({ act: "drink", label: "Under the Table " + apText(1), ap: 1, meta: "Drink with " + ({ "Colonial Officer": "a navy officer", "Pirate": "a pirate" }[(PC.data.minigames.drinking.pools[id] || {}).role] || "a local") + ". Once a season; the loser pays the " + PC.data.minigames.drinking.TAB[N().nodeData(id).tier] + "-gold tab from your purse. Win a rumor.", lock: dk.ok ? null : dk.why }));
     var lp = PC.liarsdice.canPlay(state), st = PC.liarsdice.stakes(state);
     list2.push(opt({ act: "dice", label: "Liar's Dice " + apText(1), ap: 1, meta: "As many games a sitting as your purse covers, " + st[0] + "-" + st[1] + " gold a game from your purse.", lock: lp.ok ? null : lp.why }));
     var gi = N().tavernServiceCheck(state, 1);
@@ -15494,6 +16931,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (hasCargo("dirty") && !said.offerdirty) html += opts([opt({ act: "offerdirty", label: "Offer dirty goods", meta: "No action" })]);
     }
     html += "</div></details>";
+    html += tradeMasterCard();
     if (N().fenceOpen(state)) {
       var f = N().nodeData(id).fence;
       var fg = N().greeting(state, id, f.npc, "fence");
@@ -15643,6 +17081,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function mgHead(line, title) { return '<div class="where">' + esc(line) + '</div><h2 class="title">' + esc(title) + "</h2>"; }
 
+  function tavernWhere() {
+    var nd = state.location ? N().nodeData(N().here(state)) : null;
+    var pl = nd && nd.present && nd.present.places.tavern;
+    return nd ? nd.name + " · " + (pl ? pl.heading : "The Tavern") : "The Tavern";
+  }
+
   function minigamePanel() {
     var v = PC.minigames.view(state);
     if (v.kind === "hunt") v.hunt = v; // the hunt's own view rides on the minigame view
@@ -15714,7 +17158,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // Under the Table (§41.6): the hotspot table.
   function drinkPanel(v) {
-    var html = mgHead("Ocracoke · The Tavern · Under the Table", v.opponent) +
+    var html = mgHead(tavernWhere() + " · Under the Table", v.opponent) +
       '<p class="small">Round ' + v.round + " · the tab " + v.tab + " gold</p>" +
       '<div class="namecard"><b style="font-size:22px">' + esc(v.opponent) + '</b><span class="role">' + esc(v.role) + "</span>" + (v.trait ? '<span class="traits">' + esc(v.trait) + "</span>" : "") + "</div>" +
       '<div class="gauges"><div class="gauge"><span class="lbl">Your Wits</span>' + gpips(v.wits, v.witsMax) + "</div>" +
@@ -15807,7 +17251,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function huntPanel(v) {
-    var H = v.hunt, html = mgHead("Ocracoke · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
+    var homeNd = N().nodeData(state.minigame.home || N().here(state));
+    var homeLabel = homeNd.kind === "ocean" ? "Stop hunting" : "Sail home to " + homeNd.name;
+    var H = v.hunt, html = mgHead((homeNd.kind === "ocean" ? homeNd.title : homeNd.name) + " · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
     if (H.phase === "gameover") return html + gameOverPanel(v);
     html += huntStatus(H);
     // In a battle the result sits under the two ships' stats, right above
@@ -15815,7 +17261,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (H.phase === "battle") html += battleShips(H.battle);
     html += mgLatest(v.log, v);
     if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
-    var home = H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">Sail home to Ocracoke</button>' : "";
+    var home = H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
     if (H.phase === "empty") {
       html += '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
     } else if (H.phase === "scout" || H.phase === "hunter") {
@@ -15836,9 +17282,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     } else if (H.phase === "batchEnd") {
       html += '<p>The horizon is empty for now.</p><div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
-        '<button class="secondary" data-act="hhome">Sail home to Ocracoke</button></div>';
+        '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
     return html + mgLog(v.log);
+  }
+
+  // Sail on from the hunting grounds to another live place (§22.1).
+  function sailOnButtons() {
+    var g = state.minigame;
+    if (!g || g.kind !== "hunt") return "";
+    return PC.hunt.sailOnOptions(state, g).map(function (o) {
+      return '<button class="secondary" data-act="hsailon" data-dest="' + esc(o.id) + '"' + (o.ok ? ' data-cost-ap="' + o.cost + '"' : " disabled") + ' title="' + esc(o.ok ? "" : o.why) + '">Sail on to ' + esc(o.name) + " (" + plural(o.cost, "action") + ")</button>";
+    }).join("");
   }
 
   // The Quartermaster's vote (§25.9, §25.15; A4 of the M5 playtest).
@@ -16048,7 +17503,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function dicePanel(v) {
     // The opponent's name card, smaller (B20).
-    var html = '<div class="where">Ocracoke · The Tavern · Liar\'s Dice</div><h2 class="title smallname">' + esc(v.opponent) + "</h2>";
+    var html = '<div class="where">' + esc(tavernWhere()) + ' · Liar\'s Dice</div><h2 class="title smallname">' + esc(v.opponent) + "</h2>";
     // No cap on games a sitting (B21): games played and the running tally.
     var board = '<div class="scoreboard"><p class="sc" style="margin:0 0 4px">The scoreboard</p>' + plural(v.games, "game") + " played<br>Won " + v.won + " · lost " + v.lost +
       "<br>Net " + (v.net >= 0 ? "+" : "−") + Math.abs(v.net) + " gold<br>Your purse " + gold(v.purse) + "</div>";
@@ -16495,7 +17950,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return "<h2>Developer</h2>" +
       grp("Display", '<label class="tog"><input type="checkbox" data-act="toggledice"' + (state.settings.showDice ? " checked" : "") + "> Show the dice on results</label>" +
         '<label class="tog"><input type="checkbox" data-act="togglegender"' + (state.captain.gender === "f" ? " checked" : "") + "> Woman captain (tests the pronoun swap)</label>") +
-      grp("Time", '<div class="actions">' + b("addap", "+1 action") + b("fillap", "Top up actions") + b("devnewseason", "Start the next season") + b("tohub", "Back to the town menu") + "</div>") +
+      grp("Time", '<div class="actions">' + b("addap", "+1 action") + b("fillap", "Top up actions") + b("devnewseason", "End the season now") + b("tohub", "Back to the town menu") + "</div>" +
+        (state.location ? '<p class="small">Skip to (every turn runs; a Winter on the way is held, no split): ' + PC.state.SEASONS.map(function (n, i) { return b("devskipto", n, ' data-season="' + i + '"'); }).join("") + "</p>" : "")) +
+      (state.location ? grp("Milestone 7", '<label class="tog"><input type="checkbox" data-act="devfreesail"' + (devFreeSail ? " checked" : "") + "> Sail anywhere live at 0 actions</label>" +
+        '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>") : "") +
       (state.location ? grp("Money and cargo", '<div class="actions">' + b("devgold", "+500 crew gold") + b("devpurse", "+500 purse") + b("devtreasure", "+10 clean treasure", ' data-dirty="0"') +
         b("devtreasure", "+10 dirty treasure", ' data-dirty="1"') + b("devdamage", "Damage the hull (−5)") + b("devarrive", "The arrival popup (back from a hunt, 4 wounded)") + "</div>") : "") +
       (state.location ? grp("Story", (PC.devtools && PC.devtools.skipQuests ? '<div class="actions">' + b("devskip", "Skip the mandatory quests") + "</div>" : "") +
@@ -16569,6 +18027,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     pendingConfirm = { act: data.act, data: data };
     state.location.popup = { title: title, text: text, chips: [], back: "confirmback", ok: "confirmok", okLabel: okLabel || "Go ahead" };
     return true;
+  }
+
+  // The season-turn popup (Milestone 7): what the turn did, then the new
+  // season. After Winter 1754 the end-of-year screen shows instead.
+  function seasonTurn(out) {
+    menu = null;
+    if (out.yearEnd) return;
+    var chipsList = out.chips.slice();
+    if (out.earPick && state.location) {
+      var w = (N().nodeData(N().here(state)).rumorWeights) || PC.data.nodes.ocracoke.rumorWeights;
+      var r = PC.rumors.draw(state, w, [state.world.seed, PC.state.stamp(state), "ear"].join("|"), "ear to the ground", out.earPick, { noA: true });
+      if (r) chipsList.push({ icon: "rumor", text: "Ear to the Ground: " + r.text.replace(/[“”"]/g, "") });
+    }
+    var text = out.lines.filter(Boolean).join("\n\n");
+    if (state.location) state.location.popup = { title: out.to ? out.to + " begins" : "The season turns", text: text || null, chips: chipsList.length ? chipsList : [{ icon: "clock", text: "The season turns." }] };
   }
 
   var nodeHandlers = {
@@ -16824,6 +18297,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       say("ship:articles", null, text, null, null, { outcome: OUTCOME[r.outcome] ? r.outcome : null, rollType: "Pirate Code", chips: r.effects.map(function (e) { return textChip(/morale/i.test(e) ? "morale" : "pressure", e, /−|-/.test(e) || /pressure/i.test(e) ? "bad" : "good"); }) });
       if (mt && !state.flags.mentor_first_articles) { state.flags.mentor_first_articles = true; state.location.bark = { id: mt.id, line: PC.data.officerLines.mentorFirstArticles }; }
       state.location.tab = "articles";
+      // Re-signed at the split (§26.9): back to the split screen.
+      if (state.split && state.split.step === "resign") { menu = null; state.location.say = null; }
     },
     "artamend": function (el) { var c = PC.articles.amend(state, el.dataset.slot, el.dataset.opt); say("ship:articles", null, "The change is read out to the crew.", null, null, { chips: [moraleChip(c.morale)] }); },
     "rally": function () { var r = PC.crew.rally(state); say("ship:crew", null, { clean: "The men roar back at you.", partial: "A few cheers, and some nods.", setback: "The speech falls flat." }[r.outcome], null, null, { outcome: r.outcome, rollType: "Rally Crew", chips: [textChip("ap", "1 action"), moraleChip(r.gain) || textChip("morale", "No change in morale")] }); },
@@ -16852,6 +18327,42 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship:stores", null, "The crew drink to your health.", null, null, { chips: [moraleChip(m)] }); },
     "closepopup": function () { state.location.popup = null; },
+    // ---- Milestone 7: the chart, voyages, the season loop ----
+    "openmap": function () { mapSel = null; menu = null; state.current = { screen: "map" }; },
+    "closemap": function () { mapSel = null; state.current = { screen: "node" }; },
+    "mapsel": function (el) { mapSel = mapSel === el.dataset.node ? null : el.dataset.node; },
+    "sail": function (el) {
+      var to = el.dataset.node;
+      mapSel = null;
+      PC.world.sail(state, to, { free: devFreeSail });
+      if (state.current.screen === "map") state.current = { screen: "node" };
+    },
+    "hsailon": function (el) { PC.hunt.sailOn(state, state.minigame, el.dataset.dest); PC.minigames.leave(state); },
+    "endseason": function (el) {
+      if (!state.location) { PC.scenes.endSeason(state); return; }
+      if (state.ap.left > 0 && confirmFirst(el, endSeasonLabel() + "?", "You still have " + plural(state.ap.left, "action") + " this season. They don't carry over.", endSeasonLabel())) return;
+      seasonTurn(PC.world.endSeason(state));
+    },
+    "splitgo": function () { PC.world.doSplit(state); },
+    "splithold": function () {
+      var r = PC.world.holdSplit(state);
+      state.location.popup = { title: "No split this Winter", text: r.line, chips: r.pressure ? [{ icon: "pressure", text: "The crew grow restless", ink: "bad" }] : [] };
+    },
+    "splitdepart": function () { PC.world.departures(state); articleDraft = state.split && state.split.oldTerms ? JSON.parse(JSON.stringify(state.split.oldTerms)) : null; },
+    "splitarticles": function () { menu = "ship"; state.location.tab = "articles"; state.location.say = null; },
+    "splitvote": function () { PC.world.afterResign(state); },
+    "winterpick": function (el) { PC.world.spendWinter(state, el.dataset.opt, { type: el.dataset.type }); },
+    "splitdone": function () {
+      var gaming = state.split && state.split.spent && state.split.spent.id === "gaming";
+      PC.world.finishSplit(state);
+      if (gaming && PC.liarsdice.canPlay(state, { free: true }).ok) { mgMark = 0; PC.liarsdice.start(state, { free: true }); }
+    },
+    "enroll": function (el) {
+      var who_ = N().slotNpc(N().here(state), "trademaster");
+      var r = PC.world.enroll(state, el.dataset.ship);
+      say(who_, firstName(who_), r.line, r.failed ? r.why : null, null, r.failed ? null : { chips: [goldChip(-r.paid, "purse"), r.buyPart ? goldChip(r.buyPart) : null, r.morale ? moraleChip(r.morale) : null,
+        r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.old ? textChip("ship", "The " + r.old + " rejoins your fleet") : null] });
+    },
     "firstsigning": function () {
       menu = "ship";
       state.location.tab = "articles";
@@ -17573,7 +19084,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       PC.scenes.enterScene(state, id);
       menu = null;
     },
-    "devnewseason": function () { PC.scenes.endSeason(state); menu = null; },
+    "devnewseason": function () {
+      menu = null;
+      if (!state.location) { PC.scenes.endSeason(state); return; }
+      if (state.split) PC.world.finishSplit(state);
+      seasonTurn(PC.world.endSeason(state));
+    },
+    "devskipto": function (el) { menu = null; if (!state.location) return; var o = PC.world.devSkipTo(state, Number(el.dataset.season)); if (o) seasonTurn(o); },
+    "devfreesail": function () { devFreeSail = !devFreeSail; },
+    "devstanding": function (el) { state.meters.standing[el.dataset.f] = Number(el.dataset.v); },
     "devarrive": function () {
       var n = Math.min(4, state.crew.tiers.Green || 0);
       if (n) { PC.crew.removeHands(state, "Green", n); state.crew.wounded += n; }

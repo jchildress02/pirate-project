@@ -22,11 +22,14 @@
 
   // ---- The node's state ---------------------------------------------------
 
+  // Safe to call again: a node's later-added slots (the Trade Master,
+  // Milestone 7) fill on the next visit.
   function initNode(state, id) {
     var nd = nodeData(id);
     state.nodes[id] = state.nodes[id] || { prosperity: nd.prosperity, season: null };
     (nd.slots || []).forEach(function (s) { PC.npcs.fillSlot(state, s); });
   }
+  function isOcean(id) { return nodeData(id).kind === "ocean"; }
 
   // Everything that resets each season: the stock, the crew pool, the
   // buyers' caps, what's been sold (§20.3, §24.7, §29.4).
@@ -68,7 +71,9 @@
     });
     if (m.bulk) {
       var w = JSON.parse(JSON.stringify(m.bulk.weights));
-      for (var i = 0; i < m.bulk.count && Object.keys(w).length; i++) {
+      // A fixed count (Ocracoke: 3) or a range (Norfolk: 2-4 more, §17.4.5).
+      var count = m.bulk.count != null ? m.bulk.count : m.bulk.countMin + Math.floor(r() * (m.bulk.countMax - m.bulk.countMin + 1));
+      for (var i = 0; i < count && Object.keys(w).length; i++) {
         var g = PC.npcs.weighted(r, w);
         delete w[g];
         out[g] = m.bulk.min + Math.floor(r() * (m.bulk.max - m.bulk.min + 1));
@@ -186,10 +191,13 @@
   }
 
   // A greeting by rung, or the refusal (Enemy and Rival refuse, §15.6).
+  // A person met for the first time on this visit says their first-meeting
+  // line instead (Christoph at the Dockyard, Part 4 §9).
   function greeting(state, id, who, linesKey) {
     var L = nodeData(id).lines[linesKey];
     var sl = PC.npcs.serviceLevel(state, who);
     if (sl == null) return { refuse: true, line: L.refuse };
+    if (L.first && state.location && state.location.firstMeet === who && linesKey !== "keeper") return { refuse: false, line: L.first, first: true };
     return { refuse: false, line: L.greet[String(sl)] || L.greet["0"] };
   }
 
@@ -224,13 +232,21 @@
 
   function flag(state, f) { return state.flags[f] === true; }
 
+  // The node's places in menu order. Ocracoke's first-visit locks are its
+  // own (§17.2); a place with a locked line shows as a locked row (the
+  // Admiralty House in Milestone 7); a split Winter closes the town (§26.9).
   function places(state) {
     var id = here(state), nd = nodeData(id);
-    var firstVisit = !flag(state, F.tavernDone);
-    return ["tavern", "docks", "merchant", "graveyard", "ship"].map(function (p) {
-      var out = { id: p, name: nd.locations[p].name, locked: false, why: null };
-      if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Come back after your first visit"; }
-      else if (p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.hidden = true; out.why = "Come back after A Dying Pirate's Wish"; }
+    var ocr = id === "ocracoke";
+    var firstVisit = ocr && !flag(state, F.tavernDone);
+    var split = PC.world && PC.world.splitWinter(state);
+    return (nd.placeOrder || ["tavern", "docks", "merchant", "graveyard", "ship"]).map(function (p) {
+      var loc = nd.locations[p];
+      var out = { id: p, name: loc.name, locked: false, why: null };
+      if (loc.locked) { out.locked = true; out.why = loc.locked; }
+      else if (split && p !== "ship") { out.locked = true; out.why = "The split takes the whole Winter"; }
+      else if (firstVisit && p !== "tavern" && p !== "ship") { out.locked = true; out.why = "Come back after your first visit"; }
+      else if (ocr && p === "graveyard" && !flag(state, F.dyingWish) && !flag(state, "dpw_retry")) { out.locked = true; out.hidden = true; out.why = "Come back after A Dying Pirate's Wish"; }
       return out;
     });
   }
@@ -247,10 +263,19 @@
     state.location.visit = (state.location.visit || 0) + 1;
     state.location.sales = {}; // this visit's sales by buyer (R6)
     var id = here(state);
-    // The persistent Minors count as met once the captain walks into their place.
-    var meet = { tavern: "keeper", docks: "shipwright", merchant: "provisioner" }[place];
-    if (meet) { var mid = slotNpc(id, meet); (state.npcs[mid] = state.npcs[mid] || {}).met = true; }
-    if (place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
+    // The persistent Minors count as met once the captain walks into their
+    // place; one met just now says a first-meeting line if he has one.
+    state.location.firstMeet = null;
+    (nodeData(id).slots || []).forEach(function (sl) {
+      if (sl.place !== place) return;
+      var d = (state.npcs[sl.id] = state.npcs[sl.id] || {});
+      if (!d.met) state.location.firstMeet = sl.id;
+      d.met = true;
+    });
+    if (id === "ocracoke" && place === "docks" && !flag(state, F.docks)) return "ocr_rr_1";
+    // A node's own first-entry scenes (Norfolk's beat 2, PR 5).
+    var fe = (nodeData(id).firstEntry || {})[place];
+    if (fe && !state.seen[fe] && PC.scenes.canEnter(state, fe).ok) return fe;
     return null;
   }
 
@@ -261,8 +286,9 @@
     var place = state.location.place;
     state.location.place = null;
     state.location.say = null;
+    state.location.firstMeet = null;
     var queue = [];
-    if (place === "tavern" && !flag(state, F.tavernDone)) {
+    if (here(state) === "ocracoke" && place === "tavern" && !flag(state, F.tavernDone)) {
       state.flags[F.tavernDone] = true;
       if (!flag(state, F.underworld) && !(state.location.queue || []).length) queue.push("ocr_uw_1");
       if (!flag(state, F.dyingWish)) queue.push("ocr_dpw_1");
@@ -283,6 +309,7 @@
   // The first Tavern action triggers Welcome to the Underworld right after
   // it resolves (§17.2).
   function tavernActionDone(state) {
+    if (here(state) !== "ocracoke") return;
     if (flag(state, F.tavernDone) || flag(state, F.tavernAction)) return;
     state.flags[F.tavernAction] = true;
     if (!flag(state, F.underworld)) state.location.queue = (state.location.queue || []).concat(["ocr_uw_1"]);
@@ -302,8 +329,14 @@
   }
 
   // Officer recruitment and Gather Intelligence open after the first visit.
+  function firstTavernDone(state) {
+    var f = nodeData(here(state)).firstTavernFlag;
+    if (f === undefined) f = F.tavernDone; // Ocracoke's
+    return !f || flag(state, f);
+  }
+
   function tavernServiceCheck(state, ap) {
-    if (!flag(state, F.tavernDone)) return { ok: false, why: "Not on your first visit" };
+    if (!firstTavernDone(state)) return { ok: false, why: "Not on your first visit" };
     if (ap && state.ap.left < ap) return { ok: false, why: "Not enough time this season" };
     return { ok: true };
   }
@@ -350,7 +383,7 @@
   function lodgingCost(state, ap) { return tierOf(state).lodging * state.crew.count * ap; }
 
   function lodgingCheck(state, ap) {
-    if (!flag(state, F.tavernDone)) return { ok: false, why: "Not on your first visit" };
+    if (!firstTavernDone(state)) return { ok: false, why: "Not on your first visit" };
     var who = slotNpc(here(state), "keeper");
     if (PC.npcs.serviceLevel(state, who) == null) return { ok: false, why: "The tavern keeper won't serve you" };
     if (PC.crew.usedThisSeason(state, "lodging")) return { ok: false, why: "Once a season" };
@@ -433,7 +466,8 @@
     s.stock[good] -= n;
     PC.crew.addGood(state, good, n, false);
     PC.state.addLog(state, "Bought " + n + " " + good + " for " + cost + " crew gold.");
-    return { cost: cost, line: noteTrade(state, who, cost, L) || L.goods };
+    var prod = nodeData(id).market.produces && nodeData(id).market.produces[good];
+    return { cost: cost, line: noteTrade(state, who, cost, L) || (prod && L.tobacco && good === "Tobacco" ? L.tobacco : L.goods) };
   }
 
   // What a buyer pays for one unit. "provisioner": clean only, with the
@@ -593,6 +627,12 @@
     var out = { track: track, name: TRACKS[track], level: cur, next: next };
     if (next > 5) { out.locked = "At the top level"; return out; }
     if (next > cap) { out.locked = "This yard tops out at level " + cap; out.atCap = true; return out; }
+    // Norfolk's level 4 needs Avalon 20+ (§17.4.1).
+    var gate = nd.yardGate;
+    if (gate && next >= gate.level && (state.meters.standing[gate.faction] || 0) < gate.standing) {
+      out.locked = "Level " + gate.level + " needs " + (gate.faction === "avalon" ? "Avalon" : gate.faction) + " Standing " + gate.standing + " or better";
+      out.gated = true;
+    }
     out.cost = Math.round(E().UPGRADE[next] * E().SIZE_UPGRADE[state.ship.size] * craftMult(state));
     out.effect = track === "hull" ? "Max hull +" + (hullMaxAt(state, next) - state.ship.hullMax)
       : track === "rigging" ? (next === 3 ? "+1 Speed" : next === 5 ? "+1 Handling" : (state.ship.rigging === "frayed" ? "Fixes the frayed rigging" : "No change until level 3"))
@@ -605,10 +645,10 @@
   }
 
   function upgrade(state, track) {
-    var id = here(state), L = nodeData(id).lines.shipwright;
+    var id = here(state), nd = nodeData(id), L = nd.lines.shipwright;
     if (shipwrightGreeting(state).refuse) return { line: L.refuse };
     var u = upgradeInfo(state, track);
-    if (u.locked) return { line: u.atCap ? L.atCap : u.locked, failed: true };
+    if (u.locked) return { line: u.atCap ? L.atCap : u.gated && L.gateLocked ? L.gateLocked : u.locked, failed: true };
     if (state.money.crew < u.cost) return { line: L.broke, failed: true };
     state.money.crew -= u.cost;
     var sh = state.ship;
@@ -624,7 +664,7 @@
     }
     ladderTick(state, slotNpc(id, "shipwright"), "commission");
     PC.state.addLog(state, "Bought " + u.name + " level " + u.next + " for " + u.cost + " crew gold.");
-    return { cost: u.cost, line: L.upgrade };
+    return { cost: u.cost, line: u.next >= (nd.yardMax || 2) && L.upgradeTop ? L.upgradeTop : L.upgrade };
   }
 
   // ---- Selling a prize hull (§22.7, Milestone 5 plan) -------------------------
@@ -635,7 +675,7 @@
   function hullSalePrice(state, f) {
     var id = here(state), nd = nodeData(id), H = PC.data.hunt;
     var dirty = !!f.dirty;
-    if (dirty && nd.control !== "No control") return { ok: false, why: "This yard won't touch a dirty hull" };
+    if (dirty && nd.control !== "No control") return { ok: false, why: "This yard won't touch a dirty hull", line: (nd.lines.shipwright || {}).dirtyHull };
     var mult = tierOf(state).goods;
     var size = f.size || 1;
     var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[size] * Math.max(0, f.hullMax - f.hull));
@@ -678,7 +718,7 @@
     // What no longer fits in the smaller hold goes over the side (A9).
     var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
-    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
@@ -726,8 +766,15 @@
     return PC.articles.currentReputation(state).pool;
   }
 
+  // A node can close its crew pool below a Standing (Norfolk: Avalon 0+).
+  function poolClosed(state) {
+    var g = nodeData(here(state)).crewGate;
+    return !!(g && (state.meters.standing[g.faction] || 0) < g.min);
+  }
+
   function poolAvailable(state) {
     var s = season(state);
+    if (poolClosed(state)) return { Green: 0, Able: 0, Seasoned: 0, Veteran: 0 };
     var m = poolMult(state);
     var out = {};
     Object.keys(s.pool).forEach(function (t) { out[t] = Math.max(0, Math.floor(s.pool[t] * m) - s.hired[t] - ((s.lost || {})[t] || 0)); });
@@ -828,6 +875,7 @@
     var L = nodeData(here(state)).lines.crew;
     n = Math.floor(n);
     if (n <= 0) throw new Error("Sign at least one hand.");
+    if (poolClosed(state)) return { line: L.closed || L.empty, failed: true };
     var avail = poolAvailable(state)[tier] || 0;
     if (!avail) return { line: L.empty, failed: true };
     if (PC.crew.berths(state) <= 0) return { line: L.full, failed: true };
@@ -918,7 +966,10 @@
     id = id || here(state);
     var nd = nodeData(id), L = nd.lines.arrival;
     var lines = [];
+    var pre = [];
+    if (opts.voyage) pre = opts.voyage.lines.slice();
     if (opts.fromHunt) lines.push(L.back);
+    else if (L.arrive) lines.push(L.arrive);
     var c = state.crew;
     if (c.wounded > 0) {
       var cook = (state.officers || []).some(function (o) { return !o.gone && o.type === "Cook" && o.aboard === "flagship"; });
@@ -962,13 +1013,16 @@
       lines.push("PLACEHOLDER: You set " + state.captives + " captive" + (state.captives === 1 ? "" : "s") + " ashore, free. Their thanks come with " + reward + " gold.");
       state.captives = 0;
     }
-    // Holdings come after the prototype.
+    // Holdings come in M9; the trade ship's earnings are collected here (§27.7).
+    var ledger = PC.world ? PC.world.collectLedger(state, id) : null;
+    if (ledger) lines.push("PLACEHOLDER: The Trade Master hands over your trade ship's earnings: " + ledger + " gold, into your purse.");
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
     // P16: the lines carry which pot paid in brackets, so the old pay chips
     // under them (which repeated the lines) are gone.
-    var chips = lines.map(function (l) { return { icon: "port", text: l }; });
-    state.location.popup = { title: "Arrival at " + nd.name, lines: lines, chips: chips };
+    var all = pre.concat(lines);
+    var chips = all.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []);
+    state.location.popup = { title: "Arrival at " + nd.name, lines: all, chips: chips };
     return state.location.popup;
   }
 
@@ -1004,6 +1058,9 @@
     recruitBatch: recruitBatch,
     trimPlan: trimPlan,
     initNode: initNode,
+    isOcean: isOcean,
+    poolClosed: poolClosed,
+    firstTavernDone: firstTavernDone,
     season: season,
     tierOf: tierOf,
     nodeData: nodeData,
