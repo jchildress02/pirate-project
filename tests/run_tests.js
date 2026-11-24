@@ -6,11 +6,12 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
+PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
 
 var passed = 0, failed = 0;
 function test(name, fn) {
@@ -2738,6 +2739,221 @@ test("Hurricane 1754: the north's strike comes as the season opens", function ()
 test("the Winter salvage bonus applies to ordinary Graveyard dives in Winter, never the Miranda", function () {
   ok(PC.weather.winterSalvage({ time: { year: 1754, season: 3 } }, {}) === true);
   ok(PC.weather.winterSalvage({ time: { year: 1754, season: 3 } }, { miranda: true }) === false);
+});
+
+console.log("Milestone 7, PR 4: voyage events (§44)");
+
+function ve(seed, fn) {
+  PC.voyageEvents.off = false;
+  var V = PC.data.voyageEvents, keep = JSON.parse(JSON.stringify({ slot: V.SLOT_CHANCE, enc: V.ENCOUNTER_CHANCE, off: V.OFFICER_CHANCE, port: V.PORT_OFFICER_CHANCE, storm: V.STORM }));
+  try { return fn(m7(seed), V); }
+  finally { PC.voyageEvents.off = true; V.SLOT_CHANCE = keep.slot; V.ENCOUNTER_CHANCE = keep.enc; V.OFFICER_CHANCE = keep.off; V.PORT_OFFICER_CHANCE = keep.port; V.STORM = keep.storm; }
+}
+function quietSea(V) { V.SLOT_CHANCE = 0; }
+function noStorms(V) { V.STORM = { Fair: 0, Unsettled: 0, Foul: 0, hurricaneFloor: 0, perExtraAp: 0 }; }
+
+test("the registry: written events have choices and results; every approved event is listed; ids are unique; no jolly boats", function () {
+  var V = PC.data.voyageEvents, seen = {};
+  V.written.concat([V.hurricane, V.breakingUp], V.approved, V.officerAtSea, V.officerInPort).forEach(function (e) {
+    ok(!seen[e.id], "duplicate " + e.id); seen[e.id] = true;
+    if (e.placeholder) return;
+    ok(e.setup, e.id + " has a setup");
+    (e.choices || []).forEach(function (c) { ok(c.result || c.clean || c.bottle || c.founderSecond, e.id + ": " + c.label); });
+  });
+  eq(V.written.length, 15);
+  ok(V.approved.length >= 60, "the placeholders");
+  ok(!/jolly boat/i.test(JSON.stringify(V)));
+});
+
+test("a quiet voyage arrives at once, with a passage line in the arrival popup", function () {
+  ve("ve1", function (s, V) {
+    quietSea(V);
+    PC.world.sail(s, "norfolk");
+    eq(s.location.node, "norfolk"); eq(s.voyage, null);
+    var lines = s.location.popup.lines.join(" ");
+    ok(V.passage.some(function (p) { return lines.indexOf(p.text) >= 0; }), "a passage line");
+  });
+});
+
+test("a forced event holds the voyage on the event screen; choosing resolves it; Continue arrives", function () {
+  ve("ve2", function (s, V) {
+    quietSea(V);
+    s.flags.devForceEvent = "ve_c09_shanty";
+    var m = s.crew.morale;
+    PC.world.sail(s, "norfolk");
+    eq(s.current.screen, "event"); ok(s.voyage && s.voyage.pending);
+    var v = PC.voyageEvents.view(s);
+    eq(v.title, "Give Us a Song");
+    var save = PC.state.deserialize(PC.state.serialize(s)); ok(save.voyage, "the voyage is saved mid-event");
+    var i = v.choices.filter(function (c) { return /Save your breath/.test(c.label); })[0].index;
+    var r = PC.voyageEvents.choose(s, i);
+    eq(s.crew.morale, m - 2); ok(r.chips.length);
+    PC.voyageEvents.next(s);
+    eq(s.location.node, "norfolk"); eq(s.current.screen, "node");
+  });
+});
+
+test("the storm chance by outlook: Fair 5%, Foul 45%, Hurricane at least 20%, +5% an extra action", function () {
+  var s = m7("ve3"), v = { zone: "north", ap: 1 };
+  s.world.devOutlook = { stamp: PC.state.stamp(s), north: "Fair" };
+  eq(PC.voyageEvents.stormChance(s, v), 0.05);
+  s.world.devOutlook.north = "Foul"; eq(PC.voyageEvents.stormChance(s, v), 0.45);
+  s.world.devOutlook.north = "Fair"; s.time.season = 2; s.world.devOutlook.stamp = PC.state.stamp(s);
+  eq(PC.voyageEvents.stormChance(s, v), 0.20);
+  v.ap = 3; ok(Math.abs(PC.voyageEvents.stormChance(s, v) - 0.30) < 1e-9);
+});
+
+test("a storm: running before the wind needs a 2-action voyage; clean gives an action back", function () {
+  ve("ve4", function (s, V) {
+    quietSea(V);
+    s.flags.devForceEvent = "ve_w01_noreaster";
+    PC.world.sail(s, "norfolk"); // 1 action
+    ok(!PC.voyageEvents.view(s).choices.some(function (c) { return /Run before/.test(c.label); }), "hidden on a 1-action voyage");
+    var s2 = m7("ve4b"); s2.flags.devForceEvent = "ve_w01_noreaster";
+    PC.world.sail(s2, "bahama"); // 2 actions from Ocracoke
+    var c = PC.voyageEvents.view(s2).choices.filter(function (x) { return /Run before/.test(x.label); })[0];
+    ok(c, "shown on a 2-action voyage");
+    var ap = s2.ap.left;
+    withDice([6, 6], function () { PC.voyageEvents.choose(s2, c.index); });
+    PC.voyageEvents.next(s2);
+    eq(s2.ap.left, ap + 1);
+  });
+});
+
+test("a placeholder card plays its name and description, and changes nothing", function () {
+  ve("ve5", function (s, V) {
+    quietSea(V); s.flags.devForceEvent = "ve_t02";
+    var before;
+    PC.world.sail(s, "norfolk");
+    before = JSON.stringify([s.crew, s.ship, s.provisions, s.money]);
+    var v = PC.voyageEvents.view(s);
+    eq(v.phase, "placeholder"); ok(/^PLACEHOLDER \(Fouled Bottom\)/.test(v.text));
+    s.ap.left = 7; var real = PC.node.arrive; PC.node.arrive = function () { return null; };
+    try { PC.voyageEvents.next(s); } finally { PC.node.arrive = real; }
+    eq(JSON.stringify([s.crew, s.ship, s.provisions, s.money]), before);
+  });
+});
+
+test("Talk at the Mess Tables: ×3 while the crew are sore, half weight at Steady; the sore flag ends with the voyage", function () {
+  ve("ve6", function (s, V) {
+    var e = PC.voyageEvents.byId("ve_c01_grumbling");
+    s.crew.morale = 70; var hi = PC.voyageEvents.generalPool(s, { zone: "north", ap: 1, from: "ocracoke", to: "norfolk" })[e.id];
+    s.flags.soreFlag = true; s.flags.soreGotAway = "Mary Ann";
+    eq(PC.voyageEvents.generalPool(s, { zone: "north", ap: 1, from: "ocracoke", to: "norfolk" })[e.id], hi * 3);
+    s.flags.devForceEvent = e.id; quietSea(V);
+    PC.world.sail(s, "norfolk");
+    ok(/Mary Ann slipped away/.test(PC.voyageEvents.view(s).text));
+    var cs = PC.voyageEvents.view(s).choices;
+    PC.voyageEvents.choose(s, cs[cs.length - 1].index); PC.voyageEvents.next(s);
+    eq(s.flags.soreFlag, false);
+  });
+});
+
+test("a hunt from port draws a slot on the way out: a card waits, then the first batch starts", function () {
+  ve("ve7", function (s, V) {
+    quietSea(V); s.flags.devForceEvent = "ve_h06_mackerel";
+    var g = PC.hunt.start(s);
+    eq(s.current.screen, "event"); eq(g.batch, null);
+    var hc = PC.voyageEvents.view(s).choices;
+    PC.voyageEvents.choose(s, hc[hc.length - 1].index);
+    PC.voyageEvents.next(s);
+    eq(s.current.screen, "minigame"); ok(g.batch, "the batch has started");
+  });
+});
+
+test("the leg home: a card waits before the arrival", function () {
+  ve("ve8", function (s, V) {
+    quietSea(V);
+    var g = PC.hunt.start(s); g.phase = "batchEnd";
+    s.flags.devForceEvent = "ve_t02";
+    PC.hunt.sailHome(s, g); PC.minigames.leave(s);
+    eq(s.current.screen, "event");
+    PC.voyageEvents.next(s);
+    eq(s.current.screen, "node"); ok(s.location.popup, "the arrival");
+  });
+});
+
+test("a ship met at sea: the scouting card, let her pass, and the voyage runs on to Norfolk", function () {
+  ve("ve9", function (s, V) {
+    V.SLOT_CHANCE = 1; V.ENCOUNTER_CHANCE = 1; noStorms(V); V.OFFICER_CHANCE = 0;
+    s.meters.heat.avalon = 0;
+    PC.world.sail(s, "norfolk");
+    var v = PC.voyageEvents.view(s);
+    eq(v.encounter, "ship");
+    var g = PC.voyageEvents.meet(s, false);
+    eq(s.current.screen, "minigame"); ok(g.encounter);
+    if (g.phase === "scout") { PC.hunt.next(s, g); eq(g.phase, "encounterEnd"); PC.minigames.leave(s); eq(s.location.node, "norfolk"); }
+    else eq(g.phase, "hunter"); // a pirate that likes her odds comes for you
+  });
+});
+
+test("an officer's port event fires as the captain leaves a place where an action was spent", function () {
+  ve("ve10", function (s, V) {
+    V.PORT_OFFICER_CHANCE = 1;
+    var o = PC.officers.generate(s, "ocracoke", "t|off", "off_t"); o.fear = "Loss"; o.drive = "Faith"; o.joined = { year: 1753, season: 0 }; o.rung = 0;
+    s.officers.push(o);
+    PC.node.enter(s, "ship"); s.ap.left -= 1;
+    var fire = PC.node.leave(s);
+    eq(fire, null); eq(s.current.screen, "event");
+    var v = PC.voyageEvents.view(s);
+    ok(/Loss/.test(v.title)); ok(v.text.indexOf(o.first) >= 0, "names the officer");
+    var refuse = v.choices.filter(function (c) { return /Refuse/.test(c.label); })[0];
+    PC.voyageEvents.choose(s, refuse.index); PC.voyageEvents.next(s);
+    eq(s.current.screen, "node"); eq(o.approval, -3);
+  });
+});
+
+test("approval points: 5 move a rung, at most once a season; an authored rung move ignores the cap", function () {
+  var s = m7("ve11"), o = { id: "x", rung: 0, approval: 0 };
+  PC.voyageEvents.points(s, o, 3); eq(o.rung, 0);
+  PC.voyageEvents.points(s, o, 2); eq(o.rung, 1); eq(o.approval, 0);
+  PC.voyageEvents.points(s, o, 5); eq(o.rung, 1, "capped this season");
+});
+
+test("the Hurricane at Sea: a setback breaks her up; a second setback founders her; alone, the captain's Endure decides", function () {
+  ve("ve12", function (s, V) {
+    quietSea(V); s.time.season = 2; s.flags.devForceEvent = "ve_w02_hurricane";
+    PC.world.sail(s, "norfolk");
+    withDice([1, 1], function () { PC.voyageEvents.choose(s, 0); });
+    PC.voyageEvents.next(s);
+    eq(PC.voyageEvents.view(s).title, "She's Breaking Up");
+    withDice([1, 1], function () { PC.voyageEvents.choose(s, 0); });
+    ok(s.gameOver, "lost with her");
+    PC.voyageEvents.next(s);
+    eq(s.current.screen, "end");
+  });
+});
+
+test("provisions by legs: one leg is crew ÷ 5 lots; the Developer's outlook override holds for the season", function () {
+  ve("ve13", function (s, V) {
+    quietSea(V); s.flags.devForceEvent = "ve_h06_mackerel";
+    PC.world.sail(s, "norfolk");
+    var p = s.provisions, i = PC.voyageEvents.view(s).choices.filter(function (c) { return /All hands/.test(c.label); })[0].index;
+    PC.voyageEvents.choose(s, i);
+    eq(s.provisions - p, Math.round(PC.world.headsAtSea(s) / 5 * 0.5));
+    s.world.devOutlook = { stamp: PC.state.stamp(s), south: "Foul" };
+    eq(PC.weather.outlook(s, "south"), "Foul");
+  });
+});
+
+test("the Vote comes at the next voyage event after the post falls vacant; the captain reacts to the winner", function () {
+  ve("ve14", function (s, V) {
+    quietSea(V);
+    var o = PC.officers.generate(s, "ocracoke", "t|v", "off_v"); o.joined = { year: 1753, season: 0 }; s.officers.push(o);
+    s.officers.forEach(function (x) { x.quartermaster = false; });
+    s.actingQM = { active: true, pending: true, full: "Tom Hale" };
+    ok(PC.officers.votePending(s));
+    PC.world.sail(s, "norfolk");
+    var v = PC.voyageEvents.view(s);
+    eq(v.voteStep, "pre");
+    PC.voyageEvents.vote(s, o.id);
+    eq(PC.voyageEvents.view(s).voteStep, "result");
+    var m = s.crew.morale;
+    PC.voyageEvents.voteReact(s, "congratulate");
+    eq(s.crew.morale, m + 3);
+    PC.voyageEvents.next(s);
+    eq(s.location.node, "norfolk"); ok(!PC.officers.votePending(s));
+  });
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");
