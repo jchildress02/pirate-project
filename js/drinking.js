@@ -72,7 +72,8 @@
 
   function opening(state, game) {
     var t = traitOf(game.opp);
-    M().say(state, game, D().lines.setup + (t.hint || "PLACEHOLDER (setup hint)."));
+    var pool = D().pools[game.node] || {};
+    M().say(state, game, (pool.setup || D().lines.setup) + (t.hint || "PLACEHOLDER (setup hint)."));
     if (game.hairOfTheDog) M().say(state, game, "Your head is still pounding from last time.");
   }
 
@@ -244,7 +245,7 @@
     if (game.over) return game;
     game.round += 1;
     var t = traitOf(game.opp);
-    if (t.quitsAtDoneFor && game.opp.tolerance <= 1) { M().say(state, game, D().lines.timidQuits); return finish(state, game, "win"); }
+    if (t.quitsAtDoneFor && game.opp.tolerance <= 1) { M().say(state, game, t.doneFor || D().lines.timidQuits); return finish(state, game, "win"); }
     showTell(state, game);
     if (game.opp.strongRound && game.round === game.opp.strongRound && !game.mustStrong) {
       M().say(state, game, D().lines.heCallsStrong);

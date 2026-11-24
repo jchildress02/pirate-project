@@ -16,12 +16,23 @@
   function D() { return PC.data.minigames.dice; }
   function M() { return PC.minigames; }
   var COND = ["Harbor"];
+  // A node's table can have its own lines (Norfolk's Colonial Officer,
+  // Part 4 §12); anything it leaves out falls back to the shared ones.
+  function LN(node) {
+    var p = D().pools[node] || {};
+    if (!p.lines) return D().lines;
+    var out = {};
+    Object.keys(D().lines).forEach(function (k) { out[k] = D().lines[k]; });
+    Object.keys(p.lines).forEach(function (k) { out[k] = p.lines[k]; });
+    return out;
+  }
 
   function stakes(state, node) { return D().STAKES[PC.node.nodeData(node || PC.node.here(state)).tier] || [25, 50]; }
 
-  function canPlay(state) {
+  // opts.free: the Gaming Tables Winter (§26.10), no action spent.
+  function canPlay(state, opts) {
     var id = PC.node.here(state);
-    var c = PC.node.tavernServiceCheck(state, 1);
+    var c = PC.node.tavernServiceCheck(state, opts && opts.free ? 0 : 1);
     if (!c.ok) return c;
     if (!D().pools[id]) return { ok: false, why: "No one's gambling here" };
     // Stakes come from the purse, never crew gold (§18.1): say so plainly,
@@ -40,10 +51,11 @@
     return out;
   }
 
-  function start(state) {
-    var c = canPlay(state);
+  function start(state, opts) {
+    var free = !!(opts && opts.free);
+    var c = canPlay(state, opts);
     if (!c.ok) throw new Error(c.why);
-    PC.crew.spendAP(state, 1);
+    if (!free) PC.crew.spendAP(state, 1);
     PC.node.tavernVisit(state);
     state.minigames.diceSessions = (state.minigames.diceSessions || 0) + 1;
     var node = PC.node.here(state);
@@ -56,7 +68,7 @@
       sessionRerolls: (state.captain.items || []).indexOf("Loaded Dice") >= 0 ? [{ name: "Loaded Dice", types: ["Cards & Dice"], op: "cheat" }] : [],
     };
     M().start(state, game, "node");
-    M().say(state, game, D().lines.sit);
+    M().say(state, game, LN(game.node).sit);
     return game;
   }
 
@@ -75,7 +87,7 @@
     var lim = stakes(state, game.node);
     stake = Math.round(stake);
     if (stake < lim[0] || stake > lim[1]) throw new Error("Stakes here are " + lim[0] + "-" + lim[1] + " gold.");
-    if (state.money.purse < stake) throw new Error(D().lines.broke);
+    if (state.money.purse < stake) throw new Error(LN(game.node).broke);
     state.money.purse -= stake;
     game.games += 1;
     game.round = { stake: stake, myN: D().DICE, hisN: D().DICE, opener: "me", peeked: [], cheated: false, history: [] };
@@ -146,8 +158,8 @@
     if (push && valid(g, best.q + 1, best.f)) best = { q: best.q + 1, f: best.f, p: hisOdds(game, best.q + 1, best.f) };
     g.bid = { q: best.q, f: best.f, by: "him", bluff: best.p < 0.5 };
     var line = game.opp.name.split(" ")[0] + " bids " + faces(best.q, best.f) + ".";
-    if (g.bid.bluff && game.sized === "clean") line += " " + D().lines.tell;
-    else if (g.bid.bluff && game.sized === "partial" && r() < 0.6) line += " " + D().lines.vague;
+    if (g.bid.bluff && game.sized === "clean") line += " " + LN(game.node).tell;
+    else if (g.bid.bluff && game.sized === "partial" && r() < 0.6) line += " " + LN(game.node).vague;
     g.history.push(line);
     g.turn = "me";
     return game;
@@ -210,7 +222,7 @@
       // Card Sharp: 500 gold net over the captain's life, wins less losses
       // (ruled November 18). Once earned it's never taken away.
       state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) + g.stake;
-      M().say(state, game, D().lines.win);
+      M().say(state, game, LN(game.node).win);
       if (state.minigames.diceWinnings >= D().CARD_SHARP_AT && state.captain.tags.indexOf("Card Sharp") < 0) {
         state.captain.tags.push("Card Sharp");
         M().say(state, game, "New tag: Card Sharp.");
@@ -219,7 +231,7 @@
     } else {
       game.lost += 1; game.net -= g.stake;
       state.minigames.diceWinnings = (state.minigames.diceWinnings || 0) - g.stake; // net (Card Sharp)
-      M().say(state, game, D().lines.lose);
+      M().say(state, game, LN(game.node).lose);
     }
     return game;
   }
@@ -254,14 +266,14 @@
   function settle(state, game, p) {
     if (p.op === "size") {
       game.sized = p.outcome;
-      M().say(state, game, D().lines.size[p.outcome]);
+      M().say(state, game, LN(game.node).size[p.outcome]);
       return game;
     }
     if (p.op === "cheat") {
       var g = game.round;
       if (p.outcome === "setback") return caught(state, game, "setback");
       g.peeked.push(p.data.index);
-      M().say(state, game, D().lines.cheat[p.outcome]);
+      M().say(state, game, LN(game.node).cheat[p.outcome]);
       if (p.outcome === "partial") {
         game.marks += 1;
         if (game.marks >= D().MARKS_TO_CATCH) return caught(state, game, "marks");
@@ -275,7 +287,7 @@
   // faction drops (black Standing at Ocracoke, §18.3).
   function caught(state, game, why) {
     var g = game.round;
-    M().say(state, game, (D().lines.caughtWhy && D().lines.caughtWhy[why] ? D().lines.caughtWhy[why] + " " : "") + D().lines.caught);
+    M().say(state, game, (D().lines.caughtWhy && D().lines.caughtWhy[why] ? D().lines.caughtWhy[why] + " " : "") + LN(game.node).caught);
     g.caughtWhy = why || null;
     var faction = PC.node.nodeData(game.node).faction;
     PC.scenes.applyEffect(state, { standing: { faction: faction, delta: D().CAUGHT_STANDING } });
@@ -294,7 +306,7 @@
       var g = game.round;
       g.over = true; g.won = false; g.forfeit = true;
       game.lost += 1; game.net -= g.stake;
-      M().say(state, game, D().lines.forfeit);
+      M().say(state, game, LN(game.node).forfeit);
     }
     game.round = null;
     game.over = true;

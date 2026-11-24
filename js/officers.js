@@ -75,6 +75,16 @@
 
   // ---- Generated candidates (§25.1, §25.7) ---------------------------------
 
+  // A node can lean its candidates toward some types (Norfolk: Gunner and
+  // Navigator at double weight, ex-navy, §17.4.4).
+  function officerType(node, r, one) {
+    var w = node && PC.data.nodes[node] && PC.data.nodes[node].officerTypeWeights;
+    if (!w) return one(C().OFFICER_TYPES).id;
+    var weights = {};
+    C().OFFICER_TYPES.forEach(function (t) { weights[t.id] = w[t.id] || 1; });
+    return PC.npcs.weighted(r, weights);
+  }
+
   function generate(state, node, key, id) {
     var rec = PC.npcs.generate(state, { id: id, role: "Officer", pool: "master", node: null, key: key, persistent: false });
     var r = PC.rng.fromKey(key + "|officer");
@@ -89,7 +99,7 @@
     var o = {
       id: id, first: rec.first, last: rec.last, nickname: rec.nickname || null, full: rec.full, gender: rec.gender,
       age: 20 + Math.floor(r() * 41), // 20-60 (§25.1)
-      type: one(C().OFFICER_TYPES).id, level: 1,
+      type: officerType(node, r, one), level: 1,
       voice: voice, secondary: secondary,
       drive: one(C().DRIVES), fear: one(C().FEARS),
       approval: 0, aboard: "flagship", wounded: false, sacrificeUsed: false,

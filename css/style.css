@@ -587,3 +587,18 @@ details.stats > summary { cursor: pointer; color: var(--faded); font-style: ital
 .sliderwrap .ticks i b { display: block; width: 1.5px; height: 7px; margin: 0 auto 3px; background: #6b5030; }
 /* Liar's Dice: the opponent's name, smaller (B20). */
 h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
+
+/* ---- The chart (Milestone 7, §38.8): a placeholder map drawn in code ---- */
+.mapwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 6px 0 12px; border: 1px solid var(--rule); box-shadow: 0 0 0 4px var(--parchment), 0 0 0 5px var(--rule-soft); }
+.mapbox { position: relative; min-width: 860px; aspect-ratio: 3 / 2; }
+.mapbox .mapsvg, .mapbox .mapimg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.mapnode { all: unset; position: absolute; transform: translate(-50%, -50%); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; z-index: 2; }
+.mapnode .dot { width: 18px; height: 18px; border-radius: 50%; background: #7a2416; border: 2px solid #efe3c6; box-shadow: 0 0 0 1.5px #4a3418; }
+.mapnode .lab { font-family: var(--sc); font-size: 17px; letter-spacing: .04em; color: var(--ink); background: rgba(239,227,198,.85); padding: 0 6px; border-radius: 2px; white-space: nowrap; }
+.mapnode.ocean .dot { width: 14px; height: 14px; background: var(--sea); border-radius: 3px; transform: rotate(45deg); }
+.mapnode.uncharted { opacity: .45; }
+.mapnode.uncharted .dot { background: #8c7a5a; }
+.mapnode.here .dot { box-shadow: 0 0 0 1.5px #4a3418, 0 0 0 6px rgba(201,159,69,.55); }
+.mapnode.live:hover .lab, .mapnode.sel .lab, .mapnode:focus-visible .lab { background: #f6ecd4; outline: 2px solid var(--gilt); }
+.destcard { max-width: 680px; }
+.destcard .flag { width: 18px; height: 12px; vertical-align: -1px; margin-right: 6px; }

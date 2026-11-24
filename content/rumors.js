@@ -26,9 +26,9 @@
 
     pool: [
       // Legend
-      { id: "legend_lantern", type: "Legend", text: "\"They say that you can see a lantern burning out on the wrecks at night. I don't know who could be lighting it.\"" },
-      { id: "legend_voice", type: "Legend", text: "\"Fisherman swears he heard a voice coming from the Graveyard last night. Said it kept saying the same thing over and over again. Wouldn't tell me what.\"" },
-      { id: "legend_giant_shark", type: "Legend", text: "\"Heard some sailors say they saw a shark the length of a frigate. Sharks can't grow that big, can they?\"" },
+      { id: "legend_lantern", node: "ocracoke", type: "Legend", text: "\"They say that you can see a lantern burning out on the wrecks at night. I don't know who could be lighting it.\"" },
+      { id: "legend_voice", node: "ocracoke", type: "Legend", text: "\"Fisherman swears he heard a voice coming from the Graveyard last night. Said it kept saying the same thing over and over again. Wouldn't tell me what.\"" },
+      { id: "legend_giant_shark", node: "ocracoke", type: "Legend", text: "\"Heard some sailors say they saw a shark the length of a frigate. Sharks can't grow that big, can they?\"" },
 
       // Danger (they name a real danger spot this season, §30.9)
       { id: "danger_patrol", type: "Danger", spot: "Patrol", text: "\"They're saying the guards at [Node] are cracking down on smuggling. Best not to have any dirty goods in your hold when you dock there.\"" },
@@ -41,18 +41,18 @@
       { id: "ws_opportunist_2", type: "World State", posture: "Opportunist", text: "\"Business is booming in Nassau. Prices are higher for just about everything.\"" },
       { id: "ws_hunter_1", type: "World State", posture: "Hunter", text: "\"Seems like Frisian warships are everywhere down south. They're hanging pirates in St. Augustine by the dozen.\"" },
       { id: "ws_hunter_2", type: "World State", posture: "Hunter", text: "\"Frisians seem mad about something. Mad enough to scour the seas looking for pirates to hang.\"" },
-      { id: "ws_loyalists", type: "World State", text: "\"Lot of speculation from these boys about where Amber Jack is hiding and whether he'll come back for them. I think he's long gone.\"" },
+      { id: "ws_loyalists", node: "ocracoke", type: "World State", text: "\"Lot of speculation from these boys about where Amber Jack is hiding and whether he'll come back for them. I think he's long gone.\"" },
 
       // Reputation (§30.11: a recent deed, then the Dread band, then the newcomer)
-      { id: "rep_tp_humiliated", type: "Reputation", deed: true, when: { flag: "tp_humiliated" }, text: "\"Did you hear about the newcomer that pushed Twopenny over? Whole beach is still laughing about it.\"" },
-      { id: "rep_tp_beat_you", type: "Reputation", deed: true, when: { flag: "tp_beat_you" }, text: "\"Twopenny's been telling everyone he whipped the new captain in a fight. It's a bit hard to believe.\"" },
-      { id: "rep_shark_killed", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain {captain.last} killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
+      { id: "rep_tp_humiliated", node: "ocracoke", type: "Reputation", deed: true, when: { flag: "tp_humiliated" }, text: "\"Did you hear about the newcomer that pushed Twopenny over? Whole beach is still laughing about it.\"" },
+      { id: "rep_tp_beat_you", node: "ocracoke", type: "Reputation", deed: true, when: { flag: "tp_beat_you" }, text: "\"Twopenny's been telling everyone he whipped the new captain in a fight. It's a bit hard to believe.\"" },
+      { id: "rep_shark_killed", node: "ocracoke", type: "Reputation", deed: true, when: { flag: "shark_killed" }, text: "\"Ollie's been telling everyone that Captain {captain.last} killed a huge shark with just {captain.his} knife. He's not one to exaggerate, either.\"" },
       { id: "rep_asking", type: "Reputation", deed: true, when: { seasonFlag: "gi_asked" }, text: "PLACEHOLDER (line to write, §30.4): the next Reputation rumor here is about the captain asking questions." },
       { id: "rep_dread_20", type: "Reputation", dread: [20, 39], text: "\"[Player] is definitely not someone you want to cross.\"" },
       { id: "rep_dread_40", type: "Reputation", dread: [40, 69], text: "\"Merchants from here to Havana are terrified of the [Ship].\"" },
       { id: "rep_dread_70", type: "Reputation", dread: [70, 100], text: "\"Even just hearing the name [Player] strikes fear in the hearts of sailors.\"" },
-      { id: "rep_newcomer_1", type: "Reputation", newcomer: true, text: "\"Did you see that new sloop in the cove? Doesn't look all that fast to me.\"" },
-      { id: "rep_newcomer_2", type: "Reputation", newcomer: true, text: "\"New fellow that just arrived is looking for someone. Him and everyone else here.\"" },
+      { id: "rep_newcomer_1", node: "ocracoke", type: "Reputation", newcomer: true, text: "\"Did you see that new sloop in the cove? Doesn't look all that fast to me.\"" },
+      { id: "rep_newcomer_2", node: "ocracoke", type: "Reputation", newcomer: true, text: "\"New fellow that just arrived is looking for someone. Him and everyone else here.\"" },
 
       // Prize (rare): the special ship joins the next hunt in her waters (Milestone 5)
       { id: "prize_licorne", type: "Prize", ship: "Licorne", waters: "northern", text: "\"Heard the *Licorne* is still running loose up the banks, full of Charleston silver.\"" },

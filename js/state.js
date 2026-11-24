@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 7;
+  var SAVE_VERSION = 8;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -50,8 +50,21 @@
     addMilestone3Fields(state);
     addMilestone4Fields(state);
     addMilestone5Fields(state);
+    addMilestone7Fields(state);
     if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
+  }
+
+  // Milestone 7: the map, voyages and the season loop (§4, §26.9, §27.7).
+  function addMilestone7Fields(state) {
+    if (state.tradeShip === undefined) state.tradeShip = null;   // §27.7
+    if (state.split === undefined) state.split = null;           // the Winter split in progress (§26.9)
+    if (state.splitWinter === undefined) state.splitWinter = null;
+    if (state.voyage === undefined) state.voyage = null;
+    state.yearStart = state.yearStart || { year: state.time.year, purse: state.money.purse, crew: state.money.crew, prizes: (state.records && state.records.prizes) || 0 };
+    if (state.crew && state.crew.pressure == null) state.crew.pressure = 0;
+    // A node's later-added slots (the Trade Master) fill now.
+    if (state.location && state.location.node && PC.node) PC.node.initNode(state, state.location.node);
   }
 
   // UI pass 1 (the Creator chat, §11.4, §14.2): five skills cut or merged,
@@ -162,6 +175,7 @@
     if (state.time.season >= SEASONS.length) { state.time.season = 0; state.time.year += 1; }
     state.ap.left = state.ap.max;
     state.rerollsUsed = {};
+    if (state.time.season === 0) state.yearStart = { year: state.time.year, purse: state.money.purse, crew: state.money.crew, prizes: (state.records && state.records.prizes) || 0 };
     addLog(state, "— " + seasonName(state) + " " + state.time.year + " begins. —");
   }
 
@@ -220,6 +234,11 @@
       // Milestone 5: the fleet, captives aboard, prize records, grudges.
       addMilestone5Fields(data);
       data.saveVersion = 7;
+    }
+    if (data.saveVersion === 7) {
+      // Milestone 7: voyages and the season loop; Ocracoke's Trade Master.
+      addMilestone7Fields(data);
+      data.saveVersion = 8;
     }
     return data;
   }

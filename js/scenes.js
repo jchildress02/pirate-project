@@ -53,6 +53,9 @@
       return Array.isArray(cond.season) ? cond.season.indexOf(s) >= 0 : cond.season === s;
     }
     if (cond.gold) return (state.money[cond.gold.pot] || 0) >= cond.gold.atLeast;
+    if (cond.minYear) return state.time.year >= cond.minYear;
+    if (cond.maxYear) return state.time.year <= cond.maxYear;
+    if (cond.node) return !!(state.location && state.location.node === cond.node);
     throw new Error("Unknown condition: " + JSON.stringify(cond));
   }
 

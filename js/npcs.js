@@ -224,6 +224,8 @@
   // ID plus a replacement counter. Locked once drawn.
   function fillSlot(state, slot) {
     state.generated = state.generated || {};
+    // A Named NPC in a slot (Horace at Norfolk's Tavern) is authored, not drawn.
+    if (slot.fixed) { state.npcs[slot.id] = state.npcs[slot.id] || {}; return PC.data.npcs[slot.id]; }
     if (state.generated[slot.id]) return state.generated[slot.id];
     var d = (state.npcs[slot.id] = state.npcs[slot.id] || {});
     var rec = generate(state, {

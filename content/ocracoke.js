@@ -45,7 +45,13 @@
       { key: "keeper", id: "ocr_keeper", role: "Tavern Keeper", label: "the tavern keeper", place: "tavern", node: "ocracoke" },
       { key: "shipwright", id: "ocr_shipwright", role: "Craftsman", label: "the shipwright", place: "docks", node: "ocracoke" },
       { key: "provisioner", id: "ocr_provisioner", role: "Merchant", label: "the provisioner", place: "merchant", node: "ocracoke" },
+      // Milestone 7: the Trade Master (§17.2, §27.7). Norfolk's lines serve as his role lines.
+      { key: "trademaster", id: "ocr_trademaster", role: "Merchant", label: "the Trade Master", place: "merchant", node: "ocracoke" },
     ],
+    placeOrder: ["tavern", "docks", "merchant", "graveyard", "ship"],
+    firstTavernFlag: "ocr_first_tavern_done",
+    zone: "north",
+    draft: "Shallow",              // a shallow harbor (§42.7)
 
     locations: {
       tavern: { name: "Tavern", blurb: "The tavern consists of three shacks nailed together. With only a simple bar and a wide assortment of tables and chairs, the tavern hosts the most pathetic group of sad sacks this side of the Atlantic." },
