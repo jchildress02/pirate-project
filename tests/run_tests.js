@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/norfolk.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -2656,6 +2656,88 @@ test("a version 7 save loads as version 8 with the trade ship and season-loop fi
   old.saveVersion = 7; delete old.tradeShip; delete old.split; delete old.yearStart; delete old.generated.ocr_trademaster;
   var back = PC.state.deserialize(JSON.stringify(old));
   eq(back.saveVersion, 8); eq(back.tradeShip, null); ok(back.yearStart); ok(back.generated.ocr_trademaster);
+});
+
+
+console.log("Milestone 7, PR 3: weather (§42)");
+
+test("the outlook is seeded and known a season ahead; Hurricane 1754 in the north is fixed Foul", function () {
+  var s = m7("wx1");
+  eq(PC.weather.outlookAt(s, "north", 1754, 2), "Foul");
+  var a = PC.weather.outlookAt(s, "south", 1755, 1), b = PC.weather.outlookAt(s, "south", 1755, 1);
+  eq(a, b);
+  s.time.season = 0; eq(PC.weather.nextOutlook(s, "south"), PC.weather.outlookAt(s, "south", 1754, 1));
+});
+
+test("conditions: Summer doubles Calm, Spring doubles Fog in the north; a Foul outlook never rolls Calm", function () {
+  var s = m7("wx2"); s.time.season = 1;
+  eq(PC.weather.conditionWeights(s, "Fair", "north")[0], 40);
+  s.time.season = 0;
+  eq(PC.weather.conditionWeights(s, "Fair", "north")[3], 20);
+  eq(PC.weather.conditionWeights(s, "Fair", "south")[3], 10);
+  eq(PC.data.weather.CONDITION.Foul[0], 0);
+});
+
+test("each hunt batch rolls a condition; a Storm batch makes a Ride Out Storm check first; density drops", function () {
+  var s = m7("wx3"), real = PC.weather.rollCondition;
+  PC.weather.rollCondition = function () { return "Storm"; };
+  var hull = s.ship.hull, g;
+  try { withDice([1, 1], function () { g = PC.hunt.start(s); }); } finally { PC.weather.rollCondition = real; }
+  eq(g.batch.condition, "Storm");
+  ok(s.ship.hull < hull, "a setback costs hull");
+  ok(PC.huntGen.density(s, "Storm") < PC.huntGen.density(s, "Fair"));
+});
+
+test("Read Weather before a batch: clean reveals the next condition and rerolls a Storm once", function () {
+  var s = m7("wx4"), g = PC.hunt.start(s);
+  g.phase = "batchEnd";
+  var calls = 0, real = PC.weather.rollCondition;
+  PC.weather.rollCondition = function () { calls++; return calls === 1 ? "Storm" : "Fair"; };
+  try { withDice([6, 6], function () { PC.hunt.readAhead(s, g); }); } finally { PC.weather.rollCondition = real; }
+  eq(g.readAhead.seen, "Fair"); ok(g.readAhead.rerolled);
+  PC.hunt.anotherBatch(s, g);
+  eq(g.batch.condition, "Fair");
+});
+
+test("in battle: Calm slows ships without sweeps; Fog: no pre-battle flee roll; Rough: the smaller ship's Exchange −1", function () {
+  var s = m7("wx5");
+  var bq = aShip(s, "Barque", "Trade", "Avalon");
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  g.batch.condition = "Calm";
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  var b = g.battle;
+  eq(PC.combat.ship(s, b, bq.id).speed, 1);
+  eq(PC.combat.ship(s, b, "flagship").speed, s.ship.speed); // a sloop has sweeps
+  b.condition = "Rough";
+  var parts = PC.combat.weatherParts(s, b, "exchange");
+  ok(parts.some(function (p) { return p.value === -1; }), "the sloop is the smaller ship");
+  b.condition = "Fog";
+  ok(PC.combat.weatherParts(s, b, "flee")[0].value === 1);
+});
+
+test("a hurricane strike hits ships in an open harbor, spares the shallows, never sinks", function () {
+  var s = m7("wx6"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  s.time.year = 1755; s.time.season = 2;
+  var real = PC.weather.outlook; PC.weather.outlook = function () { return "Foul"; };
+  var hull = s.ship.hull, out = { lines: [], chips: [] };
+  try { PC.weather.strike(s, "north", out, { fixed: true }); } finally { PC.weather.outlook = real; }
+  ok(s.ship.hull < hull && s.ship.hull >= 1);
+  var s2 = m7("wx7"); s2.time.year = 1755; s2.time.season = 2; var h2 = s2.ship.hull, o2 = { lines: [], chips: [] };
+  PC.weather.strike(s2, "north", o2, { fixed: true });
+  eq(s2.ship.hull, h2); ok(/shallows/.test(o2.lines[0]));
+});
+
+test("Hurricane 1754: the north's strike comes as the season opens", function () {
+  var s = m7("wx8"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  s.time.season = 1; var hull = s.ship.hull;
+  var out = PC.world.endSeason(s);
+  eq(PC.state.seasonName(s), "Hurricane");
+  ok(out.hurricane && out.hurricane[0].hit, "struck at Norfolk"); ok(s.ship.hull < hull);
+});
+
+test("the Winter salvage bonus applies to ordinary Graveyard dives in Winter, never the Miranda", function () {
+  ok(PC.weather.winterSalvage({ time: { year: 1754, season: 3 } }, {}) === true);
+  ok(PC.weather.winterSalvage({ time: { year: 1754, season: 3 } }, { miranda: true }) === false);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

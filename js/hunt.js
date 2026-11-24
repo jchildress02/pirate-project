@@ -43,6 +43,15 @@
     };
     M().start(state, game, "node");
     M().say(state, game, L().setOut);
+    // Read Weather rolls itself before a port hunt (§42.6); its result
+    // rides on the hunt's storm check (voyage events, §44.7).
+    game.zone = waters;
+    if (!PC.node.isOcean(state.location.node)) {
+      game.readWeather = PC.weather.autoRead(state, waters, [state.world.seed, PC.state.stamp(state), game.key, "read"].join("|"));
+      M().noteRoll(game, { label: "Read Weather", outcome: game.readWeather.outcome, effect: { clean: "a storm on the way out is redrawn once, and +1 to ride one out", partial: "+1 to ride out a storm", setback: "no help from the sky" }[game.readWeather.outcome] });
+    }
+    if (PC.voyageEvents && PC.voyageEvents.huntLeg) PC.voyageEvents.huntLeg(state, game, "out");
+    if (state.minigame !== game || game.over) return game;
     newBatch(state, game);
     return game;
   }
@@ -74,8 +83,13 @@
     var r = M().rand(state, game, "batch");
     var force = game.force;
     var hunter = force && force.kind === "hunter" ? force.flag || "Avalon" : G().rollHunter(state, game.waters, r);
-    game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force };
+    // The batch's weather (§42.4): rolled now, or read ahead (§42.6).
+    var cond = game.nextCondition || PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition"));
+    game.nextCondition = null; game.readAhead = null;
+    game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force, condition: cond };
     game.force = null;
+    M().say(state, game, "The weather: " + PC.weather.badge(cond) + ".");
+    if (cond === "Storm") stormBatch(state, game);
     // A vacant Quartermaster's post is filled at the next voyage event
     // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
     // save with the post empty is caught here too.
@@ -87,6 +101,45 @@
       return;
     }
     reveal(state, game);
+  }
+
+  // A Storm batch (§42.4): a Ride Out Storm check (DR 2) before its rolls.
+  // Clean, no loss; partial -5% hull; setback -10% hull and -5 morale.
+  function stormCheck(state) {
+    var extra = [];
+    var nav = (state.officers || []).some(function (o) { return !o.gone && o.type === "Navigator" && (o.aboard || "flagship") === "flagship" && (o.level || 1) >= 2; });
+    if (nav) extra.push({ label: "Navigator", value: 1 });
+    var salt = (state.officers || []).some(function (o) { return !o.gone && (o.voice === "Old Salt" || o.secondary === "Old Salt"); });
+    if (salt) extra.push({ label: "Old Salt aboard", value: 1 }); // crew checks in storms, don't stack (§42.9)
+    return { type: "Ride Out Storm", dr: PC.data.weather.STORM_BATCH_DR, extra: extra };
+  }
+  function stormBatch(state, game) {
+    var r = PC.checks.resolve(state, stormCheck(state), M().key(state, game, "storm-batch"), { conditions: ["Storm"] });
+    var sh = state.ship, lost = 0, morale = 0;
+    if (r.outcome === "partial") lost = Math.max(1, Math.round(sh.hullMax * 0.05));
+    if (r.outcome === "setback") { lost = Math.max(1, Math.round(sh.hullMax * 0.10)); morale = 5; }
+    if (lost) sh.hull = Math.max(1, sh.hull - lost);
+    if (morale) PC.crew.addMorale(state, -morale);
+    M().say(state, game, PC.data.weather.lines.stormBatch[r.outcome]);
+    M().noteRoll(game, { label: "Ride Out Storm", outcome: r.outcome, effect: lost ? "hull −" + lost + (morale ? ", morale −" + morale : "") : "no damage" });
+    return r.outcome;
+  }
+
+  // Read Weather before a batch (§42.6): optional, 0 AP, once a batch.
+  // Clean: see the next batch's condition, and reroll it once if Storm.
+  // Partial: see it. Setback: nothing.
+  function canReadAhead(state, game) { return game.phase === "batchEnd" && !game.readAhead && state.ap.left >= 1 && game.apUsed < H().MAX_AP; }
+  function readAhead(state, game) {
+    if (!canReadAhead(state, game)) throw new Error("Not the moment for that.");
+    var r = PC.checks.resolve(state, PC.weather.readCheck(state, game.waters), M().key(state, game, "read-ahead"), { conditions: [] });
+    var c = PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition"));
+    var rerolled = false;
+    if (r.outcome === "clean" && c === "Storm") { c = PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition-reroll")); rerolled = true; }
+    game.nextCondition = c;
+    game.readAhead = { outcome: r.outcome, seen: r.outcome !== "setback" ? c : null, rerolled: rerolled };
+    M().noteRoll(game, { label: "Read Weather", outcome: r.outcome, effect: r.outcome === "setback" ? "the sky tells you nothing" : "the next batch: " + PC.weather.badge(c) + (rerolled ? " (the storm passes by)" : "") });
+    M().say(state, game, r.outcome === "setback" ? "PLACEHOLDER: You study the sky, but it tells you nothing." : "PLACEHOLDER: You study the sky. Next: " + PC.weather.badge(c) + ".");
+    return game.readAhead;
   }
 
   // ---- The Vote (§25.9, the template §25.15) ------------------------------------
@@ -126,7 +179,7 @@
     var grp = null;
     if (i === 0 && b.hunter) grp = G().sighting(state, game.waters, r, { kind: "hunter", flag: b.hunter });
     else if (b.force && i === 0) grp = G().sighting(state, game.waters, r, b.force);
-    else if (r() < G().density(state) || (i === b.n - 1 && !b.found)) grp = G().sighting(state, game.waters, r);
+    else if (r() < G().density(state, b.condition) || (i === b.n - 1 && !b.found)) grp = G().sighting(state, game.waters, r);
     if (grp) { b.found += 1; game.sighting = grp; game.phase = grp.hunter ? "hunter" : "scout"; M().say(state, game, grp.hunter ? L().hunter : L().sail); }
     else { game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]); }
   }
@@ -679,6 +732,9 @@
       phase: game.phase, apUsed: game.apUsed, apLeft: state.ap.left, maxAp: H().MAX_AP,
       vote: game.vote || null, lastApproval: game.lastApproval || null,
       batch: game.batch ? { n: game.batch.n, next: game.batch.next } : null,
+      condition: game.batch ? game.batch.condition : null, outlook: PC.weather.outlook(state, game.waters),
+      canReadAhead: canReadAhead(state, game), readAhead: game.readAhead || null,
+      readCheck: PC.weather.readCheck(state, game.waters),
       waters: H().WATERS[game.waters].name, scout: sv, advice: advice(state, game, sv), qm: qm ? qm.first || qm.full : null,
       battle: game.battle && game.phase === "battle" ? C().view(state, game) : null,
       after: game.after ? {
@@ -747,6 +803,7 @@
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
+    canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
   };

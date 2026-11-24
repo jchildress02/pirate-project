@@ -602,3 +602,8 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .mapnode.live:hover .lab, .mapnode.sel .lab, .mapnode:focus-visible .lab { background: #f6ecd4; outline: 2px solid var(--gilt); }
 .destcard { max-width: 680px; }
 .destcard .flag { width: 18px; height: 12px; vertical-align: -1px; margin-right: 6px; }
+
+/* Weather badges (§42.10): text stand-ins until the art chat's icons. */
+.wx { display: inline-block; font-family: var(--sc); font-size: 15px; letter-spacing: .03em; padding: 0 7px; border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,251,238,.7); color: var(--sea); white-space: nowrap; vertical-align: 1px; }
+.wx-foul, .wx-storm { color: var(--bad); border-color: var(--bad); }
+.wx-unsettled, .wx-rough, .wx-fog { color: var(--mid); }

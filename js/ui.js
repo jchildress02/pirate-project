@@ -406,6 +406,7 @@
     return '<header class="topbar"><div><span class="brand">Pirate Chronicle</span><span class="wt">(working title)</span></div>' +
       '<span class="when">' + esc(PC.state.seasonName(state)) + " " + state.time.year + "</span>" +
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
+      (state.location && PC.weather ? wxBadge(PC.weather.outlook(state, PC.weather.zoneHere(state)), "This season's weather here (" + PC.weather.zoneHere(state) + ")") : "") +
       // On a phone the strip scrolls away, so the gold rides in the sticky bar (the author's phone notes).
       '<span class="pgold">Purse ' + gold(state.money.purse) + " · Crew " + gold(state.money.crew) + "</span>" +
       '<span class="grow"></span>' + seal() +
@@ -1381,6 +1382,8 @@
   function graveyardMenu() {
     var S = PC.data.minigames.salvage;
     var greet = (S.greetings || {})[String(Math.max(-1, Math.min(3, PC.npcs.rung(state, "ollie"))))] || (S.greetings || {})["0"] || "";
+    // Ollie's Winter line, the first Graveyard visit each Winter (§42.8).
+    if (state.location.ollieWinter) greet = PC.data.weather.lines.ollieWinter;
     var html = '<div class="block"><div class="person">' + castFrame("ollie").replace('class="castframe"', 'class="castframe" style="flex:0 0 100px"').replace(/width:150px/g, "width:100px") +
       '<div class="pmain">' + nameCard("ollie", "Dive host") + '<div class="say">' + inline(greet) + "</div></div></div>";
     // A Dying Pirate's Wish: the Miranda is the only wreck until the mermaid comes up (§18.2).
@@ -1615,11 +1618,22 @@
     if (v.batch) bits.push("sighting " + Math.min(v.batch.next, v.batch.n) + " of " + v.batch.n + " this action");
     bits.push("hold " + (v.holdMax - v.holdFree) + " of " + v.holdMax);
     if (v.prizesTaken) bits.push(plural(v.prizesTaken, "prize") + " taken");
-    return '<p class="small" style="margin:0 0 8px">' + esc(bits.join(" · ")) + "</p>";
+    return '<p class="small" style="margin:0 0 8px">' + (v.condition ? wxBadge(v.condition) + " " : "") + esc(bits.join(" · ")) + "</p>";
   }
 
-  // The scouting card (§22.3): only what a lookout could see.
+  // A weather word as a text badge (§42.10) until the art chat's icons.
+  function wxBadge(word, title) {
+    if (!word || !PC.weather) return "";
+    return '<span class="wx wx-' + esc(String(word).toLowerCase()) + '" title="' + esc(title || "The weather") + '">' + esc(PC.weather.badge(word)) + "</span>";
+  }
+
+  // The scouting card (§22.3): only what a lookout could see. In Fog, only
+  // her class until the battle opens (§42.4).
   function scoutCard(s, v) {
+    if (v && v.condition === "Fog") {
+      return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">A ' + esc(s.cls) + ' <span class="note">· half-seen in the fog</span></h4>' +
+        '<p class="small" style="margin:4px 0"><i>The lookout: PLACEHOLDER: "Can\'t make out her colors in this murk, Captain."</i></p></div></div>';
+    }
     var rows = [["Flag", s.flag], ["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
       ["Speed", s.speed + " · " + s.handling], ["Draft", s.draft], ["Carries", s.lootTypes.join(", ")], ["Loot", s.loot]];
     return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + dirtyName("A " + s.cls + (s.name ? ", the " + s.name : ""), s.flag !== "Pirate") + ' <span class="note">· ' + esc(s.role === "War" ? "warship" : s.role === "Raider" ? "raider" : s.role === "Hybrid" ? "armed trader" : "merchant") + "</span></h4>" +
@@ -1658,6 +1672,9 @@
     } else if (H.phase === "after") {
       html += afterPanel(H.after, H);
     } else if (H.phase === "batchEnd") {
+      if (H.canReadAhead) html += opts([opt({ act: "hreadwx", label: "Read the weather (optional)", check: chk(H.readCheck),
+        meta: "No action · once a batch. Clean: see the next batch's weather, and if it's a storm, wait it out (reroll once). Partial: see it. Setback: nothing." })]);
+      else if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + "</p>";
       html += '<p>The horizon is empty for now.</p><div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
@@ -1706,7 +1723,7 @@
   function battleShips(b) {
     var html = '<div class="battle"><div class="bside"><div class="h4">Your side</div>' + b.mine.map(function (s) { return shipRow(s, false, false); }).join("") + "</div>" +
       '<div class="bside"><div class="h4">Theirs</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
-    if (b.ca != null) html += '<p class="sc" style="margin:6px 0">Round ' + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
+    if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
   }
 
@@ -2384,6 +2401,8 @@
 
   function enterPlace(place) {
     var fire = N().enter(state, place);
+    state.location.ollieWinter = false;
+    if (place === "graveyard" && isWinter() && state.flags.ollieWinterSeen !== PC.state.stamp(state)) { state.flags.ollieWinterSeen = PC.state.stamp(state); state.location.ollieWinter = true; }
     diveZone = null; drinkSpot = null;
     state.location.said = {}; state.location.bark = null; state.location.say = null;
     if (fire) PC.scenes.enterScene(state, fire);
@@ -2500,6 +2519,7 @@
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
+    "hreadwx": function () { markLog(); PC.hunt.readAhead(state, state.minigame); },
     "hhome": function () { PC.hunt.sailHome(state, state.minigame); PC.minigames.leave(state); },
     "sellhull": function (el) {
       var id = who("shipwright");

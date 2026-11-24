@@ -58,18 +58,28 @@
 
   function tableFor(zone, type) { return zone === "cabin" ? zone + "_" + (type === "frigate" ? "frigate" : "brig") : zone; }
 
-  function rollItem(r, zone, type) {
+  // winter: the Winter salvage bonus (§42.8): +5 points on the better tiers
+  // (taken from junk) and +25% quantity on treasure and provisions finds.
+  function rollItem(r, zone, type, winter) {
     var t = tableFor(zone, type);
-    var tier = M().weighted(r, D().TIERS[t]);
+    var weights = D().TIERS[t];
+    if (winter && PC.data.weather) {
+      weights = JSON.parse(JSON.stringify(weights));
+      var add = PC.data.weather.WINTER_SALVAGE.goodFind;
+      var take = Math.min(add, weights.junk || 0);
+      if (take) { weights.junk -= take; weights.treasure = (weights.treasure || 0) + take; }
+    }
+    var tier = M().weighted(r, weights);
+    var q = winter && PC.data.weather ? PC.data.weather.WINTER_SALVAGE.quantity : 1;
     var y = D().YIELDS[t] || {};
     if (tier === "junk") return { tier: "junk", line: M().pick(r, D().junk) };
-    if (tier === "supplies") return { tier: "supplies", provisions: M().between(r, y.supplies[0], y.supplies[1]) };
+    if (tier === "supplies") return { tier: "supplies", provisions: Math.round(M().between(r, y.supplies[0], y.supplies[1]) * q) };
     if (tier === "goods") {
       var w = {}; y.goods.forEach(function (g, i) { w[i] = g[3]; });
       var g = y.goods[M().weighted(r, w)];
       return { tier: "goods", good: g[0], n: M().between(r, g[1], g[2]) };
     }
-    if (tier === "treasure") return { tier: "treasure", treasure: M().between(r, y.treasure[0], y.treasure[1]), gold: M().between(r, y.gold[0], y.gold[1]) };
+    if (tier === "treasure") return { tier: "treasure", treasure: Math.round(M().between(r, y.treasure[0], y.treasure[1]) * q), gold: M().between(r, y.gold[0], y.gold[1]) };
     var rare = r() < (y.rare || 0);
     return { tier: "item", item: M().pick(r, D().ITEMS[rare ? "rare" : "uncommon"]), rare: rare };
   }
@@ -109,9 +119,10 @@
     var key = "dive|" + (opts.miranda ? "miranda-" + ((state.rolls.miranda = (state.rolls.miranda || 0) + 1)) : w.id);
     var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), key, "loot"].join("|"));
     var zones = {};
+    var winter = PC.weather ? PC.weather.winterSalvage(state, opts) : false;
     D().ZONES[w.type].forEach(function (z) {
       var items = [];
-      for (var i = 0; i < D().SLOTS; i++) items.push(rollItem(r, z, w.type));
+      for (var i = 0; i < D().SLOTS; i++) items.push(rollItem(r, z, w.type, winter));
       zones[z] = { dr: (w.zoneDr && w.zoneDr[z] != null) ? w.zoneDr[z] : D().ZONE_DR[z], mod: 0, items: items, next: 0, scouted: -1 };
     });
     if (opts.miranda) zones[D().miranda.quest.zone].items[0] = { tier: "quest", item: D().miranda.quest.item };

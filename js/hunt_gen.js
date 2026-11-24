@@ -50,9 +50,11 @@
 
   // ---- Step 2-4 -------------------------------------------------------------
 
-  function density(state) {
+  // cond: the batch's weather (§42.4) takes points off; the clamp holds.
+  function density(state, cond) {
     var D = H().DENSITY;
-    return clamp(D.base + (D.season[seasonOf(state)] || 0), D.min, D.max) / 100;
+    var w = cond && PC.data.weather ? (PC.data.weather.DENSITY[cond] || 0) : 0;
+    return clamp(D.base + (D.season[seasonOf(state)] || 0) + w, D.min, D.max) / 100;
   }
 
   function flagWeights(state, waters) {
