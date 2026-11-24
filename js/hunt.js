@@ -467,7 +467,7 @@
     if (loot.chest) chips.push(mchip("gold", "chest:" + pot, loot.chest, "Ship's chest: {n} gold to " + (pot === "purse" ? "your purse" : "crew gold"), "mid"));
     // Her cargo into the pooled hold: what the player picked (A7), or the
     // densest first when nothing was picked (the sim, §22.7).
-    var dirty = e.flag !== "Pirate";
+    var dirty = !PC.letters.legitimate(state, e.flag); // clean if a pirate or covered by your letter (§22.4)
     var taken = ch.cargo ? loadPicked(state, loot, dirty, ch.cargo) : loadCargo(state, loot, dirty);
     // Goods leave the chip list (they were picked on the screen); provisions stay (A10).
     taken.forEach(function (t) { if (t.prov) chips.push(mchip("prov", "prov", t.prov, "+{n} provisions")); });
@@ -503,7 +503,15 @@
       var hf = e.flag === "Avalon" ? "avalon" : e.flag === "Frisia" ? "frisia" : null;
       if (hf && !executed) { PC.scenes.applyEffect(state, { heat: { faction: hf, delta: H().HUNTER_TAKEN_HEAT } }); out.push(mchip("heat", "heat:" + hf, H().HUNTER_TAKEN_HEAT, e.flag + " Heat {+n}", hf)); }
     } else {
+      // A covered prize (§28.3): the issuer +1 (at most +4 a season) and
+      // charges nothing; the other side still charges in full (§31.1).
+      var l = PC.letters.letter(state), covered = PC.letters.covers(state, e.flag);
+      if (covered) {
+        var g1 = PC.letters.coveredPrize(state), isf = PC.letters.issuer(l.issuer);
+        if (g1) out.push(mchip("standing", "standing:" + l.faction, g1, isf.factionName + " Standing {+n} (a lawful prize)", l.faction));
+      }
       ["Avalon", "Frisia"].forEach(function (fac) {
+        if (covered && fac.toLowerCase() === l.faction) return;
         var side = H().SIDES[fac][e.flag];
         if (!side) return;
         var kind = e.role === "War" ? "navy" : "merchant";
@@ -574,7 +582,7 @@
     var tiers = takeHands(state, e.crewMin);
     var rec = { id: e.id, kind: kind, cls: e.cls, name: e.name, flag: e.flag, role: e.role, size: e.size, hull: Math.max(1, e.hull), hullMax: e.hullMax,
       guns: e.guns, gunsMax: e.gunsMax, crew: e.crewMin, crewMin: e.crewMin, crewMax: e.crewMax, cargo: e.cargo, speed: e.speed,
-      handling: e.handling, rating: 3, dirty: e.flag !== "Pirate", crewTiers: tiers, wounded: 0 };
+      handling: e.handling, rating: 3, dirty: !PC.letters.legitimate(state, e.flag), crewTiers: tiers, wounded: 0 };
     if (kind === "fleet") {
       var o = (state.officers || []).filter(function (x) { return x.id === officerId && !x.gone; })[0]
         || (state.officers || []).filter(function (x) { return !x.gone && (x.aboard || "flagship") === "flagship" && !x.mentor; })[0];
@@ -602,7 +610,7 @@
     state.ship = {
       name: e.name || e.cls, type: e.cls, hull: Math.max(1, Math.round(e.hull)), hullMax: c.hull, baseHull: c.hull, guns: e.guns, gunsMax: c.guns,
       cargo: c.cargo, size: c.size, crewMin: c.crewMin, crewMax: c.crewMax, speed: c.speed, speedMax: c.speed, handling: c.handling,
-      rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: e.flag !== "Pirate", prizeOf: e.flag,
+      rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: !PC.letters.legitimate(state, e.flag), prizeOf: e.flag,
     };
   }
 
@@ -711,7 +719,7 @@
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
           draft: s.draft, cue: s.cue, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
-          legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s, state) };
+          legit: legitLine(state, s) };
       }),
     };
   }
@@ -730,6 +738,18 @@
       if (d > gap) { gap = d; best = k; }
     });
     return best;
+  }
+
+  // The scouting card's line on whether she's a lawful prize (§22.4).
+  function legitLine(state, s) {
+    if (s.flag === "Pirate") return "A pirate: always fair game, and her cargo is clean.";
+    var l = PC.letters.letter(state);
+    if (l && PC.letters.covers(state, s.flag)) {
+      var is = PC.letters.issuer(l.issuer);
+      var other = (is.faction === "avalon" && (s.flag === "Frisia" || s.flag === "Ireland")) ? " Frisia doesn't honor your letter: taking her still costs Frisian Standing and Heat." : "";
+      return "Your letter covers her: a lawful prize, and her cargo is clean. " + is.factionName + " Standing +1." + other;
+    }
+    return (l ? "Your letter doesn't cover her" : "You hold no letter") + ": her cargo will be dirty, and " + meterNote(s, state);
   }
 
   // A prize against a faction you stand at 40+ with is a betrayal (§28.6):
@@ -800,7 +820,7 @@
         o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
         return o;
       }),
-      dirty: e.flag !== "Pirate",
+      dirty: !PC.letters.legitimate(state, e.flag),
       // The hold as it stands, for the cargo picker's stacked bar (A7, B42).
       hold: { cap: PC.crew.holdCapacity(state), provisions: state.provisions, goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), per: PC.data.economy.TREASURE_PER_SLOT },
     };

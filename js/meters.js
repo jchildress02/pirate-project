@@ -171,7 +171,11 @@
   function addStanding(state, f, d) {
     if (!f || !d) return 0;
     var before = state.meters.standing[f] || 0;
-    state.meters.standing[f] = clamp(before + d, -100, 100);
+    // While a letter is held the other side can't rise above -10 (§28.3).
+    var cap = PC.letters ? PC.letters.capFor(state, f) : 100;
+    var nv = clamp(before + d, -100, 100);
+    if (d > 0 && nv > cap) nv = Math.max(before, cap); // a rise stops at the cap
+    state.meters.standing[f] = nv;
     if (f === "pirates" && d < 0) seasonRec(state).blackLoss = true;
     return state.meters.standing[f] - before;
   }
@@ -231,7 +235,8 @@
       var offended = f === "pirates" ? rec.blackLoss : !!rec.offense[f];
       if (offended) return;
       var b0 = PC.node.standingBand(state, f).name;
-      var nv = Math.min(R().DRIFT_STOP, s + R().DRIFT);
+      var nv = Math.min(R().DRIFT_STOP, s + R().DRIFT, PC.letters ? PC.letters.capFor(state, f) : 100);
+      if (nv <= s) return;
       state.meters.standing[f] = nv;
       chips.push({ icon: "standing", text: NAME[f] + " Standing +" + (nv - s) + " (time heals)", ink: f });
       var b1 = PC.node.standingBand(state, f).name;

@@ -1181,7 +1181,7 @@
             return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
               : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
           })() + "</div>" +
-          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
+          (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + (p.cut ? ", less " + gold(p.cut) + " to your letter's issuer" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
             // Her effect on the hold (A9).
             " The hold goes from " + hh.capBefore + " to " + hh.capAfter + " (" + hh.used + " used)" + (hh.over ? '; <b style="color:#8f2a1c">' + hh.over + " slots won't fit and go over the side</b>" : "") + ".</p>" : "");
       }).join("") + "</div>";
@@ -1430,7 +1430,10 @@
     // R6: this visit's running total, and Sell all he'll take.
     var sold = N().visitSales(state, buyer);
     var html = '<div class="svc"><h4>' + esc(title) + '</h4><p class="small">' + (buyer === "fence" ? "Buys dirty treasure and goods only." : "Buys clean treasure and goods only.") + " Sales go to crew gold.</p>" + coffers(capLeft, cap, his) +
-      (sold ? '<p class="small"><b>This visit: +' + gold(sold) + " crew gold</b></p>" : "");
+      (sold ? '<p class="small"><b>This visit: +' + gold(sold - N().visitCut(state, buyer)) + " crew gold</b>" +
+        // The issuer's cut, deducted at the till (§29.12).
+        (N().visitCut(state, buyer) ? ' <span class="note">(after ' + gold(N().visitCut(state, buyer)) + " to " + esc(PC.letters.issuer(PC.letters.letter(state).issuer).name) + "'s cut)</span>" : "") + "</p>" : "") +
+      (buyer !== "fence" && PC.letters.letter(state) ? '<p class="note">' + esc(PC.letters.issuer(PC.letters.letter(state).issuer).name) + " takes " + Math.round(PC.letters.issuer(PC.letters.letter(state).issuer).cut * 100) + "% of every clean sale.</p>" : "");
     if (!rows.length) return html + '<p class="note">Nothing aboard ' + (buyer === "fence" ? "for him" : "to sell here") + ".</p></div>";
     html += '<div class="actions" style="margin:4px 0 8px"><button class="secondary" data-act="sellall" data-buyer="' + buyer + '"' + (capLeft <= 0 ? " disabled" : "") + ">Sell all " + (his === "Her" ? "she" : "he") + "'ll take</button></div>";
     return html + '<table class="grid"><tr><th>Cargo</th><th>Aboard</th><th>Pays</th><th>Sell</th></tr>' + rows.map(function (r) {
@@ -2416,6 +2419,16 @@
   }
 
   // The full captain sheet (§41.12).
+  // The letter of marque, shown as a state, not a tag (§28.7).
+  function letterLine() {
+    var l = PC.letters.letter(state);
+    if (!l) return '<p class="small" style="margin-top:10px"><b>Letter of marque:</b> none. Every prize but a pirate is dirty.</p>';
+    var is = PC.letters.issuer(l.issuer);
+    return '<p class="small" style="margin-top:10px"><b>Letter of marque:</b> ' + esc(is.name) + "'s. Covers " + esc(is.covers.join(", ")) + " ships: their cargo is clean, and " + esc(is.factionName) +
+      " gains +1 Standing a prize (at most +4 a season). " + esc(is.name) + " takes " + Math.round(is.cut * 100) + "% of every clean sale; " + esc(is.factionName) + "'s port fees are halved; " +
+      esc(is.factionName === "Avalon" ? "Frisian" : "Avalon") + " Standing stays at −10 or below while you hold it.</p>";
+  }
+
   // How the meters move, in plain words (§28; the author asked that the
   // offense and betrayal rules be clear to the player).
   function meterHelp() {
@@ -2455,7 +2468,7 @@
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", state.provisions + " lots · " + esc(seaTime(state.provisions))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
-      meters(true) + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+      meters(true) + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -2507,7 +2520,10 @@
         '<p class="small">This season\'s outlook: ' + ["north", "south"].map(function (z) { return (z === "north" ? "North " : " · South ") + ["Fair", "Unsettled", "Foul"].map(function (o) {
           return '<button class="' + (PC.weather.outlook(state, z) === o ? "primary" : "secondary") + '" data-act="devoutlook" data-zone="' + z + '" data-o="' + o + '">' + o + "</button>"; }).join(""); }).join("") + "</p>" +
         '<div class="small">The last voyage\'s slots:' + devReadout() + "</div>" +
-        '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>") : "") +
+        '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>" +
+        // Milestone 8: the letter and Key's regard (hidden in play).
+        '<p class="small">Key\'s letter: ' + (PC.letters.letter(state) ? "held " + b("devletter", "Take it away", ' data-on="0"') : "none " + b("devletter", "Give it", ' data-on="1"')) +
+        " · Key's regard (" + (state.regard && state.regard.key ? state.regard.key.v + ", " + PC.letters.band(state, "key") : "unmet") + "): " + [-5, -2, 0, 2, 4].map(function (v) { return b("devregard", String(v), ' data-v="' + v + '"'); }).join("") + "</p>") : "") +
       (state.location ? grp("Money and cargo", '<div class="actions">' + b("devgold", "+500 crew gold") + b("devpurse", "+500 purse") + b("devtreasure", "+10 clean treasure", ' data-dirty="0"') +
         b("devtreasure", "+10 dirty treasure", ' data-dirty="1"') + b("devdamage", "Damage the hull (−5)") + b("devarrive", "The arrival popup (back from a hunt, 4 wounded)") + "</div>") : "") +
       (state.location ? grp("Story", (PC.devtools && PC.devtools.skipQuests ? '<div class="actions">' + b("devskip", "Skip the mandatory quests") + "</div>" : "") +
@@ -3716,6 +3732,8 @@
       w.devOutlook[el.dataset.zone] = el.dataset.o;
     },
     "devfreesail": function () { devFreeSail = !devFreeSail; },
+    "devletter": function (el) { if (el.dataset.on === "1") PC.letters.take(state, "key", { force: true }); else PC.letters.giveUp(state); },
+    "devregard": function (el) { PC.letters.meet(state, "key"); state.regard.key.v = Number(el.dataset.v); },
     "devstanding": function (el) { state.meters.standing[el.dataset.f] = Number(el.dataset.v); },
     "devarrive": function () {
       var n = Math.min(4, state.crew.tiers.Green || 0);

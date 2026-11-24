@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 8;
+  var SAVE_VERSION = 9;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -239,6 +239,12 @@
       // Milestone 7: voyages and the season loop; Ocracoke's Trade Master.
       addMilestone7Fields(data);
       data.saveVersion = 8;
+    }
+    if (data.saveVersion === 8) {
+      // Milestone 8: letters of marque and Legendary regard (PR 4).
+      data.regard = data.regard || {};
+      data.letter = data.letter || null;
+      data.saveVersion = 9;
     }
     return data;
   }

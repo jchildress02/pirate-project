@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -2657,11 +2657,11 @@ test("a hunt from an ocean node stays at sea; Norfolk hunts the Hatteras Banks",
   eq(s.location.node, "bahama");
 });
 
-test("a version 7 save loads as version 8 with the trade ship and season-loop fields, and Ocracoke's Trade Master", function () {
+test("a version 7 save loads (now through to the current version) with the trade ship and season-loop fields, and Ocracoke's Trade Master", function () {
   var s = m7("mig"); var old = JSON.parse(PC.state.serialize(s));
   old.saveVersion = 7; delete old.tradeShip; delete old.split; delete old.yearStart; delete old.generated.ocr_trademaster;
   var back = PC.state.deserialize(JSON.stringify(old));
-  eq(back.saveVersion, 8); eq(back.tradeShip, null); ok(back.yearStart); ok(back.generated.ocr_trademaster);
+  eq(back.saveVersion, PC.state.SAVE_VERSION); eq(back.tradeShip, null); ok(back.yearStart); ok(back.generated.ocr_trademaster);
 });
 
 
@@ -3363,6 +3363,109 @@ test("laying up needs Wary or better: +20% at Wary, refused at Hostile", functio
   var f = s.fleet[0], val = PC.data.hunt.HULL_VALUE.Sloop;
   s.meters.standing.avalon = -15; eq(PC.node.layUpPrice(s, f).up, Math.round(val * 0.10 * 1.2));
   s.meters.standing.avalon = -45; ok(!PC.node.canLayUp(s, f.id).ok);
+});
+
+// ---- Milestone 8, PR 4: letters and Key's regard (§22.4, §29.12, §39.6) ----
+console.log("Milestone 8, PR 4: letters and Key's regard (§22.4, §29.12, §39.6, §17.4.7)");
+
+function takePrize(seed, flag, withLetter) {
+  var s = huntReady(seed);
+  if (withLetter) PC.letters.take(s, "key", { force: true });
+  var bq = aShip(s, "Barque", "Trade", flag);
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  withDice([6, 6], function () { PC.hunt.engage(s, g); });
+  return { s: s, g: g };
+}
+
+test("Key's letter: -10 Frisia on taking it, and Frisia held at -10 or below while it's held", function () {
+  var s = huntReady("lt1");
+  s.meters.standing.frisia = 5;
+  PC.letters.take(s, "key");
+  eq(s.meters.standing.frisia, -5 > -10 ? -10 : -5, "held at -10");
+  PC.meters.addStanding(s, "frisia", 8); eq(s.meters.standing.frisia, -10, "can't rise past -10");
+  s.meters.standing.frisia = -30; PC.meters.addStanding(s, "frisia", 5); eq(s.meters.standing.frisia, -25, "below the cap it moves freely");
+  PC.letters.giveUp(s); PC.meters.addStanding(s, "frisia", 30); eq(s.meters.standing.frisia, 5);
+});
+
+test("a covered French prize: clean cargo, Avalon +1, no Heat anywhere; an Avalon prize under Key's letter is still dirty and costs Avalon", function () {
+  var t = takePrize("lt2", "France", true), s = t.s;
+  var av = s.meters.standing.avalon, h = s.meters.heat.avalon;
+  PC.hunt.settlePrize(s, t.g, { hull: "release", crew: "release", captives: "free" });
+  eq(s.meters.standing.avalon, av + 1); eq(s.meters.heat.avalon, h);
+  ok(!s.cargo.treasure.dirty && !Object.keys(s.cargo.goods).some(function (k) { return s.cargo.goods[k].dirty; }), "nothing dirty");
+  var u = takePrize("lt3", "Avalon", true), a = u.s, h2 = a.meters.heat.avalon;
+  PC.hunt.settlePrize(a, u.g, { hull: "release", crew: "release", captives: "free" });
+  eq(a.meters.heat.avalon, h2 + 6);
+});
+
+test("a covered Frisian prize: clean, Avalon +1, and Frisia still charges in full (only the issuer's side honors a letter)", function () {
+  var t = takePrize("lt4", "Frisia", true), s = t.s;
+  var h = s.meters.heat.frisia;
+  PC.hunt.settlePrize(s, t.g, { hull: "release", crew: "release", captives: "free" });
+  ok(s.meters.heat.frisia > h, "Frisian Heat");
+});
+
+test("the issuer's +1 stops at +4 a season", function () {
+  var s = huntReady("lt5"); PC.letters.take(s, "key", { force: true });
+  var a = s.meters.standing.avalon;
+  for (var i = 0; i < 6; i++) PC.letters.coveredPrize(s);
+  eq(s.meters.standing.avalon, a + 4);
+});
+
+test("Key's cut: 10% off every clean sale at the till, none at the fence; Avalon port fees halved", function () {
+  var s = atNorfolk("lt6");
+  var fee0 = PC.node.portFee(s, "norfolk");
+  PC.letters.take(s, "key", { force: true });
+  eq(PC.node.portFee(s, "norfolk"), Math.round(fee0 / 2));
+  s.cargo.treasure.clean = 10;
+  var c0 = s.money.crew, each = PC.node.unitPrice(s, "provisioner", "treasure");
+  var r = PC.node.sell(s, "provisioner", "treasure", 10);
+  eq(s.money.crew - c0, r.gold - Math.round(r.gold * 0.10));
+  eq(PC.node.visitCut(s, "provisioner"), Math.round(r.gold * 0.10));
+});
+
+test("Key's regard: hidden -5..+5, unmet until met; a band line in the log; Distrusted blocks the letter; Sworn enemy turns on Key's hunt", function () {
+  var s = atNorfolk("lt7");
+  eq(PC.letters.band(s, "key"), "Unmet");
+  var ch = PC.letters.addRegard(s, "key", 2); eq(ch.to, "Respected");
+  ok(s.log.some(function (l) { return /respect you/.test(l.text || l); }));
+  s.regard.key.v = -2; ok(!PC.letters.canTake(s, "key").ok);
+  s.regard.key.v = -4; s.meters.heat.avalon = 10; eq(PC.letters.huntHeat(s, "avalon"), 30);
+  s.regard.key.v = 0; eq(PC.letters.huntHeat(s, "avalon"), 10);
+  s.meters.standing.avalon = -5; ok(!PC.letters.canTake(s, "key").ok, "needs Avalon 0+");
+});
+
+test("Norfolk's level 4: refused to a captain Key distrusts, 15% off for one he trusts", function () {
+  var s = atNorfolk("lt8");
+  s.meters.standing.avalon = 25; s.ship.upgrades = { hull: 3, rigging: 1, guns: 1 };
+  var full = PC.node.upgradeInfo(s, "hull");
+  ok(!full.locked, "open at Avalon 25, regard Neutral");
+  PC.letters.meet(s, "key"); s.regard.key.v = -2;
+  ok(PC.node.upgradeInfo(s, "hull").locked, "locked when Key distrusts you");
+  s.regard.key.v = 4;
+  eq(PC.node.upgradeInfo(s, "hull").cost, Math.round(full.cost * 0.85));
+});
+
+test("an unpaid anchorage season is owed; the shipwright drops a rung until it's paid", function () {
+  var s = atNorfolk("lt9");
+  PC.hunt.devFleetShip(s, "Sloop");
+  var f = s.fleet[0];
+  PC.node.layUp(s, f.id);
+  var r0 = PC.npcs.rung(s, "christoph");
+  s.money.crew = 0; s.money.purse = 0;
+  PC.node.layUpSeason(s);
+  eq(PC.npcs.rung(s, "christoph"), r0 - 1); ok(PC.node.laidUpHere(s, "norfolk")[0].owed > 0);
+  ok(!PC.node.canRecover(s, f.id).ok, "can't take her back while you owe");
+  s.money.crew = 5000;
+  PC.node.recover(s, f.id);
+  eq(PC.npcs.rung(s, "christoph"), r0);
+});
+
+test("bribes at Norfolk's first inspection come from the purse first", function () {
+  var s = toNorfolk("lt10");
+  s.money.purse = 1000; s.money.crew = 1000;
+  PC.sceneFns.apply(s, { hook: "nor_pay", what: "bribe_before", mult: 1 });
+  eq(s.money.crew, 1000, "crew gold untouched while the purse covers it");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

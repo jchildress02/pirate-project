@@ -522,7 +522,9 @@
     var gold = Math.round(each * units);
     if (what === "treasure") state.cargo.treasure[k] -= units;
     else { PC.crew.removeGood(state, what, units, dirty); s.sold[what] = (s.sold[what] || 0) + units; }
-    state.money.crew += gold;
+    // The issuer's cut comes off every clean sale at the till (§29.12).
+    var ct = dirty ? { cut: 0, net: gold } : takeCut(state, buyer, gold);
+    state.money.crew += ct.net;
     markDealt(state, who);
     noteSale(state, buyer, gold);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
@@ -531,7 +533,7 @@
     var gain = Math.min(E().PROSPERITY_SEASON_CAP, Math.floor(s.soldGold / E().PROSPERITY_PER_SOLD)) - s.prosperityGained;
     if (gain > 0) { s.prosperityGained += gain; state.nodes[id].prosperity = clamp(state.nodes[id].prosperity + gain, 0, 100); }
     var label = what === "treasure" ? (dirty ? "dirty " : "") + "treasure" : (dirty ? "dirty " : "") + what;
-    PC.state.addLog(state, "Sold " + units + " " + label + " to " + PC.npcs.get(state, who).full + " for " + gold + " crew gold.");
+    PC.state.addLog(state, "Sold " + units + " " + label + " to " + PC.npcs.get(state, who).full + " for " + gold + " gold" + (ct.cut ? " (" + ct.cut + " to " + ct.who + "'s cut)" : "") + ".");
     var line;
     if (dirty) {
       ladderTick(state, who, "deal") && (line = L.rungUp);
@@ -543,6 +545,14 @@
     }
     return { units: units, gold: gold, line: line, partial: units < n };
   }
+
+  // The issuer's cut on a clean sale (§29.12), noted for the buyer's card.
+  function takeCut(state, buyer, gold) {
+    var c = PC.letters ? PC.letters.cut(state, gold) : { cut: 0, net: gold };
+    if (c.cut) { var cs = (state.location.cuts = state.location.cuts || {}); cs[buyer] = (cs[buyer] || 0) + c.cut; }
+    return c;
+  }
+  function visitCut(state, buyer) { return ((state.location.cuts || {})[buyer]) || 0; }
 
   // This visit's sales to a buyer, for the running total on his card (R6).
   function noteSale(state, buyer, gold) {
@@ -565,7 +575,7 @@
     if (units <= 0) return { line: L.capReached, units: 0, gold: 0 };
     var gold = Math.round(each * units);
     state.provisions -= units;
-    state.money.crew += gold;
+    state.money.crew += takeCut(state, "provisioner", gold).net;
     season(state).provisionerPaid += gold;
     noteSale(state, "provisioner", gold);
     PC.state.addLog(state, "Sold " + units + " provisions lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
@@ -644,7 +654,11 @@
       out.locked = "Level " + gate.level + " needs " + (gate.faction === "avalon" ? "Avalon" : gate.faction) + " Standing " + gate.standing + " or better";
       out.gated = true;
     }
-    out.cost = Math.round(E().UPGRADE[next] * E().SIZE_UPGRADE[state.ship.size] * craftMult(state));
+    // Key's regard at Norfolk's level 4 (§17.4.7): never for a captain he
+    // distrusts or has sworn against; 15% off at Trusted.
+    var kb = gate && next >= gate.level && PC.letters ? PC.letters.band(state, "key") : null;
+    if (kb === "Distrusted" || kb === "Sworn enemy") { out.locked = "Not for a captain the Admiral " + (kb === "Distrusted" ? "distrusts" : "has sworn against"); out.gated = true; }
+    out.cost = Math.round(E().UPGRADE[next] * E().SIZE_UPGRADE[state.ship.size] * craftMult(state) * (kb === "Trusted" ? 1 - PC.data.letterRules.KEY_TRUSTED_YARD : 1));
     out.effect = track === "hull" ? "Max hull +" + (hullMaxAt(state, next) - state.ship.hullMax)
       : track === "rigging" ? (next === 3 ? "+1 Speed" : next === 5 ? "+1 Handling" : (state.ship.rigging === "frayed" ? "Fixes the frayed rigging" : "No change until level 3"))
       : (next === 3 || next === 5 ? "+1 Gunnery" : "No change until level 3");
@@ -692,7 +706,9 @@
     var repair = Math.round(E().REPAIR_PER_HP * E().SIZE_REPAIR[size] * Math.max(0, f.hullMax - f.hull));
     var hull = Math.max(0, Math.round(H.HULL_VALUE[f.cls] * (dirty ? H.HULL_SALE.dirty : H.HULL_SALE.clean) * mult) - repair);
     var guns = Math.round(f.guns * E().GUN * H.LOOSE_GUN_SALE * mult);
-    return { ok: true, hull: hull, guns: guns, total: hull + guns, dirty: dirty, repair: repair };
+    // A clean hull pays the issuer's cut; loose guns don't (§29.12).
+    var cut = dirty || !PC.letters ? 0 : PC.letters.cut(state, hull).cut;
+    return { ok: true, hull: hull, guns: guns, cut: cut, total: hull - cut + guns, dirty: dirty, repair: repair };
   }
 
   // What selling her does to the pooled hold (A9): the space she takes
@@ -711,6 +727,7 @@
     if (shipwrightGreeting(state).refuse) return { line: nodeData(here(state)).lines.shipwright.refuse };
     var p = hullSalePrice(state, f);
     if (!p.ok) throw new Error(p.why);
+    if (p.cut) { var cs = (state.location.cuts = state.location.cuts || {}); cs.yard = (cs.yard || 0) + p.cut; }
     state.money.crew += p.total;
     state.records.hullsSold = (state.records.hullsSold || 0) + 1; // the end screen (R5)
     state.fleet = state.fleet.filter(function (x) { return x !== f; });
@@ -729,7 +746,7 @@
     // What no longer fits in the smaller hold goes over the side (A9).
     var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Sold the " + f.cls + (f.name ? " " + f.name : "") + " to the yard for " + p.total + " crew gold.");
-    return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
+    return { gold: p.total, cut: p.cut, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
   // ---- Laying a ship up at anchor (§22.7, §20.4, §28.2; Milestone 8, PR 3) ----
@@ -794,6 +811,7 @@
     if (!c.ok) throw new Error(c.why);
     var l = c.rec, f = l.ship;
     if (l.owed) PC.crew.payFrom(state, l.owed);
+    if (l.rungDown) PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), 1); // the debt is cleared
     state.laidUp = state.laidUp.filter(function (x) { return x !== l; });
     var tiers = PC.hunt.takeHands(state, f.crewMin || 0);
     f.crewTiers = tiers; f.crew = f.crewMin || 0;
@@ -818,7 +836,12 @@
       var nd0 = nodeData(l.node), g = PC.meters.officialGate(state, l.node);
       var due = Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
       if (PC.crew.canPay(state, due)) { PC.crew.payFrom(state, due); lines.push("Anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + due + " gold."); }
-      else { l.owed += due; lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed."); }
+      else {
+        l.owed += due;
+        lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed.");
+        // The shipwright holding her thinks less of you until it's paid (the author's ruling).
+        if (!l.rungDown) { l.rungDown = true; PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), -1); lines.push(PC.npcs.get(state, slotNpc(l.node, "shipwright")).first + " won't forget it until you pay."); }
+      }
     });
     return lines;
   }
@@ -1017,7 +1040,8 @@
   function portFee(state, id) {
     id = id || here(state);
     var nd = nodeData(id);
-    return Math.round(nd.portFeeBase * state.ship.size * standingBand(state, nd.faction).fee);
+    // Halved at the letter issuer's ports (§20.4).
+    return Math.round(nd.portFeeBase * state.ship.size * standingBand(state, nd.faction).fee * (PC.letters ? PC.letters.feeMult(state, nd.faction) : 1));
   }
 
   // The harbor due and its shortfall (§17.2). Crew gold pays first and
@@ -1197,7 +1221,7 @@
     salePrice: salePrice,
     shopPrice: shopPrice,
     demandOf: demandOf,
-    standingBand: standingBand, docksConditions: docksConditions,
+    standingBand: standingBand, docksConditions: docksConditions, takeCut: takeCut, visitCut: visitCut,
     layUpPrice: layUpPrice, canLayUp: canLayUp, layUp: layUp, laidUpHere: laidUpHere, layUpSlots: layUpSlots, canRecover: canRecover, recover: recover, layUpSeason: layUpSeason,
     purchaseMult: purchaseMult,
     slotNpc: slotNpc,
