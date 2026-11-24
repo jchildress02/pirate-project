@@ -609,6 +609,11 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .mapnode.live:hover .lab, .mapnode.sel .lab, .mapnode:focus-visible .lab { background: #f6ecd4; outline: 2px solid var(--gilt); }
 .destcard { max-width: 680px; }
 .destcard .flag { width: 18px; height: 12px; vertical-align: -1px; margin-right: 6px; }
+
+/* Weather badges (§42.10): text stand-ins until the art chat's icons. */
+.wx { display: inline-block; font-family: var(--sc); font-size: 15px; letter-spacing: .03em; padding: 0 7px; border: 1px solid var(--rule); border-radius: 10px; background: rgba(255,251,238,.7); color: var(--sea); white-space: nowrap; vertical-align: 1px; }
+.wx-foul, .wx-storm { color: var(--bad); border-color: var(--bad); }
+.wx-unsettled, .wx-rough, .wx-fog { color: var(--mid); }
 </style>
 </head>
 <body>
@@ -5637,18 +5642,28 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function tableFor(zone, type) { return zone === "cabin" ? zone + "_" + (type === "frigate" ? "frigate" : "brig") : zone; }
 
-  function rollItem(r, zone, type) {
+  // winter: the Winter salvage bonus (§42.8): +5 points on the better tiers
+  // (taken from junk) and +25% quantity on treasure and provisions finds.
+  function rollItem(r, zone, type, winter) {
     var t = tableFor(zone, type);
-    var tier = M().weighted(r, D().TIERS[t]);
+    var weights = D().TIERS[t];
+    if (winter && PC.data.weather) {
+      weights = JSON.parse(JSON.stringify(weights));
+      var add = PC.data.weather.WINTER_SALVAGE.goodFind;
+      var take = Math.min(add, weights.junk || 0);
+      if (take) { weights.junk -= take; weights.treasure = (weights.treasure || 0) + take; }
+    }
+    var tier = M().weighted(r, weights);
+    var q = winter && PC.data.weather ? PC.data.weather.WINTER_SALVAGE.quantity : 1;
     var y = D().YIELDS[t] || {};
     if (tier === "junk") return { tier: "junk", line: M().pick(r, D().junk) };
-    if (tier === "supplies") return { tier: "supplies", provisions: M().between(r, y.supplies[0], y.supplies[1]) };
+    if (tier === "supplies") return { tier: "supplies", provisions: Math.round(M().between(r, y.supplies[0], y.supplies[1]) * q) };
     if (tier === "goods") {
       var w = {}; y.goods.forEach(function (g, i) { w[i] = g[3]; });
       var g = y.goods[M().weighted(r, w)];
       return { tier: "goods", good: g[0], n: M().between(r, g[1], g[2]) };
     }
-    if (tier === "treasure") return { tier: "treasure", treasure: M().between(r, y.treasure[0], y.treasure[1]), gold: M().between(r, y.gold[0], y.gold[1]) };
+    if (tier === "treasure") return { tier: "treasure", treasure: Math.round(M().between(r, y.treasure[0], y.treasure[1]) * q), gold: M().between(r, y.gold[0], y.gold[1]) };
     var rare = r() < (y.rare || 0);
     return { tier: "item", item: M().pick(r, D().ITEMS[rare ? "rare" : "uncommon"]), rare: rare };
   }
@@ -5688,9 +5703,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var key = "dive|" + (opts.miranda ? "miranda-" + ((state.rolls.miranda = (state.rolls.miranda || 0) + 1)) : w.id);
     var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), key, "loot"].join("|"));
     var zones = {};
+    var winter = PC.weather ? PC.weather.winterSalvage(state, opts) : false;
     D().ZONES[w.type].forEach(function (z) {
       var items = [];
-      for (var i = 0; i < D().SLOTS; i++) items.push(rollItem(r, z, w.type));
+      for (var i = 0; i < D().SLOTS; i++) items.push(rollItem(r, z, w.type, winter));
       zones[z] = { dr: (w.zoneDr && w.zoneDr[z] != null) ? w.zoneDr[z] : D().ZONE_DR[z], mod: 0, items: items, next: 0, scouted: -1 };
     });
     if (opts.miranda) zones[D().miranda.quest.zone].items[0] = { tier: "quest", item: D().miranda.quest.item };
@@ -6822,9 +6838,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // ---- Step 2-4 -------------------------------------------------------------
 
-  function density(state) {
+  // cond: the batch's weather (§42.4) takes points off; the clamp holds.
+  function density(state, cond) {
     var D = H().DENSITY;
-    return clamp(D.base + (D.season[seasonOf(state)] || 0), D.min, D.max) / 100;
+    var w = cond && PC.data.weather ? (PC.data.weather.DENSITY[cond] || 0) : 0;
+    return clamp(D.base + (D.season[seasonOf(state)] || 0) + w, D.min, D.max) / 100;
   }
 
   function flagWeights(state, waters) {
@@ -7141,7 +7159,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // A plain view of any ship in the battle, by id. The flagship reads the
   // live state; everything else is its own record.
-  function ship(state, b, id) {
+  // Weather (§42.4): in a Calm every ship's Speed counts as 1, except ships
+  // with sweeps (Cutter, Sloop, Royal Sloop, Schooner).
+  function calmed(b, s) {
+    if (!b || b.condition !== "Calm" || !s) return s;
+    if (PC.weather && PC.weather.hasSweeps(s.cls)) return s;
+    s.speed = Math.min(s.speed, 1);
+    return s;
+  }
+  function ship(state, b, id) { return calmed(b, shipRaw(state, b, id)); }
+  function shipRaw(state, b, id) {
     if (id === "flagship") {
       var sh = state.ship, c = cls(sh.type) || {};
       return {
@@ -7422,6 +7449,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       speedLoss: {}, rudder: {}, killed: {}, woundedTiers: {}, startCrew: { flagship: state.crew.count },
       startHull: { flagship: state.ship.hull }, firstExchange: true, fleetOrder: "take", openRange: false,
       dueled: false, posBonus: 0, step: null, over: null, captured: [], log0: game.log.length,
+      // The weather (§42.4): the batch's condition, or the voyage's.
+      condition: (game.batch && game.batch.condition) || game.condition || "Fair",
     };
     fleet(state).forEach(function (f) { b.startCrew[f.id] = f.crew; b.startHull[f.id] = f.hull; });
     game.battle = b;
@@ -7502,6 +7531,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var b = game.battle;
     var foes = fightingEnemies(b);
     if (foes.some(function (e) { return e.hunter || e.escort; })) return startRound(state, game);
+    if (b.condition === "Fog") return startRound(state, game); // a ship met in fog gets no pre-battle flee roll (§42.4)
     var theirSpeed = Math.min.apply(null, foes.map(function (e) { return ship(state, b, e.id).speed; }));
     var p = fleeChance(theirSpeed - fleetSpeed(state, b), fleetCA(state, b));
     if (!chance(state, game, "fleePre", p)) { say(state, game, L().stays); return startRound(state, game); }
@@ -7535,6 +7565,39 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return true;
   }
 
+  // ---- Weather in battle (§42.4) -------------------------------------------
+  // Each returns parts for the player's roll; a Navigator at level 4 spares
+  // his side Rough's and Fog's penalties and takes Storm's one smaller.
+  function nav4(state) { return PC.weather && PC.weather.navigatorL4(state); }
+  function weatherParts(state, b, kind) {
+    var c = b.condition, out = [];
+    if (!c || c === "Fair" || c === "Calm") return out;
+    var me = ship(state, b, "flagship"), en = ship(state, b, b.pairs.flagship);
+    if (!en) return out;
+    if (c === "Rough") {
+      if (kind === "exchange" && me.size !== en.size) {
+        if (me.size < en.size && !nav4(state)) out.push({ label: "Rough seas (the smaller ship)", value: -1 });
+        if (en.size < me.size) out.push({ label: "Rough seas (she's smaller)", value: 1 });
+      }
+      if (kind === "grapple" && !nav4(state)) out.push({ label: "Rough seas", value: -1 });
+      if (kind === "repel") out.push({ label: "Rough seas (she boards)", value: 1 });
+    }
+    if (c === "Fog") {
+      if (kind === "position" && me.speed !== en.speed) {
+        if (me.speed > en.speed) out.push({ label: "Fog (you're faster)", value: 1 });
+        else if (!nav4(state)) out.push({ label: "Fog (she's faster)", value: -1 });
+      }
+      if (kind === "flee") out.push({ label: "Fog (breaking off)", value: 1 });
+    }
+    if (c === "Storm") {
+      // Storm is -2 on the Exchange for both sides: in one opposed roll the
+      // two cancel, unless a Navigator at level 4 takes only -1 (DEFAULT).
+      if (kind === "exchange" && nav4(state)) out.push({ label: "Storm (your Navigator)", value: 1 });
+      if (kind === "firearms") out.push({ label: "Storm (firearms)", value: nav4(state) ? 0 : -1 });
+    }
+    return out.filter(function (x) { return x.value; });
+  }
+
   // Beat 1: Position (Maneuver). DR is her captain's rating.
   function positionCheck(state, b) {
     var me = ship(state, b, "flagship"), en = ship(state, b, b.pairs.flagship);
@@ -7544,6 +7607,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (pk) extra.push({ label: "Support", value: pk });
     if (b.posBonus) extra.push({ label: b.posBonus > 0 ? "Caught on your terms" : "They caught you", value: b.posBonus });
     if (b.rudder[en.id]) extra.push({ label: "Her rudder", value: 1 });
+    extra = extra.concat(weatherParts(state, b, "position"));
     return { type: "Maneuver", dr: clamp(en.rating, 0, 8), extra: extra.filter(function (x) { return x.value; }) };
   }
 
@@ -7585,7 +7649,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       { label: "Combat Advantage", value: pairCA(state, b, "flagship", en.id) },
       { label: "Position", value: b.exMod || 0 },
       { label: "Support", value: perk(state, b, "exchange") - enemyPerk(state, b, "exchange", en.id) },
-    ].filter(function (x) { return x.value; });
+    ].concat(weatherParts(state, b, "exchange")).filter(function (x) { return x.value; });
     var edge = parts.reduce(function (a, x) { return a + x.value; }, 0);
     return { parts: parts, edge: clamp(edge, -4, 6) };
   }
@@ -7753,7 +7817,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var en = ship(state, b, b.pairs.flagship);
     var extra = [{ label: "Speed", value: clamp(fleetSpeed(state, b) - en.speed, -2, 2) }];
     if (onFlagship(state, "Navigator")) extra.push({ label: "Navigator", value: 1 });
-    return { type: "Outrun", dr: clamp(en.rating, 0, 8), extra: extra.filter(function (x) { return x.value; }) };
+    var fleeing = b.chaseMode === "flee" || (b.chase && b.chase.mode === "flee");
+    if (fleeing) extra = extra.concat(weatherParts(state, b, "flee"));
+    // A fleeing ship may run into the storm (§42.4): Ride Out Storm in
+    // place of Outrun.
+    var type = fleeing && b.condition === "Storm" ? "Ride Out Storm" : "Outrun";
+    return { type: type, dr: clamp(en.rating, 0, 8), extra: extra.filter(function (x) { return x.value; }) };
   }
 
   function doChase(state, game) {
@@ -7833,7 +7902,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var b = game.battle;
     if (b.step !== "grapple") throw new Error("Not the moment for that.");
     var en = lead(b);
-    var extra = b.closeBonus ? [{ label: "Closed on her", value: 1 }] : [];
+    var extra = (b.closeBonus ? [{ label: "Closed on her", value: 1 }] : []).concat(weatherParts(state, b, "grapple"));
     return M().roll(state, game, { type: "Board", dr: clamp(en.rating, 0, 8), extra: extra }, "grapple", {}, ["Battle"]);
   }
 
@@ -7853,7 +7922,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function doRepel(state, game) {
     var b = game.battle;
     if (b.step !== "repel") throw new Error("Not the moment for that.");
-    return M().roll(state, game, { type: "Board", dr: clamp(lead(b).rating, 0, 8) }, "repel", {}, ["Battle"]);
+    return M().roll(state, game, { type: "Board", dr: clamp(lead(b).rating, 0, 8), extra: weatherParts(state, b, "repel") }, "repel", {}, ["Battle"]);
   }
 
   function settleRepel(state, game, p) {
@@ -7924,7 +7993,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var gb = gunBonus(state);
     if ((id === "lead" || id === "duel") && !b.board.shotDone && gb != null) {
       b.board.shotDone = true;
-      return M().roll(state, game, { type: "Marksmanship", dr: clamp(lead(b).rating, 0, 8), extra: gb ? [{ label: "The pistol", value: gb }] : [] }, "shot", { then: id }, ["Battle"]);
+      return M().roll(state, game, { type: "Marksmanship", dr: clamp(lead(b).rating, 0, 8), extra: (gb ? [{ label: "The pistol", value: gb }] : []).concat(weatherParts(state, b, "firearms")) }, "shot", { then: id }, ["Battle"]);
     }
     return rollAction(state, game, a);
   }
@@ -8155,7 +8224,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (!b) return null;
     var en = lead(b);
     var v = {
-      step: b.step, round: b.round, over: b.over, lostHow: b.lostHow || null,
+      step: b.step, round: b.round, over: b.over, lostHow: b.lostHow || null, condition: b.condition || null,
       enemies: b.enemies.map(function (e) { return shipLine(state, b, e.id); }),
       mine: ["flagship"].concat(fleet(state).filter(function (f) { return !f.out || b.startCrew[f.id] != null; }).map(function (f) { return f.id; })).map(function (id) { return shipLine(state, b, id); }),
       target: b.pairs.flagship || null, pairs: b.pairs, support: b.support, enemySupport: b.enemySupport,
@@ -8182,6 +8251,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   PC.combat = {
     rollEffect: rollEffect,
+    weatherParts: weatherParts,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,
     begin: begin, engage: engage, setTarget: setTarget, assignFleetShip: assignFleetShip, showOfForce: showOfForce,
@@ -8241,6 +8311,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     };
     M().start(state, game, "node");
     M().say(state, game, L().setOut);
+    // Read Weather rolls itself before a port hunt (§42.6); its result
+    // rides on the hunt's storm check (voyage events, §44.7).
+    game.zone = waters;
+    if (!PC.node.isOcean(state.location.node)) {
+      game.readWeather = PC.weather.autoRead(state, waters, [state.world.seed, PC.state.stamp(state), game.key, "read"].join("|"));
+      M().noteRoll(game, { label: "Read Weather", outcome: game.readWeather.outcome, effect: { clean: "a storm on the way out is redrawn once, and +1 to ride one out", partial: "+1 to ride out a storm", setback: "no help from the sky" }[game.readWeather.outcome] });
+    }
+    if (PC.voyageEvents && PC.voyageEvents.huntLeg) PC.voyageEvents.huntLeg(state, game, "out");
+    if (state.minigame !== game || game.over) return game;
     newBatch(state, game);
     return game;
   }
@@ -8272,8 +8351,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var r = M().rand(state, game, "batch");
     var force = game.force;
     var hunter = force && force.kind === "hunter" ? force.flag || "Avalon" : G().rollHunter(state, game.waters, r);
-    game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force };
+    // The batch's weather (§42.4): rolled now, or read ahead (§42.6).
+    var cond = game.nextCondition || PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition"));
+    game.nextCondition = null; game.readAhead = null;
+    game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force, condition: cond };
     game.force = null;
+    M().say(state, game, "The weather: " + PC.weather.badge(cond) + ".");
+    if (cond === "Storm") stormBatch(state, game);
     // A vacant Quartermaster's post is filled at the next voyage event
     // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
     // save with the post empty is caught here too.
@@ -8285,6 +8369,45 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       return;
     }
     reveal(state, game);
+  }
+
+  // A Storm batch (§42.4): a Ride Out Storm check (DR 2) before its rolls.
+  // Clean, no loss; partial -5% hull; setback -10% hull and -5 morale.
+  function stormCheck(state) {
+    var extra = [];
+    var nav = (state.officers || []).some(function (o) { return !o.gone && o.type === "Navigator" && (o.aboard || "flagship") === "flagship" && (o.level || 1) >= 2; });
+    if (nav) extra.push({ label: "Navigator", value: 1 });
+    var salt = (state.officers || []).some(function (o) { return !o.gone && (o.voice === "Old Salt" || o.secondary === "Old Salt"); });
+    if (salt) extra.push({ label: "Old Salt aboard", value: 1 }); // crew checks in storms, don't stack (§42.9)
+    return { type: "Ride Out Storm", dr: PC.data.weather.STORM_BATCH_DR, extra: extra };
+  }
+  function stormBatch(state, game) {
+    var r = PC.checks.resolve(state, stormCheck(state), M().key(state, game, "storm-batch"), { conditions: ["Storm"] });
+    var sh = state.ship, lost = 0, morale = 0;
+    if (r.outcome === "partial") lost = Math.max(1, Math.round(sh.hullMax * 0.05));
+    if (r.outcome === "setback") { lost = Math.max(1, Math.round(sh.hullMax * 0.10)); morale = 5; }
+    if (lost) sh.hull = Math.max(1, sh.hull - lost);
+    if (morale) PC.crew.addMorale(state, -morale);
+    M().say(state, game, PC.data.weather.lines.stormBatch[r.outcome]);
+    M().noteRoll(game, { label: "Ride Out Storm", outcome: r.outcome, effect: lost ? "hull −" + lost + (morale ? ", morale −" + morale : "") : "no damage" });
+    return r.outcome;
+  }
+
+  // Read Weather before a batch (§42.6): optional, 0 AP, once a batch.
+  // Clean: see the next batch's condition, and reroll it once if Storm.
+  // Partial: see it. Setback: nothing.
+  function canReadAhead(state, game) { return game.phase === "batchEnd" && !game.readAhead && state.ap.left >= 1 && game.apUsed < H().MAX_AP; }
+  function readAhead(state, game) {
+    if (!canReadAhead(state, game)) throw new Error("Not the moment for that.");
+    var r = PC.checks.resolve(state, PC.weather.readCheck(state, game.waters), M().key(state, game, "read-ahead"), { conditions: [] });
+    var c = PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition"));
+    var rerolled = false;
+    if (r.outcome === "clean" && c === "Storm") { c = PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition-reroll")); rerolled = true; }
+    game.nextCondition = c;
+    game.readAhead = { outcome: r.outcome, seen: r.outcome !== "setback" ? c : null, rerolled: rerolled };
+    M().noteRoll(game, { label: "Read Weather", outcome: r.outcome, effect: r.outcome === "setback" ? "the sky tells you nothing" : "the next batch: " + PC.weather.badge(c) + (rerolled ? " (the storm passes by)" : "") });
+    M().say(state, game, r.outcome === "setback" ? "PLACEHOLDER: You study the sky, but it tells you nothing." : "PLACEHOLDER: You study the sky. Next: " + PC.weather.badge(c) + ".");
+    return game.readAhead;
   }
 
   // ---- The Vote (§25.9, the template §25.15) ------------------------------------
@@ -8324,7 +8447,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var grp = null;
     if (i === 0 && b.hunter) grp = G().sighting(state, game.waters, r, { kind: "hunter", flag: b.hunter });
     else if (b.force && i === 0) grp = G().sighting(state, game.waters, r, b.force);
-    else if (r() < G().density(state) || (i === b.n - 1 && !b.found)) grp = G().sighting(state, game.waters, r);
+    else if (r() < G().density(state, b.condition) || (i === b.n - 1 && !b.found)) grp = G().sighting(state, game.waters, r);
     if (grp) { b.found += 1; game.sighting = grp; game.phase = grp.hunter ? "hunter" : "scout"; M().say(state, game, grp.hunter ? L().hunter : L().sail); }
     else { game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]); }
   }
@@ -8877,6 +9000,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       phase: game.phase, apUsed: game.apUsed, apLeft: state.ap.left, maxAp: H().MAX_AP,
       vote: game.vote || null, lastApproval: game.lastApproval || null,
       batch: game.batch ? { n: game.batch.n, next: game.batch.next } : null,
+      condition: game.batch ? game.batch.condition : null, outlook: PC.weather.outlook(state, game.waters),
+      canReadAhead: canReadAhead(state, game), readAhead: game.readAhead || null,
+      readCheck: PC.weather.readCheck(state, game.waters),
       waters: H().WATERS[game.waters].name, scout: sv, advice: advice(state, game, sv), qm: qm ? qm.first || qm.full : null,
       battle: game.battle && game.phase === "battle" ? C().view(state, game) : null,
       after: game.after ? {
@@ -8945,6 +9071,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
+    canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
   };
@@ -9679,6 +9806,185 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     tradeFee: tradeFee, buyout: buyout, tradeIncome: tradeIncome, tradeOptions: tradeOptions, enroll: enroll, collectLedger: collectLedger,
     devSkipTo: devSkipTo,
   };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — weather (§42; Milestone 7, PR 3).
+ *
+ * Two layers: a season outlook for each zone (Fair, Unsettled, Foul),
+ * rolled one season ahead from the world seed, and a condition for each
+ * hunt batch and each battle met on a voyage (Calm, Fair, Rough, Fog,
+ * Storm). Read Weather rolls itself before every voyage and port hunt;
+ * before a hunt batch it's an optional 0 AP roll. Hurricane strikes hit
+ * ships in open harbors as Hurricane season turns (the north's 1754 strike
+ * comes as the season opens). In Winter, Lilyhook's Graveyard pays better.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function D() { return PC.data.weather; }
+  function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  function weighted(r, names, weights) {
+    var w = {};
+    names.forEach(function (n, i) { if (weights[i] > 0) w[n] = weights[i]; });
+    return PC.npcs.weighted(r, w);
+  }
+  var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
+
+  // ---- Layer 1: the outlook (§42.3) ---------------------------------------
+  // Seeded by year, season and zone, so next season's is already known (the
+  // Almanac shows it).
+  function outlookAt(state, zone, year, season) {
+    var fixed = D().FIXED[year + "-" + season + "-" + zone];
+    if (fixed) return fixed;
+    var r = PC.rng.fromKey([state.world.seed, year, season, zone, "outlook"].join("|"));
+    return weighted(r, D().OUTLOOKS, D().OUTLOOK[zone][SEASONS[season]]);
+  }
+  function outlook(state, zone) { return outlookAt(state, zone || "north", state.time.year, state.time.season); }
+  function nextOutlook(state, zone) {
+    var s = state.time.season + 1, y = state.time.year;
+    if (s > 3) { s = 0; y += 1; }
+    return outlookAt(state, zone || "north", y, s);
+  }
+  function zoneHere(state) {
+    var id = state.location && state.location.node;
+    return id ? PC.world.zoneOf(id) : "north";
+  }
+
+  // ---- Layer 2: conditions (§42.4) ------------------------------------------
+
+  function conditionWeights(state, outl, zone) {
+    var w = D().CONDITION[outl].slice();
+    var season = PC.state.seasonName(state);
+    if (season === "Summer") w[0] *= 2;
+    if (season === "Spring" && zone === "north") w[3] *= 2;
+    return w;
+  }
+
+  function rollCondition(state, zone, key) {
+    var o = outlook(state, zone);
+    return weighted(PC.rng.fromKey(key), D().CONDITIONS, conditionWeights(state, o, zone));
+  }
+
+  function densityMod(cond) { return (D().DENSITY[cond] || 0) / 100; }
+
+  // ---- Read Weather (§42.6) ------------------------------------------------------
+
+  function readCheck(state, zone) { return { type: "Read Weather", dr: D().READ_DR[outlook(state, zone)] }; }
+
+  // The automatic roll before a voyage or a port hunt. Its result rides on
+  // the voyage (storms, PR 4): clean redraws a storm once and +1 on Ride Out
+  // Storm; partial +1; setback nothing.
+  function autoRead(state, zone, key) {
+    var r = PC.checks.resolve(state, readCheck(state, zone), key, { conditions: [] });
+    return { outcome: r.outcome, dice: r.dice, edge: r.assessment.edge, outlook: outlook(state, zone) };
+  }
+
+  // ---- Ships and the battle effects (§42.4) ----------------------------------------
+
+  function hasSweeps(cls) { return D().SWEEPS.indexOf(cls) >= 0; }
+
+  // A Navigator at level 4 aboard the flagship (§42.9): his side ignores
+  // Rough's and Fog's penalties and takes Storm's one smaller.
+  function navigatorL4(state) {
+    return (state.officers || []).some(function (o) { return !o.gone && o.type === "Navigator" && (o.aboard || "flagship") === "flagship" && (o.level || 1) >= 4; });
+  }
+
+  // ---- Hurricane strikes (§42.7) ------------------------------------------------------
+
+  // Where the captain's ships lie as the season turns, and whether that is
+  // an open harbor in the zone: the flagship's place decides for the fleet
+  // in company (laid-up ships wait for M8's lay-up).
+  function exposed(state, zone) {
+    var id = state.location && state.location.node;
+    if (!id || PC.world.zoneOf(id) !== zone) return { inZone: false };
+    var n = PC.data.nodes[id] || {};
+    var safe = D().SHELTERED.indexOf(id) >= 0 || n.draft === "Shallow";
+    return { inZone: true, safe: safe, node: id };
+  }
+
+  function strikeShips(state, rnd) {
+    var hits = [];
+    var lo = D().STRIKE_HULL[0], hi = D().STRIKE_HULL[1];
+    var hitOne = function (s, name, isFlag) {
+      var pct = lo + rnd() * (hi - lo);
+      var loss = Math.max(1, Math.round(s.hullMax * pct));
+      var before = s.hull;
+      s.hull = Math.max(1, s.hull - loss);
+      hits.push({ name: name, lost: before - s.hull, flagship: isFlag });
+    };
+    hitOne(state.ship, state.ship.name, true);
+    (state.fleet || []).forEach(function (f) { if (!f.out) hitOne(f, f.name || f.cls, false); });
+    return hits;
+  }
+
+  // One zone's strike roll and its effects; adds lines and chips to out.
+  function strike(state, zone, out, opts) {
+    opts = opts || {};
+    var o = outlook(state, zone);
+    var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), zone, "hurricane-strike", opts.start ? "start" : "end"].join("|"));
+    if (!opts.fixed && r() >= (D().STRIKE[o] || 0)) return false;
+    var waters = PC.data.hunt.WATERS[zone].name;
+    var ex = exposed(state, zone);
+    var fill = function (l) { return l.replace(/\[Waters\]/g, waters).replace(/\[Ship\]/g, state.ship.name); };
+    out.hurricane = out.hurricane || [];
+    if (!ex.inZone) {
+      out.lines.push(fill(D().lines.elsewhere));
+      out.hurricane.push({ zone: zone, outlook: o, hit: false, elsewhere: true });
+    } else if (ex.safe) {
+      out.lines.push(fill(D().lines.spared));
+      out.hurricane.push({ zone: zone, outlook: o, hit: false });
+    } else {
+      var hits = strikeShips(state, r);
+      out.lines.push(fill(opts.start ? D().lines.hitStart : D().lines.hit));
+      hits.forEach(function (h) { out.chips.push({ icon: "hull", text: "Hurricane: the " + h.name + " loses " + h.lost + " hull", ink: "bad" }); });
+      out.hurricane.push({ zone: zone, outlook: o, hit: true, hits: hits });
+      PC.state.addLog(state, "A hurricane struck the " + waters + ": " + hits.map(function (h) { return h.name + " −" + h.lost; }).join(", ") + ".");
+    }
+    return true;
+  }
+
+  // The season-turn hooks (js/world.js).
+  function beforeUpkeep(state, out) {
+    if (PC.state.seasonName(state) !== "Hurricane") return;
+    ["north", "south"].forEach(function (z) {
+      if (z === "north" && state.time.year === 1754) return; // its strike came at the season's start
+      strike(state, z, out);
+    });
+  }
+  function afterTurn(state, out) {
+    if (PC.state.seasonName(state) === "Hurricane" && state.time.year === 1754) {
+      strike(state, "north", out, { fixed: true, start: true });
+    }
+  }
+
+  // ---- The Winter salvage bonus (§42.8) ------------------------------------------------
+
+  function winterSalvage(state, opts) {
+    return PC.state.seasonName(state) === "Winter" && !opts.miranda && (opts.site || "ocracoke") === "ocracoke";
+  }
+
+  // ---- What the screen shows ---------------------------------------------------------
+
+  function badge(word) { return D().BADGE[word] || word; }
+  function outlookLine(state, zone) {
+    var t = (zone === "south" ? "South" : "North") + " this season: " + badge(outlook(state, zone));
+    if ((state.captain.items || []).indexOf("Pirate's Almanac") >= 0) t += " · next season: " + badge(nextOutlook(state, zone));
+    return t;
+  }
+
+  PC.weather = {
+    outlook: outlook, outlookAt: outlookAt, nextOutlook: nextOutlook, zoneHere: zoneHere,
+    conditionWeights: conditionWeights, rollCondition: rollCondition, densityMod: densityMod,
+    readCheck: readCheck, autoRead: autoRead, hasSweeps: hasSweeps, navigatorL4: navigatorL4,
+    exposed: exposed, strike: strike, beforeUpkeep: beforeUpkeep, afterTurn: afterTurn,
+    winterSalvage: winterSalvage, badge: badge, outlookLine: outlookLine,
+  };
+
+  if (PC.world) { PC.world.hook("beforeUpkeep", beforeUpkeep); PC.world.hook("afterTurn", afterTurn); }
 })();
 </script>
   <script>
@@ -14937,6 +15243,55 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Weather (§42): the outlook and condition tables, their effects and the
+ * popup lines. Every number is a placeholder (§42); the lines marked
+ * PLACEHOLDER are §42.7's proposals, for the author to rewrite (PH4).
+ * The rules are in js/weather.js.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+
+  PC.data.weather = {
+    OUTLOOKS: ["Fair", "Unsettled", "Foul"],
+    // §42.3 [Fair, Unsettled, Foul] by season and zone.
+    OUTLOOK: {
+      north: { Spring: [50, 40, 10], Summer: [70, 25, 5], Hurricane: [25, 40, 35], Winter: [30, 45, 25] },
+      south: { Spring: [65, 30, 5], Summer: [60, 30, 10], Hurricane: [15, 40, 45], Winter: [65, 30, 5] },
+    },
+    FIXED: { "1754-2-north": "Foul" }, // Hurricane 1754 in the north (§42.3, the Battle of Ocracoke's storm)
+
+    CONDITIONS: ["Calm", "Fair", "Rough", "Fog", "Storm"],
+    // §42.4 [Calm, Fair, Rough, Fog, Storm] by outlook.
+    CONDITION: { Fair: [20, 60, 10, 10, 0], Unsettled: [10, 35, 30, 15, 10], Foul: [0, 15, 40, 10, 35] },
+    DENSITY: { Calm: -10, Fair: 0, Rough: -5, Fog: -10, Storm: -15 }, // points off §22.5's density
+    SWEEPS: ["Cutter", "Sloop", "Royal Sloop", "Schooner"],             // Calm doesn't slow them
+
+    READ_DR: { Fair: 1, Unsettled: 2, Foul: 3 },  // §42.6
+    STORM_BATCH_DR: 2,                              // §42.4 Ride Out Storm before a Storm batch
+    STRIKE: { Foul: 0.50, Unsettled: 0.15, Fair: 0 }, // §42.7
+    STRIKE_HULL: [0.10, 0.20],
+    SHELTERED: ["ocracoke", "edenton", "haven", "talanee"],
+    WINTER_SALVAGE: { quantity: 1.25, goodFind: 5 }, // §42.8
+
+    // Text badges until the art chat's icons (§42.10).
+    BADGE: { Fair: "☀ Fair", Unsettled: "☁ Unsettled", Foul: "⛈ Foul", Calm: "≈ Calm", Rough: "〰 Rough", Fog: "▒ Fog", Storm: "⛈ Storm" },
+
+    lines: {
+      // §42.7 (PLACEHOLDER, PH4: the author writes them).
+      hit: "PLACEHOLDER: A hurricane tore through the [Waters] as the season turned. The [Ship] rode it out at anchor, but she'll need the shipwright.",
+      spared: "PLACEHOLDER: A hurricane tore through the [Waters]. Snug in the shallows, the [Ship] barely felt it.",
+      elsewhere: "PLACEHOLDER: Word comes of a hurricane in the [Waters].",
+      hitStart: "PLACEHOLDER: A hurricane tore through the [Waters] as the season opened. The [Ship] rode it out at anchor, but she'll need the shipwright.",
+      stormBatch: { clean: "PLACEHOLDER: The storm howls, but she rides it out.", partial: "PLACEHOLDER: A sea comes aboard and stoves in part of the rail.", setback: "PLACEHOLDER: The storm batters her for hours. The crew are soaked, sick and sullen." },
+      // Ollie's line, the first Graveyard visit each Winter (§42.8; the author's line, final).
+      ollieWinter: "Some new wrecks washed up with the latest storm. Should be some good finds out there.",
+    },
+  };
+})();
+</script>
+  <script>
 /* Norfolk (§17.4 and its appendix): the node record the engine reads.
  *
  * The rules are in js/node.js and js/world.js. Every line here is the
@@ -16028,6 +16383,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return '<header class="topbar"><div><span class="brand">Pirate Chronicle</span><span class="wt">(working title)</span></div>' +
       '<span class="when">' + esc(PC.state.seasonName(state)) + " " + state.time.year + "</span>" +
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
+      (state.location && PC.weather ? wxBadge(PC.weather.outlook(state, PC.weather.zoneHere(state)), "This season's weather here (" + PC.weather.zoneHere(state) + ")") : "") +
       // On a phone the strip scrolls away, so the gold rides in the sticky bar (the author's phone notes).
       '<span class="pgold">Purse ' + gold(state.money.purse) + " · Crew " + gold(state.money.crew) + "</span>" +
       '<span class="grow"></span>' + seal() +
@@ -17003,6 +17359,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function graveyardMenu() {
     var S = PC.data.minigames.salvage;
     var greet = (S.greetings || {})[String(Math.max(-1, Math.min(3, PC.npcs.rung(state, "ollie"))))] || (S.greetings || {})["0"] || "";
+    // Ollie's Winter line, the first Graveyard visit each Winter (§42.8).
+    if (state.location.ollieWinter) greet = PC.data.weather.lines.ollieWinter;
     var html = '<div class="block"><div class="person">' + castFrame("ollie").replace('class="castframe"', 'class="castframe" style="flex:0 0 100px"').replace(/width:150px/g, "width:100px") +
       '<div class="pmain">' + nameCard("ollie", "Dive host") + '<div class="say">' + inline(greet) + "</div></div></div>";
     // A Dying Pirate's Wish: the Miranda is the only wreck until the mermaid comes up (§18.2).
@@ -17237,11 +17595,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (v.batch) bits.push("sighting " + Math.min(v.batch.next, v.batch.n) + " of " + v.batch.n + " this action");
     bits.push("hold " + (v.holdMax - v.holdFree) + " of " + v.holdMax);
     if (v.prizesTaken) bits.push(plural(v.prizesTaken, "prize") + " taken");
-    return '<p class="small" style="margin:0 0 8px">' + esc(bits.join(" · ")) + "</p>";
+    return '<p class="small" style="margin:0 0 8px">' + (v.condition ? wxBadge(v.condition) + " " : "") + esc(bits.join(" · ")) + "</p>";
   }
 
-  // The scouting card (§22.3): only what a lookout could see.
+  // A weather word as a text badge (§42.10) until the art chat's icons.
+  function wxBadge(word, title) {
+    if (!word || !PC.weather) return "";
+    return '<span class="wx wx-' + esc(String(word).toLowerCase()) + '" title="' + esc(title || "The weather") + '">' + esc(PC.weather.badge(word)) + "</span>";
+  }
+
+  // The scouting card (§22.3): only what a lookout could see. In Fog, only
+  // her class until the battle opens (§42.4).
   function scoutCard(s, v) {
+    if (v && v.condition === "Fog") {
+      return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">A ' + esc(s.cls) + ' <span class="note">· half-seen in the fog</span></h4>' +
+        '<p class="small" style="margin:4px 0"><i>The lookout: PLACEHOLDER: "Can\'t make out her colors in this murk, Captain."</i></p></div></div>';
+    }
     var rows = [["Flag", s.flag], ["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
       ["Speed", s.speed + " · " + s.handling], ["Draft", s.draft], ["Carries", s.lootTypes.join(", ")], ["Loot", s.loot]];
     return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + dirtyName("A " + s.cls + (s.name ? ", the " + s.name : ""), s.flag !== "Pirate") + ' <span class="note">· ' + esc(s.role === "War" ? "warship" : s.role === "Raider" ? "raider" : s.role === "Hybrid" ? "armed trader" : "merchant") + "</span></h4>" +
@@ -17280,6 +17649,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     } else if (H.phase === "after") {
       html += afterPanel(H.after, H);
     } else if (H.phase === "batchEnd") {
+      if (H.canReadAhead) html += opts([opt({ act: "hreadwx", label: "Read the weather (optional)", check: chk(H.readCheck),
+        meta: "No action · once a batch. Clean: see the next batch's weather, and if it's a storm, wait it out (reroll once). Partial: see it. Setback: nothing." })]);
+      else if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + "</p>";
       html += '<p>The horizon is empty for now.</p><div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
@@ -17328,7 +17700,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function battleShips(b) {
     var html = '<div class="battle"><div class="bside"><div class="h4">Your side</div>' + b.mine.map(function (s) { return shipRow(s, false, false); }).join("") + "</div>" +
       '<div class="bside"><div class="h4">Theirs</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
-    if (b.ca != null) html += '<p class="sc" style="margin:6px 0">Round ' + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
+    if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
   }
 
@@ -18006,6 +18378,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function enterPlace(place) {
     var fire = N().enter(state, place);
+    state.location.ollieWinter = false;
+    if (place === "graveyard" && isWinter() && state.flags.ollieWinterSeen !== PC.state.stamp(state)) { state.flags.ollieWinterSeen = PC.state.stamp(state); state.location.ollieWinter = true; }
     diveZone = null; drinkSpot = null;
     state.location.said = {}; state.location.bark = null; state.location.say = null;
     if (fire) PC.scenes.enterScene(state, fire);
@@ -18122,6 +18496,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
+    "hreadwx": function () { markLog(); PC.hunt.readAhead(state, state.minigame); },
     "hhome": function () { PC.hunt.sailHome(state, state.minigame); PC.minigames.leave(state); },
     "sellhull": function (el) {
       var id = who("shipwright");

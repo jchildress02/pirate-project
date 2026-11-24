@@ -82,7 +82,16 @@
 
   // A plain view of any ship in the battle, by id. The flagship reads the
   // live state; everything else is its own record.
-  function ship(state, b, id) {
+  // Weather (§42.4): in a Calm every ship's Speed counts as 1, except ships
+  // with sweeps (Cutter, Sloop, Royal Sloop, Schooner).
+  function calmed(b, s) {
+    if (!b || b.condition !== "Calm" || !s) return s;
+    if (PC.weather && PC.weather.hasSweeps(s.cls)) return s;
+    s.speed = Math.min(s.speed, 1);
+    return s;
+  }
+  function ship(state, b, id) { return calmed(b, shipRaw(state, b, id)); }
+  function shipRaw(state, b, id) {
     if (id === "flagship") {
       var sh = state.ship, c = cls(sh.type) || {};
       return {
@@ -363,6 +372,8 @@
       speedLoss: {}, rudder: {}, killed: {}, woundedTiers: {}, startCrew: { flagship: state.crew.count },
       startHull: { flagship: state.ship.hull }, firstExchange: true, fleetOrder: "take", openRange: false,
       dueled: false, posBonus: 0, step: null, over: null, captured: [], log0: game.log.length,
+      // The weather (§42.4): the batch's condition, or the voyage's.
+      condition: (game.batch && game.batch.condition) || game.condition || "Fair",
     };
     fleet(state).forEach(function (f) { b.startCrew[f.id] = f.crew; b.startHull[f.id] = f.hull; });
     game.battle = b;
@@ -443,6 +454,7 @@
     var b = game.battle;
     var foes = fightingEnemies(b);
     if (foes.some(function (e) { return e.hunter || e.escort; })) return startRound(state, game);
+    if (b.condition === "Fog") return startRound(state, game); // a ship met in fog gets no pre-battle flee roll (§42.4)
     var theirSpeed = Math.min.apply(null, foes.map(function (e) { return ship(state, b, e.id).speed; }));
     var p = fleeChance(theirSpeed - fleetSpeed(state, b), fleetCA(state, b));
     if (!chance(state, game, "fleePre", p)) { say(state, game, L().stays); return startRound(state, game); }
@@ -476,6 +488,39 @@
     return true;
   }
 
+  // ---- Weather in battle (§42.4) -------------------------------------------
+  // Each returns parts for the player's roll; a Navigator at level 4 spares
+  // his side Rough's and Fog's penalties and takes Storm's one smaller.
+  function nav4(state) { return PC.weather && PC.weather.navigatorL4(state); }
+  function weatherParts(state, b, kind) {
+    var c = b.condition, out = [];
+    if (!c || c === "Fair" || c === "Calm") return out;
+    var me = ship(state, b, "flagship"), en = ship(state, b, b.pairs.flagship);
+    if (!en) return out;
+    if (c === "Rough") {
+      if (kind === "exchange" && me.size !== en.size) {
+        if (me.size < en.size && !nav4(state)) out.push({ label: "Rough seas (the smaller ship)", value: -1 });
+        if (en.size < me.size) out.push({ label: "Rough seas (she's smaller)", value: 1 });
+      }
+      if (kind === "grapple" && !nav4(state)) out.push({ label: "Rough seas", value: -1 });
+      if (kind === "repel") out.push({ label: "Rough seas (she boards)", value: 1 });
+    }
+    if (c === "Fog") {
+      if (kind === "position" && me.speed !== en.speed) {
+        if (me.speed > en.speed) out.push({ label: "Fog (you're faster)", value: 1 });
+        else if (!nav4(state)) out.push({ label: "Fog (she's faster)", value: -1 });
+      }
+      if (kind === "flee") out.push({ label: "Fog (breaking off)", value: 1 });
+    }
+    if (c === "Storm") {
+      // Storm is -2 on the Exchange for both sides: in one opposed roll the
+      // two cancel, unless a Navigator at level 4 takes only -1 (DEFAULT).
+      if (kind === "exchange" && nav4(state)) out.push({ label: "Storm (your Navigator)", value: 1 });
+      if (kind === "firearms") out.push({ label: "Storm (firearms)", value: nav4(state) ? 0 : -1 });
+    }
+    return out.filter(function (x) { return x.value; });
+  }
+
   // Beat 1: Position (Maneuver). DR is her captain's rating.
   function positionCheck(state, b) {
     var me = ship(state, b, "flagship"), en = ship(state, b, b.pairs.flagship);
@@ -485,6 +530,7 @@
     if (pk) extra.push({ label: "Support", value: pk });
     if (b.posBonus) extra.push({ label: b.posBonus > 0 ? "Caught on your terms" : "They caught you", value: b.posBonus });
     if (b.rudder[en.id]) extra.push({ label: "Her rudder", value: 1 });
+    extra = extra.concat(weatherParts(state, b, "position"));
     return { type: "Maneuver", dr: clamp(en.rating, 0, 8), extra: extra.filter(function (x) { return x.value; }) };
   }
 
@@ -526,7 +572,7 @@
       { label: "Combat Advantage", value: pairCA(state, b, "flagship", en.id) },
       { label: "Position", value: b.exMod || 0 },
       { label: "Support", value: perk(state, b, "exchange") - enemyPerk(state, b, "exchange", en.id) },
-    ].filter(function (x) { return x.value; });
+    ].concat(weatherParts(state, b, "exchange")).filter(function (x) { return x.value; });
     var edge = parts.reduce(function (a, x) { return a + x.value; }, 0);
     return { parts: parts, edge: clamp(edge, -4, 6) };
   }
@@ -694,7 +740,12 @@
     var en = ship(state, b, b.pairs.flagship);
     var extra = [{ label: "Speed", value: clamp(fleetSpeed(state, b) - en.speed, -2, 2) }];
     if (onFlagship(state, "Navigator")) extra.push({ label: "Navigator", value: 1 });
-    return { type: "Outrun", dr: clamp(en.rating, 0, 8), extra: extra.filter(function (x) { return x.value; }) };
+    var fleeing = b.chaseMode === "flee" || (b.chase && b.chase.mode === "flee");
+    if (fleeing) extra = extra.concat(weatherParts(state, b, "flee"));
+    // A fleeing ship may run into the storm (§42.4): Ride Out Storm in
+    // place of Outrun.
+    var type = fleeing && b.condition === "Storm" ? "Ride Out Storm" : "Outrun";
+    return { type: type, dr: clamp(en.rating, 0, 8), extra: extra.filter(function (x) { return x.value; }) };
   }
 
   function doChase(state, game) {
@@ -774,7 +825,7 @@
     var b = game.battle;
     if (b.step !== "grapple") throw new Error("Not the moment for that.");
     var en = lead(b);
-    var extra = b.closeBonus ? [{ label: "Closed on her", value: 1 }] : [];
+    var extra = (b.closeBonus ? [{ label: "Closed on her", value: 1 }] : []).concat(weatherParts(state, b, "grapple"));
     return M().roll(state, game, { type: "Board", dr: clamp(en.rating, 0, 8), extra: extra }, "grapple", {}, ["Battle"]);
   }
 
@@ -794,7 +845,7 @@
   function doRepel(state, game) {
     var b = game.battle;
     if (b.step !== "repel") throw new Error("Not the moment for that.");
-    return M().roll(state, game, { type: "Board", dr: clamp(lead(b).rating, 0, 8) }, "repel", {}, ["Battle"]);
+    return M().roll(state, game, { type: "Board", dr: clamp(lead(b).rating, 0, 8), extra: weatherParts(state, b, "repel") }, "repel", {}, ["Battle"]);
   }
 
   function settleRepel(state, game, p) {
@@ -865,7 +916,7 @@
     var gb = gunBonus(state);
     if ((id === "lead" || id === "duel") && !b.board.shotDone && gb != null) {
       b.board.shotDone = true;
-      return M().roll(state, game, { type: "Marksmanship", dr: clamp(lead(b).rating, 0, 8), extra: gb ? [{ label: "The pistol", value: gb }] : [] }, "shot", { then: id }, ["Battle"]);
+      return M().roll(state, game, { type: "Marksmanship", dr: clamp(lead(b).rating, 0, 8), extra: (gb ? [{ label: "The pistol", value: gb }] : []).concat(weatherParts(state, b, "firearms")) }, "shot", { then: id }, ["Battle"]);
     }
     return rollAction(state, game, a);
   }
@@ -1096,7 +1147,7 @@
     if (!b) return null;
     var en = lead(b);
     var v = {
-      step: b.step, round: b.round, over: b.over, lostHow: b.lostHow || null,
+      step: b.step, round: b.round, over: b.over, lostHow: b.lostHow || null, condition: b.condition || null,
       enemies: b.enemies.map(function (e) { return shipLine(state, b, e.id); }),
       mine: ["flagship"].concat(fleet(state).filter(function (f) { return !f.out || b.startCrew[f.id] != null; }).map(function (f) { return f.id; })).map(function (id) { return shipLine(state, b, id); }),
       target: b.pairs.flagship || null, pairs: b.pairs, support: b.support, enemySupport: b.enemySupport,
@@ -1123,6 +1174,7 @@
 
   PC.combat = {
     rollEffect: rollEffect,
+    weatherParts: weatherParts,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,
     begin: begin, engage: engage, setTarget: setTarget, assignFleetShip: assignFleetShip, showOfForce: showOfForce,

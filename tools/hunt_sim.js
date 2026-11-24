@@ -3,6 +3,12 @@
  * and reports gold per action, prizes, losses and battle lengths.
  *
  *   node tools/hunt_sim.js [hunts] [--old] [--hull10] [--grape4] [--grapeguns] [--bands]
+ *                          [--season Spring|Summer|Hurricane|Winter] [--weather]
+ *
+ * Milestone 7: weather (§42.12). Every batch rolls its condition from the
+ * season's outlook, as in play. --season picks the season (default Spring,
+ * 1755 so Hurricane isn't the fixed Foul 1754); --weather prints how often
+ * each condition came up.
  *
  * Milestone 6's balance check: --hull10 counts hull ÷ 10 in Battle Rating
  * (P12b); --grape4 doubles grapeshot again (P13a); --grapeguns takes
@@ -16,9 +22,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/norfolk.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -29,6 +35,8 @@ if (flag("--hull10")) PC.data.hunt.BR_HULL_DIV = 10;
 if (flag("--grape4")) PC.data.hunt.GRAPE_MULT = 4;
 if (flag("--grapeguns")) PC.data.hunt.GRAPE_BY_GUNS = { heavy: 1 / 3, light: 1 / 6 };
 var BANDS = {}, BANDS_N = 0;
+var SEASON = (function () { var i = process.argv.indexOf("--season"); return i >= 0 ? process.argv[i + 1] : "Spring"; })();
+var CONDS = {}, CONDS_N = 0;
 if (OLD) {
   // Before the planning rulings: 15% (min 1) on a clean clash at any band;
   // no Shaken stacking (one pending step, used once): approximated by a cap of 1.
@@ -48,6 +56,7 @@ function fitted(seed) {
   s.articles = { terms: PC.articles.defaults(), greed: 0, signed: { year: 1754, season: 0 } };
   s.ap.left = 7;
   s.flags.ocr_underworld_done = true;
+  s.time.year = 1755; s.time.season = Math.max(0, PC.state.SEASONS.indexOf(SEASON));
   return s;
 }
 
@@ -66,7 +75,9 @@ function policyScout(s, g, v) {
 
 function play(s, g) {
   var steps = 0;
+  var seenBatch = null;
   while (!g.over && steps++ < 400) {
+    if (g.batch && g.batch !== seenBatch) { seenBatch = g.batch; CONDS[g.batch.condition] = (CONDS[g.batch.condition] || 0) + 1; CONDS_N++; }
     if (g.pending) { PC.minigames.settle(s); PC.hunt.checkBattleOver(s, g); continue; }
     var v = PC.minigames.view(s);
     if (v.phase === "gameover") { g.over = true; break; }
@@ -161,4 +172,5 @@ console.log("  prizes per hunt:     " + (res.prizes / N).toFixed(2));
 console.log("  boardings per hunt:  " + (res.boardings / N).toFixed(2) + ", clashes per boarding " + (res.clashes / Math.max(1, res.boardings)).toFixed(2));
 console.log("  flagship lost:       " + (100 * res.lost / N).toFixed(1) + "% (captain died " + (100 * res.died / N).toFixed(1) + "%)");
 if (process.argv.indexOf("--why") >= 0) console.log(LOSTTO);
+if (flag("--weather")) console.log("  " + SEASON + " batch weather: " + Object.keys(CONDS).map(function (k) { return k + " " + Math.round(100 * CONDS[k] / Math.max(1, CONDS_N)) + "%"; }).join(", "));
 if (flag("--bands")) console.log("  odds bands scouted:  " + Object.keys(BANDS).sort(function (a, b) { return b - a; }).map(function (k) { return PC.data.hunt.CA_NAMES[k] + " " + Math.round(100 * BANDS[k] / BANDS_N) + "%"; }).join(", "));
