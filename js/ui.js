@@ -584,7 +584,13 @@
       var rx = PC.officers.reactions(o, tags);
       var up = rx.reduce(function (a, r) { return a + r.dir; }, 0);
       if (!up) return null;
-      var why = rx.filter(function (r) { return r.dir === (up > 0 ? 1 : -1); }).map(function (r) {
+      var shown = rx.filter(function (r) { return r.dir === (up > 0 ? 1 : -1); });
+      // A hidden drive or fear that reacts to the same tag as a known trait
+      // adds nothing on screen (Playtest Pins 0.8, #13/#20: Davey's Jovial
+      // and his hidden drive both like revelry).
+      var known = shown.filter(function (r) { return !r.hidden; }).map(function (r) { return r.tag + "|" + r.dir; });
+      shown = shown.filter(function (r) { return !r.hidden || known.indexOf(r.tag + "|" + r.dir) < 0; });
+      var why = shown.map(function (r) {
         var src = r.source || (r.hidden === "fear" ? "A fear " + (o.gender === "f" ? "she" : "he") + " hasn't told you" : r.hidden === "drive" ? "A drive " + (o.gender === "f" ? "she" : "he") + " hasn't told you" : "Their nature");
         return src + ": " + (r.dir > 0 ? "likes " : "dislikes ") + r.tag;
       }).join("; ");
@@ -922,12 +928,15 @@
         "<tr><td>The chest</td><td>" + gold(p.pool) + "</td></tr><tr><td>Held back for next time (10%)</td><td>" + gold(p.carry) + "</td></tr>" +
         "<tr><td>One share</td><td>" + gold(p.one) + "</td></tr><tr><td>Your share, into your purse</td><td>+" + gold(p.captain) + "</td></tr>" +
         "<tr><td>Your officers</td><td>" + gold(p.officers) + "</td></tr><tr><td>" + plural(p.handsN, "hand") + "</td><td>" + gold(p.hands) + "</td></tr></table>";
+      html += '<p>' + esc(S.perHand.replace("{gold}", gold(p.one)).replace("{mood}", PC.world.handMood(p.one))) + "</p>";
       html += chips([{ icon: "morale", text: "Crew morale reset to " + state.crew.morale }, { icon: "pressure", text: "The crew's grievances are settled" }, { icon: "ap", text: "The Winter's 7 actions are spent" }]);
       return html + '<div class="actions"><button class="primary" data-act="splitdepart" data-top="1">Continue</button></div>';
     }
     if (sp.step === "resign") {
       var dd = sp.departed || {};
-      html += '<div class="prose">' + prose(S.departures) + "</div>" + chips([{ icon: "officer", text: plural(dd.left || 0, "hand") + " went ashore for good", ink: "bad" }, { icon: "officer", text: plural(dd.back || 0, "hand") + " signed on again", ink: "good" }, { icon: "officer", text: plural(state.crew.count, "hand") + " aboard your flagship" }]);
+      html += '<div class="prose">' + prose(S.departures) + "</div>" +
+        '<p>' + esc(S.crewLine.replace("{skeleton}", dd.skeleton || 0).replace("{left}", dd.left || 0).replace("{back}", dd.back || 0).replace("{aboard}", state.crew.count)) + "</p>" +
+        chips([{ icon: "officer", text: plural(dd.left || 0, "hand") + " went ashore for good", ink: "bad" }, { icon: "officer", text: plural(dd.back || 0, "hand") + " signed on again", ink: "good" }, { icon: "officer", text: plural(state.crew.count, "hand") + " aboard your flagship" }]);
       html += '<div class="prose">' + prose(S.resign) + "</div>";
       if (!state.articles) return html + '<div class="actions"><button class="primary" data-act="splitarticles">Draw up the Articles</button></div>';
       return html + '<p class="note">The Articles are signed.</p><div class="actions"><button class="primary" data-act="splitvote" data-top="1">Continue</button></div>';
@@ -1007,6 +1016,8 @@
       html += '<p class="note" style="max-width:680px">This is your first visit to the Tavern. Ask ' + esc(PC.npcs.get(state, keeper).first) + " for rumors" +
         (N().oneArmedHere(state) ? ", talk to the one-armed pirate" : "") + ", or leave; the rest opens once your first visit is done.</p>";
     }
+    // "At the bar" sits above the patrons and officers (Playtest Pins 0.8, #21).
+    html += nodeExtras("tavern");
     html += DIVIDER + '<div class="block"><div class="h4">Around the Tavern</div>' + sayFor("around");
     var list2 = [];
     if (N().oneArmedHere(state)) list2.push(opt({ act: "oneArmed", label: "Talk to the one-armed pirate", meta: "He sits with his mates, drinking." }));
@@ -1024,7 +1035,7 @@
         return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
       }).join("") + "</div></div>";
     }
-    return html + "</div>" + nodeExtras("tavern") + DIVIDER + officersBlock();
+    return html + "</div>" + DIVIDER + officersBlock();
   }
 
   // Norfolk's own entries and the barkeep favor (Milestone 7, PR 5; records
@@ -1050,13 +1061,18 @@
         }
       }
     }
-    if (place === "docks" && id === "norfolk" && (state.npcs.christoph || {}).met && !f.nor_appr_done) {
-      var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
-      list.push(opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
-        meta: "The Apprentices · 1 action to help", lock: failed ? "Christoph wants you away from his ship until next season" : state.ap.left < 1 ? "No actions left this season" : null }));
-    }
     if (!list.length) return "";
     return DIVIDER + '<div class="block"><div class="h4">' + (place === "tavern" ? "At the bar" : "Around the yard") + "</div>" + opts(list) + "</div>";
+  }
+
+  // The Apprentices' opening question sits right under Christoph's line
+  // (Playtest Pins 0.8, #17). Talking them round costs no action (#18).
+  function apprenticesOpt() {
+    var id = N().here(state), f = state.flags;
+    if (id !== "norfolk" || !(state.npcs.christoph || {}).met || f.nor_appr_done) return "";
+    var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
+    return opts([opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
+      meta: "The Apprentices · talking him round costs no action; fixing it yourself, 1", lock: failed ? "Christoph wants you away from his ship until next season" : null })]);
   }
 
   // Officer recruitment (§25.7): two seats a season.
@@ -1113,6 +1129,7 @@
     var g = N().shipwrightGreeting(state);
     var html = '<div class="block">' + nameCard(wright, "Shipwright");
     html += state.location.say && state.location.say.to === wright ? sayFor(wright) : '<div class="say">' + inline(g.line) + "</div>";
+    html += apprenticesOpt();
     if (!g.refuse) {
       html += shipLine();
       var missing = sh.hullMax - sh.hull;
@@ -1315,17 +1332,23 @@
       html += haggleBlock(prov);
       var pp = N().provisionsPrice(state);
       var provMax = Math.min(free, afford(pp));
-      html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
-        (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="secondary" data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' +
-          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return gold(n * pp) + " gold · aboard after: " + (state.provisions + n) + " lots, " + timeAtSea(state.provisions + n); }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
-        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+      // Buy and Sell look different (Playtest Pins 0.8, #8): own sub-headings,
+      // Buy filled and Sell outlined, "You pay" / "They pay", and what you'd
+      // have after the trade.
+      var onHand = function () { return state.money.crew + state.money.purse; };
+      html += '<div class="svc"><h4>Provisions</h4><p class="small">One lot feeds 5 hands for an action at sea. Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+        '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(pp) + " gold each.</p>" +
+        (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="primary" data-act="buyprov" data-for="q-prov">' +
+          totalSlot(function () { return "Buy · " + gold(val("q-prov") * pp); }, "") + "</button></div>" +
+          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (state.provisions + n) + " lots aboard (" + timeAtSea(state.provisions + n) + ") · " + gold(onHand() - n * pp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
         // R7: provisions sell back at half his price, out of his coffers.
         (state.provisions > 0 ? (function () {
           var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
           var smax = Math.max(1, Math.min(state.provisions, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
-          return '<p class="small" style="margin-top:8px">He buys provisions back at ' + gold(sp) + " gold a lot.</p>" +
-            '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
-            totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>";
+          return '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
+            '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary outline" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
+            totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>" +
+            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, state.provisions - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
         })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +

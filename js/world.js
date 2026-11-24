@@ -384,6 +384,15 @@
     return sp.payout;
   }
 
+  // What each hand takes away, and how the hands take it (Playtest Pins 0.8,
+  // #25; the D1 bands, placeholders): under 50 grumbling, 50-149 content,
+  // 150-299 pleased, 300+ delighted.
+  function handMood(gold) {
+    var bands = W().split.MOOD_BANDS;
+    for (var i = bands.length - 1; i >= 0; i--) if (gold >= bands[i].min) return bands[i].word;
+    return bands[0].word;
+  }
+
   // Departures and re-signers (§26.9): a skeleton crew stays (the minimum
   // to sail the flagship and every fleet ship, chosen at random) with all
   // officers; everyone else leaves; some re-sign by the morale band before
@@ -405,6 +414,7 @@
       go.forEach(function (t) { if (r() < rate) { res[t]++; back++; } else left++; });
       return res;
     }
+    var skeleton = Math.min(state.ship.crewMin || 5, state.crew.count);
     var flag = shuffleOut(state.crew.tiers, state.ship.crewMin || 5);
     state.crew.tiers = flag;
     state.crew.count = E().TIER_ORDER.reduce(function (a, t) { return a + flag[t]; }, 0);
@@ -415,7 +425,7 @@
       f.crewTiers = res;
       f.crew = E().TIER_ORDER.reduce(function (a, k) { return a + res[k]; }, 0);
     });
-    sp.departed = { left: left, back: back, aboard: state.crew.count };
+    sp.departed = { left: left, back: back, aboard: state.crew.count, skeleton: skeleton };
     // The articles are re-signed now (§26.1): harder terms are allowed again.
     sp.oldTerms = state.articles ? state.articles.terms : null;
     state.articles = null;
@@ -638,7 +648,7 @@
     canSail: canSail, sail: sail, arriveFrom: arriveFrom, destinations: destinations,
     hook: hook, endSeason: endSeason, splitWinter: splitWinter,
     impliedShare: impliedShare, holdPressure: holdPressure, qmReading: qmReading, startWinter: startWinter, holdSplit: holdSplit,
-    doSplit: doSplit, departures: departures, afterResign: afterResign, winterOptions: winterOptions, spendWinter: spendWinter, finishSplit: finishSplit,
+    doSplit: doSplit, handMood: handMood, departures: departures, afterResign: afterResign, winterOptions: winterOptions, spendWinter: spendWinter, finishSplit: finishSplit,
     totalShares: totalShares, splitHullValue: splitHullValue,
     tradeFee: tradeFee, buyout: buyout, tradeIncome: tradeIncome, tradeOptions: tradeOptions, enroll: enroll, collectLedger: collectLedger,
     devSkipTo: devSkipTo,

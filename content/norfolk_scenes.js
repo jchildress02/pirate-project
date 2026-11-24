@@ -152,7 +152,7 @@
       { when: { fn: "qmWarmth:neutral" }, text: "\"I don't know about you, but I certainly wouldn't want to tangle with her,\" [Quartermaster] says of the flagship.\n\n" },
       { when: { fn: "qmWarmth:cold" }, text: "\"Don't let her size fool you; she's only as good as her captain,\" cautions [Quartermaster]. \"And the Scottish navy has a rather spotty track record in that department.\"\n\n" },
       "As you pull slowly into the harbor, giving the fleet a wide berth, you take notice of the infrastructure required to support a fleet like that. Spacious warehouses and sturdy wharves line the waterfront, and a small army of porters, sailors, and craftsmen work at a brisk pace up and down the length of the docks.\n\n",
-      "As your crew ties {ship} up at one of the many docks and you disembark, you're met by a bookish man in an official-looking gold uniform, with his spectacles pushed to the end of his nose, carrying a thick ledger underneath his arm. He's flanked by two uniformed soldiers carrying polished muskets.\n\n",
+      "As your crew ties the {ship} up at one of the many docks and you disembark, you're met by a bookish man in an official-looking gold uniform, with his spectacles pushed to the end of his nose, carrying a thick ledger underneath his arm. He's flanked by two uniformed soldiers carrying polished muskets.\n\n",
       { when: { tag: "Brute" }, text: "The soldiers' hands tense around their muskets as they watch you step onto the docks.\n\n" },
       "\"Welcome to Norfolk,\" he says in a nasally voice. \"The fee to dock here is {port_fee}. May I inquire as to the purpose of your visit?\" Judging by the soldiers, the question doesn't stem from innocent curiosity.",
     ],
@@ -368,6 +368,9 @@
   // ---- The Apprentices (Part 4 §10; partials ruled) -------------------------------------
 
   var APP_SET = { setback: R("You only make things worse. Christoph shoos you away from his ship. \"Out, before you sink her at the dock!\"", [{ ap: -1 }, { seasonFlag: "nor_appr_failed" }]) };
+  // Talking them round costs no action, even on a setback (Playtest Pins 0.8, #18; was PH24's 1 AP).
+  var NEED_AP = { lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" };
+  APP_SET.talkSetback = R(APP_SET.setback.text, [{ seasonFlag: "nor_appr_failed" }]);
   var DONE = { flag: "nor_appr_done" };
   S("nor_appr", {
     kind: "check", title: "The Apprentices", where: "Norfolk, the Dockyard", repeat: "always", manyChoices: true,
@@ -376,17 +379,17 @@
       K("Let me take a look.", [], { type: "Repair & Refit", dr: 2 },
         R("By sundown the planks sit flush. Christoph runs his hand along the seams. \"Not bad. Not bad at all.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
         R("The planks sit flush at last, but only after you've split half a stack of good timber. Christoph sighs and hands you the bill.", [{ ladder: { npc: "christoph", delta: 1 } }, { hook: "pay_gold", amount: 100 }, DONE, { ap: -1 }]),
-        APP_SET.setback),
+        APP_SET.setback, NEED_AP),
       C("Would a more experienced assistant help? I've got a hand who knows his way around a hull.", ["Generosity"],
         R("Within the hour, the boys are following your man's lead. \"Now this is more like it,\" Christoph says. \"I owe you, Captain.\"", [{ hook: "lose_hand" }, { ladder: { npc: "christoph", delta: 2 } }, DONE]),
         { hiddenUnless: { fn: "seasonedHand" } }),
       K("Go easy on them. They're boys, and they're still learning. Remember what you were like at that age?", ["Generosity"], { type: "Persuade", dr: 2 },
-        R("Christoph glares at the timber, then at the boys. \"At least I had a hair more respect back then. But I take your point. I'll give them one more chance.\" The chastened boys look at you like you hung the moon.", [{ ladder: { npc: "christoph", delta: 1 } }, { flag: "nor_free_repair" }, DONE, { ap: -1 }]),
-        R("Christoph grumbles, but agrees to give the boys another chance. \"Don't expect any favors for it, though.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
-        APP_SET.setback),
+        R("Christoph glares at the timber, then at the boys. \"At least I had a hair more respect back then. But I take your point. I'll give them one more chance.\" The chastened boys look at you like you hung the moon.", [{ ladder: { npc: "christoph", delta: 1 } }, { flag: "nor_free_repair" }, DONE]),
+        R("Christoph grumbles, but agrees to give the boys another chance. \"Don't expect any favors for it, though.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE]),
+        APP_SET.talkSetback),
       C("Hand me that saw. I'll show them how it's done.", [],
         R("By sundown the planks sit flush. Christoph runs his hand along the seams. \"Not bad. Not bad at all.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
-        { hiddenUnless: { profession: "Artisan" } }),
+        Object.assign({ hiddenUnless: { profession: "Artisan" } }, NEED_AP)),
       C("Sounds like your problem, not mine.", [], R("")),
     ],
   });

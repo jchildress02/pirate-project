@@ -91,7 +91,7 @@
     underworld: {
       leadIn: "\"Bobby's been hearing things lately.\"",
       lines: [
-        { id: "uw_maelis_wants", type: "Underworld", text: "\"Bobby hears the pretty miss Maelis is paying double for anything old and strange. Bobby wishes he had something like that.\"" },
+        { id: "uw_maelis_wants", type: "Underworld", text: "\"Bobby hears the pretty Miss Maelis is paying double for anything old and strange. Bobby wishes he had something like that.\"" },
         { id: "uw_letter_buyer", type: "Underworld", tier: "A", text: "\"Got a letter of marque you aren't using? Bobby knows a quiet house in [Node] that pays for papers. Bobby doesn't know what they do with them. Bobby doesn't want to know.\"" },
       ],
       chance: { "0": 0.10, "1": 0.20, "2": 0.35, "3": 0.50 },

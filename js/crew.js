@@ -341,8 +341,10 @@
     return m;
   }
 
-  // Open the stores: once a season, 1 unit per 15 crew (rounded up).
-  function storesNeeded(state) { return Math.max(1, Math.ceil(state.crew.count / 15)); }
+  // Open the stores: once a season, 1 unit per 5 crew (rounded up).
+  // One unit per 5 crew, rounded up (Playtest Pins 0.8, #24; was 15).
+  var STORES_PER = 5;
+  function storesNeeded(state) { return Math.max(1, Math.ceil(state.crew.count / STORES_PER)); }
 
   function storeChoices(state) {
     var need = storesNeeded(state);

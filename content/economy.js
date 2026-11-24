@@ -58,24 +58,25 @@
   };
 
   // §20.9 Special goods with a base price. stores: the morale a unit gives
+  // (retuned in Playtest Pins 0.8, #24: a wider gap between cheap and good)
   // when the stores are opened (§24.12).
   PC.data.goods = {
     "Rice": { base: 10, kind: "bulk" },
     "Molasses": { base: 10, kind: "bulk" },
     "Sugar": { base: 15, kind: "bulk" },
-    "Tobacco": { base: 20, kind: "bulk", stores: 5 },
+    "Tobacco": { base: 20, kind: "bulk", stores: 4 },
     "Cotton": { base: 20, kind: "bulk" },
     "Mahogany and logwood": { base: 25, kind: "bulk" },
     "Furs and hides": { base: 45, kind: "bulk" },
     "Cocoa": { base: 50, kind: "bulk" },
     "Coffee": { base: 60, kind: "bulk" },
-    "Kill-devil rum": { base: 20, kind: "drink", stores: 5 },
-    "Plantation rum": { base: 35, kind: "drink", stores: 7 },
+    "Kill-devil rum": { base: 20, kind: "drink", stores: 3 },
+    "Plantation rum": { base: 35, kind: "drink", stores: 6 },
     "Nassau reserve": { base: 120, kind: "drink", stores: 10 },
-    "Frisian genever": { base: 40, kind: "drink", stores: 7 },
-    "Scotch whisky": { base: 60, kind: "drink", stores: 7 },
-    "French wine": { base: 50, kind: "drink", stores: 7 },
-    "French brandy": { base: 70, kind: "drink", stores: 7 },
+    "Frisian genever": { base: 40, kind: "drink", stores: 6 },
+    "Scotch whisky": { base: 60, kind: "drink", stores: 6 },
+    "French wine": { base: 50, kind: "drink", stores: 6 },
+    "French brandy": { base: 70, kind: "drink", stores: 8 },
     "Indigo": { base: 40, kind: "fine" },
     // Salvage goods (§32.15; prices §20.9).
     "Ming porcelain": { base: 250, kind: "fine" },

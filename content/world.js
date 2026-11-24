@@ -104,6 +104,11 @@
       forced: "PLACEHOLDER: The crew won't wait any longer. They want their shares, and they want them now.",
       held: "PLACEHOLDER: You tell the crew there'll be no split this Winter. They take it about as well as you'd expect.",
       payout: "PLACEHOLDER: The prize ships are sold off and the crew's chest is opened on the deck. The Quartermaster counts out every man's share.",
+      // Each hand's take and the mood word (Playtest Pins 0.8, #25; D1, placeholders).
+      perHand: "Each hand takes away {gold} gold, and the hands are {mood}.",
+      MOOD_BANDS: [{ min: 0, word: "grumbling" }, { min: 50, word: "content" }, { min: 150, word: "pleased" }, { min: 300, word: "delighted" }],
+      // The skeleton crew stays; the rest go or come back (#26).
+      crewLine: "{skeleton} stay aboard as the skeleton crew. {left} leave with their shares and {back} sign on again: {aboard} aboard.",
       departures: "PLACEHOLDER: With their shares in their pockets, most of the hands go ashore for good. A few come back to sign on again.",
       resign: "PLACEHOLDER: The skeleton crew and the men who came back gather to sign the Articles again.",
       vote: "PLACEHOLDER: The crew vote on their Quartermaster again.",
