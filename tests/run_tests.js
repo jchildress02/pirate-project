@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -3471,6 +3471,45 @@ test("bribes at Norfolk's first inspection come from the purse first", function 
   s.money.purse = 1000; s.money.crew = 1000;
   PC.sceneFns.apply(s, { hook: "nor_pay", what: "bribe_before", mult: 1 });
   eq(s.money.crew, 1000, "crew gold untouched while the purse covers it");
+});
+
+// ---- Milestone 8, PR 4b: Forge a Clearance (§20.3) ----
+console.log("Milestone 8, PR 4b: Forge a Clearance (§20.3)");
+
+test("forging: 1 action, once a season; clean 20 units untrained, 50 at training 3; partial 10 / 40; setback none", function () {
+  var s = huntReady("fg1");
+  s.cargo.treasure.dirty = 30;
+  eq(PC.forgery.budget(s, "clean"), 20); eq(PC.forgery.budget(s, "partial"), 10); eq(PC.forgery.budget(s, "setback"), 0);
+  s.captain.training.Forge = 3; eq(PC.forgery.budget(s, "clean"), 50); eq(PC.forgery.budget(s, "partial"), 40);
+  s.captain.training.Forge = 0;
+  var ap = s.ap.left;
+  withDice([6, 6], function () { PC.forgery.roll(s); });
+  eq(s.ap.left, ap - 1); eq(PC.forgery.rec(s).budget, 20);
+  ok(!PC.forgery.canForge(s).ok, "once a season");
+  var clean0 = s.cargo.treasure.clean;
+  var r = PC.forgery.apply(s, PC.forgery.defaultPicks(s, 20));
+  eq(s.cargo.treasure.dirty, 10); eq(s.cargo.treasure.clean, clean0 + 20); eq(r.weight, 20);
+});
+
+test("forging: precious goods weigh 2; the picker can't go over the papers; the Forger's Kit adds 5 and the Matrices 10", function () {
+  var s = huntReady("fg2");
+  PC.crew.addGood(s, "Emeralds", 8, true); s.cargo.treasure.dirty = 5;
+  withDice([6, 6], function () { PC.forgery.roll(s); });
+  var p = PC.forgery.defaultPicks(s, 20);
+  eq(p.Emeralds, 8, "the most valuable first"); eq(p.treasure, 4);
+  var threw = false; try { PC.forgery.apply(s, { Emeralds: 8, treasure: 5 }); } catch (e) { threw = true; }
+  ok(threw, "21 units won't fit 20");
+  s.captain.items.push("Forger's Kit", "Engraver's Seal Matrices");
+  eq(PC.forgery.budget(s, "clean"), 35);
+  ok(PC.checks.assess(s, PC.forgery.check()).parts.some(function (x) { return /Matrices/.test(x.label) && x.value === 1; }));
+});
+
+test("forged goods are clean: they pass an inspection", function () {
+  var s = inspectAt("fg3", 45);
+  s.cargo.treasure.dirty = 10;
+  withDice([6, 6], function () { PC.forgery.roll(s); });
+  PC.forgery.apply(s, { treasure: 10 });
+  eq(PC.inspections.dirtyStacks(s).length, 0);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

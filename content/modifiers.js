@@ -116,6 +116,10 @@
   add("Failing Eyes", { edge: plus(["Keep Watch", "Appraise"], -1) });
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
+  // Forging (§32.8): the kit rerolls Forge and adds 5 units on a clean or
+  // partial; the matrices add +1 Forge and 10 units. They stack.
+  add("Forger's Kit", { reroll: reroll(["Forge"]), forgeUnits: 5 });
+  add("Engraver's Seal Matrices", { edge: plus(["Forge"], 1), forgeUnits: 10 });
   add("Shark-Tooth Necklace", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
   // The minigames' tags and items (§14.5, §14.4, §32.12).
   // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
