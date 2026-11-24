@@ -32,7 +32,12 @@
     var r = PC.rng.fromKey([state.world.seed, year, season, zone, "outlook"].join("|"));
     return weighted(r, D().OUTLOOKS, D().OUTLOOK[zone][SEASONS[season]]);
   }
-  function outlook(state, zone) { return outlookAt(state, zone || "north", state.time.year, state.time.season); }
+  function outlook(state, zone) {
+    // The Developer's override for this season (§44's test panel).
+    var dev = state.world && state.world.devOutlook;
+    if (dev && dev.stamp === PC.state.stamp(state) && dev[zone || "north"]) return dev[zone || "north"];
+    return outlookAt(state, zone || "north", state.time.year, state.time.season);
+  }
   function nextOutlook(state, zone) {
     var s = state.time.season + 1, y = state.time.year;
     if (s > 3) { s = 0; y += 1; }

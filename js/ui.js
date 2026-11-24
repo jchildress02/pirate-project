@@ -1614,7 +1614,7 @@
   }
 
   function huntStatus(v) {
-    var bits = ["Action " + v.apUsed + " of up to " + v.maxAp];
+    var bits = v.encounter ? ["A ship met on your voyage"] : ["Action " + v.apUsed + " of up to " + v.maxAp];
     if (v.batch) bits.push("sighting " + Math.min(v.batch.next, v.batch.n) + " of " + v.batch.n + " this action");
     bits.push("hold " + (v.holdMax - v.holdFree) + " of " + v.holdMax);
     if (v.prizesTaken) bits.push(plural(v.prizesTaken, "prize") + " taken");
@@ -1645,7 +1645,7 @@
   function huntPanel(v) {
     var homeNd = N().nodeData(state.minigame.home || N().here(state));
     var homeLabel = homeNd.kind === "ocean" ? "Stop hunting" : "Sail home to " + homeNd.name;
-    var H = v.hunt, html = mgHead((homeNd.kind === "ocean" ? homeNd.title : homeNd.name) + " · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
+    var H = v.hunt, html = mgHead(H.encounter ? "At sea · " + H.waters : (homeNd.kind === "ocean" ? homeNd.title : homeNd.name) + " · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
     if (H.phase === "gameover") return html + gameOverPanel(v);
     html += huntStatus(H);
     // In a battle the result sits under the two ships' stats, right above
@@ -1653,8 +1653,10 @@
     if (H.phase === "battle") html += battleShips(H.battle);
     html += mgLatest(v.log, v);
     if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
-    var home = H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
-    if (H.phase === "empty") {
+    var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
+    if (H.phase === "encounterEnd") {
+      html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
+    } else if (H.phase === "empty") {
       html += '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
     } else if (H.phase === "scout" || H.phase === "hunter") {
       var sv = H.scout;
@@ -1680,6 +1682,57 @@
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
     return html + mgLog(v.log);
+  }
+
+  // ---- Voyage events (§44): the card at sea, or in port as you leave ----
+
+  function eventPanel() {
+    var v = PC.voyageEvents.view(state);
+    if (!v) return '<div class="actions"><button class="primary" data-act="evnext">Continue</button></div>';
+    var html = '<div class="where">' + esc(v.where) + "</div>" + banner(v.title.toLowerCase()) + '<h2 class="title">' + esc(v.title) + "</h2>";
+    if (settings.dev) html += '<p class="note">' + esc((v.reg || "") + (v.slots ? " · slot " + v.slot + " of " + v.slots : "")) + "</p>";
+    var cont = '<div class="actions"><button class="primary" data-top="1" data-act="evnext">Continue</button></div>';
+    if (v.encounter) {
+      html += '<div class="prose dropcap">' + prose(v.text) + "</div>";
+      return html + '<div class="actions"><button class="primary" data-act="evmeet">' + (v.encounter === "hunter" ? "Face her" : "Close and look her over") + "</button>" +
+        (v.encounter === "hunter" ? "" : '<button class="secondary" data-act="evpass">Let her pass</button>') + "</div>";
+    }
+    if (v.phase === "placeholder") return html + '<div class="prose dropcap">' + prose(v.text) + "</div>" + cont;
+    if (v.phase === "vote") {
+      html += '<div class="prose dropcap">' + prose(v.text) + "</div>";
+      if (v.voteStep === "pre") {
+        var bonus = PC.officers.speakBonus(state);
+        return html + opts(v.candidates.map(function (c) { return opt({ act: "evvote", attrs: 'data-for-officer="' + esc(c.id) + '"', label: "Speak for " + c.name, meta: "Order · " + (bonus > 0 ? "+" + bonus : bonus) + " to the count" }); })
+          .concat([opt({ act: "evvote", attrs: 'data-for-officer=""', label: "Stay out of it", meta: "The crew decide alone" })]));
+      }
+      if (v.voteStep === "result") return html + opts(v.reactions.map(function (r) { return opt({ act: "evreact", attrs: 'data-react="' + r.id + '"', label: r.label }); }));
+      return html + DIVIDER + resultBits(v.result, false) + cont;
+    }
+    html += '<div class="prose' + (v.phase === "choose" ? " dropcap" : "") + '">' + prose(v.text) + "</div>";
+    if (v.phase === "result") return html + DIVIDER + resultBits(v.result, false) + cont;
+    return html + DIVIDER + opts(v.choices.map(function (c) {
+      var check = c.check ? PC.checks.assess(state, c.check, { conditions: [] }) : null;
+      return opt({ act: "evchoose", attrs: 'data-i="' + c.index + '"', label: c.label, check: check, lock: c.lock, meta: c.meta ? esc(c.meta) : null });
+    }));
+  }
+
+  // The Developer's readout of the last voyage's slots (§44).
+  function devReadout() {
+    var rd = (state.voyage && state.voyage.readout) || state.world.lastReadout || [];
+    if (!rd.length) return '<p class="note">No voyage yet.</p>';
+    var pct = function (x) { return Math.round(100 * x) + "%"; };
+    return '<ul class="small">' + rd.map(function (s) {
+      if (s.forced) return "<li>Slot " + (s.i + 1) + ": forced " + esc(s.forced) + "</li>";
+      var bits = [];
+      if (s.roll != null) bits.push("fires " + (s.roll < s.chance ? "yes" : "no") + " (" + s.roll.toFixed(2) + " vs " + pct(s.chance) + ")");
+      if (s.storm) bits.push("storm " + pct(s.storm.chance) + " rolled " + s.storm.roll.toFixed(2) + (s.storm.redraw != null ? ", redrawn " + s.storm.redraw.toFixed(2) : ""));
+      if (s.hunter) bits.push("hunter " + pct(s.hunter.chance));
+      if (s.ship) bits.push("other ship " + pct(s.ship.chance));
+      if (s.officerChance != null) bits.push("officer " + pct(s.officerChance));
+      if (s.weights) bits.push("pool of " + Object.keys(s.weights).length);
+      bits.push(s.officer ? "→ " + s.officer : s.event ? "→ " + s.event : s.quiet ? "→ quiet" : "→ a ship");
+      return "<li>Slot " + (s.i + 1) + ": " + esc(bits.join(" · ")) + "</li>";
+    }).join("") + "</ul>";
   }
 
   // Sail on from the hunting grounds to another live place (§22.1).
@@ -2348,6 +2401,12 @@
       grp("Time", '<div class="actions">' + b("addap", "+1 action") + b("fillap", "Top up actions") + b("devnewseason", "End the season now") + b("tohub", "Back to the town menu") + "</div>" +
         (state.location ? '<p class="small">Skip to (every turn runs; a Winter on the way is held, no split): ' + PC.state.SEASONS.map(function (n, i) { return b("devskipto", n, ' data-season="' + i + '"'); }).join("") + "</p>" : "")) +
       (state.location ? grp("Milestone 7", '<label class="tog"><input type="checkbox" data-act="devfreesail"' + (devFreeSail ? " checked" : "") + "> Sail anywhere live at 0 actions</label>" +
+ '<p class="small">Force the next voyage event: <select class="devevent">' + Object.keys(PC.voyageEvents ? (function () { PC.voyageEvents.byId("x"); return PC.voyageEvents.all(); })() : {}).sort().map(function (id) {
+          return '<option value="' + esc(id) + '">' + esc(id + (PC.voyageEvents.isWritten(PC.voyageEvents.byId(id)) ? "" : " (placeholder)")) + "</option>"; }).join("") + "</select> " + b("devevent", "Force") +
+          (state.flags.devForceEvent ? ' <span class="note">Next: ' + esc(state.flags.devForceEvent) + "</span>" : "") + "</p>" +
+        '<p class="small">This season\'s outlook: ' + ["north", "south"].map(function (z) { return (z === "north" ? "North " : " · South ") + ["Fair", "Unsettled", "Foul"].map(function (o) {
+          return '<button class="' + (PC.weather.outlook(state, z) === o ? "primary" : "secondary") + '" data-act="devoutlook" data-zone="' + z + '" data-o="' + o + '">' + o + "</button>"; }).join(""); }).join("") + "</p>" +
+        '<div class="small">The last voyage\'s slots:' + devReadout() + "</div>" +
         '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>") : "") +
       (state.location ? grp("Money and cargo", '<div class="actions">' + b("devgold", "+500 crew gold") + b("devpurse", "+500 purse") + b("devtreasure", "+10 clean treasure", ' data-dirty="0"') +
         b("devtreasure", "+10 dirty treasure", ' data-dirty="1"') + b("devdamage", "Damage the hull (−5)") + b("devarrive", "The arrival popup (back from a hunt, 4 wounded)") + "</div>") : "") +
@@ -3489,6 +3548,18 @@
       seasonTurn(PC.world.endSeason(state));
     },
     "devskipto": function (el) { menu = null; if (!state.location) return; var o = PC.world.devSkipTo(state, Number(el.dataset.season)); if (o) seasonTurn(o); },
+    "evchoose": function (el) { PC.voyageEvents.choose(state, Number(el.dataset.i)); },
+    "evnext": function () { PC.voyageEvents.next(state); },
+    "evvote": function (el) { PC.voyageEvents.vote(state, el.dataset.forOfficer || null); },
+    "evreact": function (el) { PC.voyageEvents.voteReact(state, el.dataset.react); },
+    "evmeet": function () { PC.voyageEvents.meet(state, false); },
+    "evpass": function () { PC.voyageEvents.meet(state, true); },
+    "devevent": function () { var sel = document.querySelector(".devevent"); if (sel) state.flags.devForceEvent = sel.value; },
+    "devoutlook": function (el) {
+      var w = state.world, st = PC.state.stamp(state);
+      if (!w.devOutlook || w.devOutlook.stamp !== st) w.devOutlook = { stamp: st };
+      w.devOutlook[el.dataset.zone] = el.dataset.o;
+    },
     "devfreesail": function () { devFreeSail = !devFreeSail; },
     "devstanding": function (el) { state.meters.standing[el.dataset.f] = Number(el.dataset.v); },
     "devarrive": function () {

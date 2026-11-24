@@ -2514,6 +2514,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Each walk into a place is one visit (one action covers every officer
     // hire on a Tavern visit, §25.7).
     state.location.visit = (state.location.visit || 0) + 1;
+    state.location.apAtEnter = state.ap.left; // port events come due by the AP spent here (§44.3)
     state.location.sales = {}; // this visit's sales by buyer (R6)
     var id = here(state);
     // The persistent Minors count as met once the captain walks into their
@@ -2547,6 +2548,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (!flag(state, F.dyingWish)) queue.push("ocr_dpw_1");
     }
     state.location.queue = (state.location.queue || []).concat(queue);
+    var spent = Math.max(0, (state.location.apAtEnter != null ? state.location.apAtEnter : state.ap.left) - state.ap.left);
+    state.location.apAtEnter = null;
+    // An officer's port event fires as the captain leaves the place (§44.3);
+    // the queued scenes wait until it's done.
+    if (spent && PC.voyageEvents && !(state.location.queue || []).length && PC.voyageEvents.portLeave(state, place, spent)) return null;
     return nextQueued(state);
   }
 
@@ -7859,6 +7865,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function letHerGo(state, game) {
     var b = game.battle;
     fightingEnemies(b).forEach(function (e) { e.out = "escaped"; });
+    // The prize got away: the crew are sore until the next voyage ends
+    // (§44.9), and the mess-table talk names her (VE-C01).
+    var gone = fightingEnemies(b)[0] || b.enemies.filter(function (e) { return e.out === "escaped"; })[0];
+    state.flags.soreFlag = true; state.flags.soreGotAway = gone && gone.name ? gone.name : null;
     endBattle(state, game);
   }
 
@@ -8318,7 +8328,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       game.readWeather = PC.weather.autoRead(state, waters, [state.world.seed, PC.state.stamp(state), game.key, "read"].join("|"));
       M().noteRoll(game, { label: "Read Weather", outcome: game.readWeather.outcome, effect: { clean: "a storm on the way out is redrawn once, and +1 to ride one out", partial: "+1 to ride out a storm", setback: "no help from the sky" }[game.readWeather.outcome] });
     }
-    if (PC.voyageEvents && PC.voyageEvents.huntLeg) PC.voyageEvents.huntLeg(state, game, "out");
+    var leg = PC.voyageEvents ? PC.voyageEvents.huntLeg(state, game, "out") : null;
+    if (leg && leg.pending) return game; // an event first; afterLeg() starts the batch
     if (state.minigame !== game || game.over) return game;
     newBatch(state, game);
     return game;
@@ -8441,6 +8452,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // The next roll of the batch: a ship, or an empty horizon. At least one
   // roll in every batch finds a ship.
   function reveal(state, game) {
+    if (game.encounter) { // a ship met on a voyage (§44.4): one sighting, then the voyage runs on
+      game.phase = "encounterEnd"; game.over = true; game.sighting = null;
+      M().say(state, game, "PLACEHOLDER: You put her astern and carry on with your voyage.");
+      return;
+    }
     var b = game.batch, r = M().rand(state, game, "sighting");
     if (b.next >= b.n) { game.phase = "batchEnd"; game.sighting = null; return; }
     var i = b.next; b.next += 1;
@@ -8692,6 +8708,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var crewChoice = ch.crew || "release";
     if (crewChoice === "execute") {
       var ex = canExecute(state, e);
+      state.flags.executedCrew = PC.state.stamp(state); // a Fear of Violence & Death trigger (§25.15)
       PC.scenes.applyEffect(state, { dread: H().EXECUTE_DREAD });
       PC.scenes.applyEffect(state, { standing: { faction: "pirates", delta: 1 } });
       chips.push(mchip("dread", "dread", H().EXECUTE_DREAD, "Dread {+n}", "bad"));
@@ -8898,7 +8915,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // the port fee), back on the open sea at an ocean node, or sailing on to
   // another place from the hunting grounds (§4, §22.1).
   function exit(state, game) {
-    if (game.phase === "gameover") { state.gameOver = game.gameOver; return "node"; }
+    if (game.phase === "gameover") { state.gameOver = game.gameOver; if (game.encounter) state.voyage = null; return "node"; }
+    if (game.encounter) { // back to the voyage it interrupted (§44.4)
+      state.minigame = null;
+      PC.voyageEvents.resume(state);
+      return null;
+    }
     if (game.sailOn) {
       var from = OCEAN_OF[game.waters] || "hatteras";
       state.minigame = null;
@@ -8909,7 +8931,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       state.location.popup = { title: PC.node.nodeData(game.home).title, lines: [], chips: [{ icon: "port", text: "PLACEHOLDER: The hunt is over. You're still out on " + PC.node.nodeData(game.home).name + "." }] };
       return "node";
     }
-    PC.node.arrive(state, game.home, { fromHunt: true });
+    // The leg back (§44.2): one event slot before the arrival.
+    var leg = PC.voyageEvents ? PC.voyageEvents.huntLeg(state, game, "back") : null;
+    if (leg && leg.pending) return null; // afterLeg() arrives when it's done
+    PC.node.arrive(state, game.home, { fromHunt: true, voyage: leg && leg.lines.length ? { lines: leg.lines, chips: [] } : undefined });
     return "node";
   }
   var OCEAN_OF = { north: "hatteras", south: "bahama" };
@@ -9000,7 +9025,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       phase: game.phase, apUsed: game.apUsed, apLeft: state.ap.left, maxAp: H().MAX_AP,
       vote: game.vote || null, lastApproval: game.lastApproval || null,
       batch: game.batch ? { n: game.batch.n, next: game.batch.next } : null,
-      condition: game.batch ? game.batch.condition : null, outlook: PC.weather.outlook(state, game.waters),
+      condition: game.batch ? game.batch.condition : game.condition || null, outlook: PC.weather.outlook(state, game.waters),
       canReadAhead: canReadAhead(state, game), readAhead: game.readAhead || null,
       readCheck: PC.weather.readCheck(state, game.waters),
       waters: H().WATERS[game.waters].name, scout: sv, advice: advice(state, game, sv), qm: qm ? qm.first || qm.full : null,
@@ -9011,6 +9036,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         repairDone: game.after.repairDone, hpLost: game.after.hpLost, repairCheck: repairCheck(state),
         prize: cur ? prizeView(state, game, cur) : null, lastPrize: game.after.lastPrize || null, left: game.after.queue.length,
       } : null,
+      encounter: !!game.encounter, pirateFirst: !!game.pirateFirst,
       canContinue: canContinue(state, game), prizesTaken: game.prizesTaken, gameOver: game.gameOver || null,
       holdFree: PC.crew.slotsFree(state), holdMax: PC.crew.holdCapacity(state),
     };
@@ -9068,12 +9094,72 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return { ship: cls, officer: o.first + " " + (o.last || "") };
   }
 
+  // ---- Voyage events on the hunt's legs (§44.2) ---------------------------------------
+
+  // A hunt leg's events are done. Out: the quiet lines go in the hunt's log
+  // and (if the leg waited on a card) the first batch starts. Back: the
+  // arrival, with the leg's lines first.
+  function afterLeg(state, v) {
+    var game = state.minigame;
+    if (state.gameOver) { state.minigame = null; PC.summary.end(state); return; }
+    if (v.dir === "out") {
+      if (!game || game.key !== v.game) return;
+      v.lines.forEach(function (l) { M().say(state, game, l); });
+      state.current = { screen: "minigame" };
+      if (!v.sync) newBatch(state, game);
+      return;
+    }
+    if (v.sync) return; // exit() goes on to the arrival
+    PC.node.arrive(state, v.home, { fromHunt: true, voyage: v.lines.length ? { lines: v.lines, chips: [] } : undefined });
+    state.current = { screen: "node" };
+  }
+
+  // A ship met on a voyage (§44.4, §44.8): the hunt's scouting card and
+  // battle, with no batches and no actions; the voyage runs on after.
+  // DEFAULT: a pirate engages first when the odds are Even or better for
+  // her (§44.4); she plays as a hunter would (no strike, no run before).
+  function startEncounter(state, grp, o) {
+    var game = {
+      kind: "hunt", key: "enc-" + (state.rolls.hunt = (state.rolls.hunt || 0) + 1), waters: o.waters, zone: o.waters,
+      apUsed: H().MAX_AP, batch: null, phase: grp.hunter ? "hunter" : "scout", sighting: grp, battle: null, after: null,
+      prizesTaken: 0, prizeMorale: 0, captives: 0, force: null, home: o.home, encounter: o.voyage, condition: o.condition,
+    };
+    M().start(state, game, "node");
+    M().say(state, game, "The weather: " + PC.weather.badge(o.condition) + ".");
+    if (!grp.hunter && grp.ships[0].flag === "Pirate") {
+      var sv = scoutView(state, game);
+      if (sv && sv.ca <= 0) { game.phase = "hunter"; game.pirateFirst = true; M().say(state, game, "PLACEHOLDER: She's a pirate, and she likes her odds. She's coming for you."); return game; }
+    }
+    M().say(state, game, grp.hunter ? L().hunter : L().sail);
+    return game;
+  }
+
+  // The flagship founders with a fleet ship in company (§44.7): the fleet
+  // ship becomes the flagship and the survivors cross to her. DEFAULT: the
+  // cargo was the fleet's and stays, down to what her hold can carry.
+  function promoteFleetShip(state, rec) {
+    var c = H().CLASSES[rec.cls] || {};
+    state.fleet = fleet(state).filter(function (f) { return f !== rec; });
+    state.ship = {
+      name: rec.name || rec.cls, type: rec.cls, hull: Math.max(1, Math.round(rec.hull)), hullMax: rec.hullMax || c.hull, baseHull: c.hull || rec.hullMax,
+      guns: rec.guns, gunsMax: rec.gunsMax || c.guns, cargo: rec.cargo != null ? c.cargo : c.cargo, size: rec.size || c.size, crewMin: rec.crewMin || c.crewMin,
+      crewMax: rec.crewMax || c.crewMax, speed: rec.speed || c.speed, speedMax: c.speed || rec.speed, handling: rec.handling != null ? rec.handling : c.handling,
+      rigging: "sound", upgrades: rec.upgrades || { hull: 1, rigging: 1, guns: 1 }, dirty: !!rec.dirty, prizeOf: rec.flag,
+    };
+    var t = rec.crewTiers || { Green: rec.crew || 0 };
+    Object.keys(t).forEach(function (k) { state.crew.tiers[k] = (state.crew.tiers[k] || 0) + t[k]; state.crew.count += t[k]; });
+    (state.officers || []).forEach(function (o) { if (!o.gone && o.aboard === rec.id) o.aboard = "flagship"; });
+    PC.crew.jettisonOverflow(state);
+    return state.ship;
+  }
+
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
+    afterLeg: afterLeg, startEncounter: startEncounter, promoteFleetShip: promoteFleetShip,
   };
 })();
 </script>
@@ -9262,6 +9348,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (out.short > 0) {
       // Hunger (§20.6): -10 morale and a Go Without check, DR by the shortfall.
       PC.crew.addMorale(state, -10);
+      state.flags.provisionsRanOut = stamp(state); // a Fear of Poverty trigger (§25.15)
       var share = out.short / Math.max(1, need), dr = 4;
       for (var i = 0; i < GO_WITHOUT.length; i++) if (share <= GO_WITHOUT[i][0]) { dr = GO_WITHOUT[i][1]; break; }
       var key = [state.world.seed, stamp(state), "go-without", state.rolls.goWithout = (state.rolls.goWithout || 0) + 1].join("|");
@@ -9843,7 +9930,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var r = PC.rng.fromKey([state.world.seed, year, season, zone, "outlook"].join("|"));
     return weighted(r, D().OUTLOOKS, D().OUTLOOK[zone][SEASONS[season]]);
   }
-  function outlook(state, zone) { return outlookAt(state, zone || "north", state.time.year, state.time.season); }
+  function outlook(state, zone) {
+    // The Developer's override for this season (§44's test panel).
+    var dev = state.world && state.world.devOutlook;
+    if (dev && dev.stamp === PC.state.stamp(state) && dev[zone || "north"]) return dev[zone || "north"];
+    return outlookAt(state, zone || "north", state.time.year, state.time.season);
+  }
   function nextOutlook(state, zone) {
     var s = state.time.season + 1, y = state.time.year;
     if (s > 3) { s = 0; y += 1; }
@@ -9985,6 +10077,776 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   };
 
   if (PC.world) { PC.world.hook("beforeUpkeep", beforeUpkeep); PC.world.hook("afterTurn", afterTurn); }
+})();
+</script>
+  <script>
+/* Pirate Chronicle — voyage events (§44; Milestone 7, PR 4).
+ *
+ * One slot per AP a voyage costs, each firing 75% of the time. A slot
+ * draws, in order (§44.4): forced events; the storm check (once a voyage);
+ * the encounter check (pirate hunters at half the batch chance, other
+ * ships); the officer events (25% a voyage, only when a trigger is met);
+ * the general pool by weight; or a quiet passage line. Hunt legs draw one
+ * slot out and one back (no encounters; one storm check a trip). Port
+ * events come due as AP is spent in a place and fire when the captain
+ * leaves it (§44.3).
+ *
+ * A card that needs the player puts the voyage on hold (state.voyage)
+ * and the screen shows it ("event"); choosing resolves it and the voyage
+ * runs on. Nothing here touches the screen.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function V() { return PC.data.voyageEvents; }
+  function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  function stamp(state) { return PC.state.stamp(state); }
+  function seasonName(state) { return PC.state.seasonName(state); }
+  function seasonIndex(state) { return state.time.year * 4 + state.time.season; }
+  function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
+  function rnd(state, v, what) { return PC.rng.fromKey([state.world.seed, stamp(state), v.key, what].join("|")); }
+
+  // ---- The registry ------------------------------------------------------------
+
+  var BY_ID = null;
+  function byId(id) {
+    if (!BY_ID) {
+      BY_ID = {};
+      V().written.concat([V().hurricane, V().breakingUp], V().approved, V().officerAtSea, V().officerInPort).forEach(function (e) { BY_ID[e.id] = e; });
+    }
+    return BY_ID[id];
+  }
+  function all() { byId("x"); return BY_ID; }
+  function isWritten(e) { return !!(e && e.choices || e && e.vote); }
+
+  // ---- Officers ------------------------------------------------------------------
+
+  function aboard(state) { return (state.officers || []).filter(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship"; }); }
+  function warmth(o) {
+    if (o.warmth) return o.warmth;
+    var t = (PC.data.creator.OFFICER_TRAITS || []).filter(function (x) { return x.id === o.voice; })[0];
+    return t ? t.warmth : "neutral";
+  }
+  function seasonsAboard(state, o) {
+    var j = o.joined || { year: 1754, season: 0 };
+    return (state.time.year - j.year) * 4 + (state.time.season - j.season);
+  }
+  function hasVoice(state, v) { return aboard(state).filter(function (o) { return o.voice === v || o.secondary === v; })[0] || null; }
+  function ofType(state, t) { return aboard(state).filter(function (o) { return o.type === t; })[0] || null; }
+  function mentor(state) { return aboard(state).filter(function (o) { return o.mentor; })[0] || null; }
+  function qm(state) { return PC.officers.quartermaster ? PC.officers.quartermaster(state) : null; }
+  function oName(o) { return o ? (o.first || o.full || "").trim() : ""; }
+
+  // Approval points (§25.5): 5 net points move a rung, at most one
+  // point-driven rung a season; authored rung moves ignore the cap.
+  function points(state, o, n) {
+    if (!o) return;
+    o.approval = (o.approval || 0) + n;
+    if (Math.abs(o.approval) >= 5 && o.rungMovedStamp !== stamp(state)) {
+      var d = o.approval > 0 ? 1 : -1;
+      o.rung = clamp((o.rung || 0) + d, -3, 3);
+      o.approval = 0;
+      o.rungMovedStamp = stamp(state);
+    }
+  }
+  function rung(state, o, n) { if (o) o.rung = clamp((o.rung || 0) + n, -3, 3); }
+
+  // ---- Weights and conditions -------------------------------------------------------
+
+  var BAND_ORDER = ["Mutinous", "Sullen", "Steady", "Eager", "Devoted"];
+  function band(state) { return PC.crew.band(state.crew.morale); }
+
+  function outlookOf(state, v) { return PC.weather ? PC.weather.outlook(state, v.zone) : "Fair"; }
+
+  function eligible(state, v, e) {
+    var w = e.when || {};
+    var s = seasonName(state);
+    if (w.seasons && w.seasons.indexOf(s) < 0) return false;
+    if (w.zone && w.zone !== v.zone) return false;
+    if (w.outlooks && w.outlooks.indexOf(outlookOf(state, v)) < 0) return false;
+    if (w.maxAp && v.ap > w.maxAp) return false;
+    if (w.northbound && !v.northbound) return false;
+    if (w.minBand && BAND_ORDER.indexOf(band(state)) < BAND_ORDER.indexOf(w.minBand)) return false;
+    if (w.minHeat && Math.max(state.meters.heat.avalon || 0, state.meters.heat.frisia || 0) < w.minHeat) return false;
+    if (w.storesOpened && !PC.crew.usedThisSeason(state, "stores")) return false;
+    if (w.greenCrew && (state.crew.tiers.Green || 0) < state.crew.count / 2) return false;
+    if (w.voice && !hasVoice(state, w.voice)) return false;
+    if (w.prizeShips && !(state.fleet || []).some(function (f) { return f.kind === "prize" && !f.out; })) return false;
+    if (w.near && v.from !== w.near && v.to !== w.near) return false;
+    if (w.minYear && state.time.year < w.minYear) return false;
+    if (w.maxYear && state.time.year > w.maxYear) return false;
+    if (w.greedAtLeast && !(state.articles && (state.articles.greed || 0) >= w.greedAtLeast)) return false;
+    if (w.once && (state.world.veOnce || {})[e.id]) return false;
+    var cd = (state.world.veCooldown || {})[e.id];
+    if (cd != null && seasonIndex(state) - cd < (e.cooldown || V().COOLDOWN)) return false;
+    return true;
+  }
+
+  function weightOf(state, v, e) {
+    if (e.grumbling) return grumbleWeight(state, e);
+    var w = e.weight || 0, when = e.when || {};
+    if (!w) return 0;
+    var o = outlookOf(state, v);
+    if (when.outlookMult && when.outlookMult[o]) w *= when.outlookMult[o];
+    if (when.conditionMult && when.conditionMult[o]) w *= when.conditionMult[o];
+    if (when.voiceMult) Object.keys(when.voiceMult).forEach(function (k) { if (hasVoice(state, k)) w *= when.voiceMult[k]; });
+    if (when.officerMult) Object.keys(when.officerMult).forEach(function (k) { if (ofType(state, k)) w *= when.officerMult[k]; });
+    if (when.pressureMult && (state.crew.pressure || 0) >= 1) w *= when.pressureMult;
+    if (when.lowHullMult && state.ship.hull < state.ship.hullMax / 2) w *= when.lowHullMult;
+    if (when.afterHurricaneMult && state.flags.hurricaneZone === stamp(state) + "-" + v.zone) w *= when.afterHurricaneMult;
+    return w;
+  }
+
+  // Talk at the Mess Tables (§44.9): high at Eager/Devoted (Steady at half
+  // weight), low at Sullen or below; ×3 while sore, ×2 at Sullen or below.
+  function grumbleWeight(state, e) {
+    var b = band(state), w = e.weight;
+    if (b === "Steady") w *= 0.5;
+    if (b === "Sullen" || b === "Mutinous") w *= 2;
+    if (state.flags.soreFlag) w *= 3;
+    return w;
+  }
+  function grumbleLow(state) { var b = band(state); return b === "Sullen" || b === "Mutinous"; }
+
+  function generalPool(state, v) {
+    var out = {};
+    all();
+    V().written.concat(V().approved).forEach(function (e) {
+      if (e.storm || !eligible(state, v, e)) return;
+      var w = weightOf(state, v, e);
+      if (w > 0) out[e.id] = w;
+    });
+    return out;
+  }
+
+  // ---- Officer triggers (§25.15, §44.12.9) ---------------------------------------------
+
+  function triggered(state, v, e) {
+    if (e.trigger === "vote") return PC.officers.votePending(state) ? {} : null;
+    if (e.trigger === "qmOpinion") {
+      var q = qm(state);
+      if (!q || q.full && !q.first || (q.rung != null && q.rung < 0) || q.ringleader) return null;
+      if (state.used.bigMoraleLoss !== stamp(state) || state.used.qmOpinion === stamp(state)) return null;
+      return { officer: q };
+    }
+    if (e.place && v.place !== e.place) return null;
+    var pick = aboard(state).filter(function (o) {
+      if (seasonsAboard(state, o) < 2) return false;
+      if (e.trigger === "drive") return o.drive === e.drive && (o.rung || 0) >= 2 && !(o.done || {})["drive"];
+      if (e.trigger === "fear") return o.fear === e.fear && (o.rung || 0) > -3 && !(o.done || {})["fear"];
+      return false;
+    })[0];
+    if (!pick) return null;
+    if (e.needs === "provisionsOut" && state.flags.provisionsRanOut !== stamp(state)) return null;
+    if (e.needs === "executed" && state.flags.executedCrew !== stamp(state)) return null;
+    if (e.needs === "standingLost" && !standingLost(state)) return null;
+    if (e.needs === "signedGreen" && !((state.flags.lastPortGreen || 0) >= 5)) return null;
+    return { officer: pick };
+  }
+
+  function standingLost(state) {
+    var s0 = state.standingAtSeason || {};
+    return Object.keys(state.meters.standing).some(function (f) { return (s0[f] != null ? s0[f] : state.meters.standing[f]) - state.meters.standing[f] >= 10; });
+  }
+
+  function officerCard(state, v, list) {
+    if ((state.used.officerEvents || {})[stamp(state)] >= V().OFFICER_SEASON_CAP) return null;
+    for (var i = 0; i < list.length; i++) {
+      var t = triggered(state, v, list[i]);
+      if (t) return { id: list[i].id, officer: t.officer ? t.officer.id : null };
+    }
+    return null;
+  }
+  function noteOfficerEvent(state) {
+    var u = (state.used.officerEvents = state.used.officerEvents || {});
+    u[stamp(state)] = (u[stamp(state)] || 0) + 1;
+  }
+
+  // ---- Storms (§44.7) -------------------------------------------------------------------
+
+  function stormChance(state, v) {
+    var S = V().STORM, o = outlookOf(state, v);
+    var p = S[o] || 0;
+    if (seasonName(state) === "Hurricane") p = Math.max(p, S.hurricaneFloor);
+    p += S.perExtraAp * Math.max(0, v.ap - 1);
+    return p;
+  }
+
+  function stormEvent(state, v, r) {
+    if (seasonName(state) === "Hurricane" && r() < 0.5) return "ve_w02_hurricane";
+    return seasonName(state) === "Summer" && v.zone === "south" ? "ve_w03_squall" : "ve_w01_noreaster";
+  }
+
+  // ---- The draw (§44.4) ------------------------------------------------------------------
+
+  function drawSlot(state, v) {
+    var r = rnd(state, v, "slot" + v.i);
+    var read = { i: v.i };
+    v.readout.push(read);
+    // Forced: the Developer's forced event, then nothing else is scripted yet.
+    if (state.flags.devForceEvent) {
+      var fid = state.flags.devForceEvent; state.flags.devForceEvent = null;
+      read.forced = fid;
+      // A forced officer event picks its officer: the one it fits, or anyone aboard.
+      var fe = byId(fid), fo = null;
+      if (fe && fe.trigger && fe.trigger !== "vote") {
+        fo = fe.trigger === "qmOpinion" ? qm(state) : aboard(state).filter(function (o) { return o.drive === fe.drive || o.fear === fe.fear; })[0] || aboard(state)[0];
+      }
+      return { card: { id: fid, officer: fo && fo.id || null } };
+    }
+    read.roll = r(); read.chance = V().SLOT_CHANCE;
+    var fires = read.roll < V().SLOT_CHANCE;
+    // The Vote is a duty, not a chance: the next event after the post falls vacant.
+    if (PC.officers.votePending(state) && !v.voteDone) { v.voteDone = true; read.officer = "vo_vote"; return { card: { id: "vo_vote" } }; }
+    if (!fires) { read.quiet = true; return { quiet: true }; }
+    // The storm check: once a voyage (one a hunt trip).
+    if (!v.stormChecked) {
+      v.stormChecked = true;
+      var p = stormChance(state, v), sr = r();
+      read.storm = { chance: p, roll: sr };
+      var hit = sr < p;
+      if (hit && v.read && v.read.outcome === "clean") { var again = r(); read.storm.redraw = again; hit = again < p; }
+      if (hit) { read.event = stormEvent(state, v, r); return { card: { id: read.event } }; }
+    }
+    // The encounter check (voyages only; hunt legs roll ships in batches).
+    if (v.mode === "voyage") {
+      var enc = encounter(state, v, r, read);
+      if (enc) return { card: enc };
+    }
+    // Officer events: one roll a voyage (25%), only when a trigger is met.
+    if (!v.officerRolled) {
+      v.officerRolled = true;
+      var oc = officerCard(state, v, V().officerAtSea);
+      read.officerChance = oc ? V().OFFICER_CHANCE : 0;
+      if (oc && r() < V().OFFICER_CHANCE) { read.officer = oc.id; return { card: oc }; }
+    }
+    // The general pool.
+    var pool = generalPool(state, v);
+    read.weights = pool;
+    if (!Object.keys(pool).length) { read.quiet = true; return { quiet: true }; }
+    var id = PC.npcs.weighted(r, pool);
+    read.event = id;
+    return { card: { id: id } };
+  }
+
+  // Pirate hunters at half the batch chance, on the zone's faction (§44.8);
+  // then other ships (the prize pipeline without the hunter and density
+  // steps): a pirate engages first at Even or better for her.
+  function encounter(state, v, r, read) {
+    var ch = PC.huntGen.hunterChances(state, v.waters);
+    var f = v.zone === "south" ? "Frisia" : "Avalon";
+    var ph = (ch[f] || 0) / 2;
+    read.hunter = { chance: ph };
+    if (r() < ph) return { encounter: "hunter", flag: f };
+    read.ship = { chance: V().ENCOUNTER_CHANCE };
+    if (r() < V().ENCOUNTER_CHANCE) return { encounter: "ship" };
+    return null;
+  }
+
+  // ---- Running a voyage ---------------------------------------------------------------------
+
+  function newRun(state, base) {
+    state.world.veSeq = (state.world.veSeq || 0) + 1;
+    return Object.assign({ key: "ve" + state.world.veSeq, i: 0, readout: [], events: [], stormChecked: false, officerRolled: false, cur: null, pending: false, refund: 0 }, base);
+  }
+
+  // Called by PC.world.sail: one slot per AP. v carries from, to, ap,
+  // lines and chips; we add slots and the Read Weather roll.
+  function voyage(state, v) {
+    if (PC.voyageEvents.off) return null; // the older tests sail without events
+    var zone = PC.world.zoneOf(v.to);
+    Object.assign(v, newRun(state, {}), v);
+    v.mode = "voyage"; v.zone = zone; v.waters = zone; v.slots = Math.max(0, v.ap);
+    var o = PC.world.place(v.from), d = PC.world.place(v.to);
+    v.northbound = !!(o && d && d.x < o.x);
+    if (PC.weather && v.slots) {
+      v.read = PC.weather.autoRead(state, zone, [state.world.seed, stamp(state), v.key, "read"].join("|"));
+      v.chips.push({ icon: "dsea", text: "Read Weather: " + v.read.outcome + " · " + PC.weather.badge(v.read.outlook), ink: v.read.outcome === "setback" ? "mid" : null });
+    }
+    state.voyage = v;
+    v.sync = true; run(state, v); v.sync = false;
+  }
+
+  // A hunt leg (§44.2): one slot out or back, from a port.
+  function huntLeg(state, game, dir) {
+    if (PC.voyageEvents.off) return null;
+    if (PC.node.isOcean(game.home)) return null;
+    var v = newRun(state, { mode: "leg", dir: dir, from: game.home, to: game.home, ap: 1, slots: 1, zone: game.waters, waters: game.waters,
+      lines: [], chips: [], read: game.readWeather || null, stormChecked: !!game.stormChecked, officerRolled: !!game.officerRolled, game: game.key, home: game.home });
+    state.voyage = v;
+    v.sync = true; run(state, v); v.sync = false;
+    game.officerRolled = game.officerRolled || v.officerRolled;
+    game.stormChecked = game.stormChecked || v.stormChecked;
+    return v;
+  }
+
+  function run(state, v) {
+    while (v.i < v.slots) {
+      var slot = drawSlot(state, v);
+      v.i += 1;
+      if (slot.quiet) { var pl = passage(state, v); if (pl) v.lines.push(pl); continue; }
+      openCard(state, v, slot.card);
+      if (v.cur) { v.pending = true; state.current = { screen: "event" }; return; }
+    }
+    v.pending = false;
+    finish(state, v);
+  }
+
+  function openCard(state, v, card) {
+    if (card.encounter) { v.cur = { encounter: card.encounter, flag: card.flag, phase: "choose" }; return; }
+    var e = byId(card.id);
+    if (!e) return;
+    if (e.trigger) noteOfficerEvent(state);
+    if (e.trigger === "qmOpinion") state.used.qmOpinion = stamp(state);
+    if (card.officer) {
+      var o = (state.officers || []).filter(function (x) { return x.id === card.officer; })[0];
+      if (o) { o.done = o.done || {}; o.done[e.trigger] = true; }
+    }
+    v.cur = { id: e.id, officer: card.officer || null, phase: isWritten(e) ? "choose" : "placeholder" };
+    if (e.vote) { v.cur.phase = "vote"; }
+    v.events.push(e.id);
+    var cd = (state.world.veCooldown = state.world.veCooldown || {});
+    cd[e.id] = seasonIndex(state);
+    if ((e.when || {}).once) (state.world.veOnce = state.world.veOnce || {})[e.id] = true;
+    if (e.storm) state.flags.firstStormSeen = state.flags.firstStormSeen || "pending";
+  }
+
+  // The passage line for a quiet slot (§44 appendix §2): by outlook, then
+  // zone and season; never the same line twice in a row.
+  function passage(state, v) {
+    var o = outlookOf(state, v), s = seasonName(state);
+    var fits = V().passage.filter(function (p) {
+      var w = p.when || {};
+      return (!w.outlook || w.outlook === o) && (!w.zone || w.zone === v.zone) && (!w.season || w.season === s);
+    });
+    var last = state.world.lastPassage;
+    var pool = fits.filter(function (p) { return p.text !== last; });
+    if (!pool.length) pool = fits;
+    var r = rnd(state, v, "passage" + v.i);
+    var line = pool[Math.floor(r() * pool.length)];
+    state.world.lastPassage = line ? line.text : null;
+    return line ? line.text : null;
+  }
+
+  // The run is done. During the first, synchronous run (v.sync) the
+  // caller goes on itself: world.sail arrives, hunt.start starts its batch.
+  function finish(state, v) {
+    state.world.lastReadout = v.readout;
+    if (v.mode === "voyage") {
+      // The sore flag lasts until the next voyage ends (§44.9).
+      state.flags.soreFlag = false; state.flags.soreGotAway = null;
+      if (v.refund) { state.ap.left = Math.min(state.ap.max, state.ap.left + v.refund); v.refund = 0; }
+      v.events.forEach(function (id) { var e = byId(id); if (e) v.chips.push({ icon: "dsea", text: "At sea: " + e.name }); });
+      v.events = [];
+      v.pending = false;
+      if (v.sync) return;
+      if (state.gameOver) { state.voyage = null; PC.summary.end(state); return; }
+      PC.world.arriveFrom(state, v);
+      return;
+    }
+    state.voyage = null;
+    if (v.mode === "leg") { PC.hunt.afterLeg(state, v); return; }
+    if (v.mode === "port") {
+      if (state.gameOver) { PC.summary.end(state); return; }
+      state.current = { screen: "node" };
+      var nx = PC.node.nextQueued(state);
+      if (nx) PC.scenes.enterScene(state, nx);
+    }
+  }
+
+  // ---- The card the screen shows -----------------------------------------------------------
+
+  function tokens(state, v, text, ctx) {
+    ctx = ctx || {};
+    var o = ctx.officer || null;
+    var warmOf = function (want) {
+      var x = aboard(state).filter(function (a) { return want.indexOf(warmth(a)) >= 0; })[0];
+      return x ? oName(x) : "one of the hands";
+    };
+    var q = qm(state);
+    var fills = {
+      "Quartermaster": q ? (q.first ? oName(q) : q.full) : "One of the hands",
+      "Mentor": mentor(state) ? oName(mentor(state)) : "One of the old hands",
+      "Name": oName(o), "A": oName(o),
+      "Ship Name": ctx.gotAway || state.ship.name, "Ship": state.ship.name,
+      "Node": PC.world.placeName(v.to === "hatteras" || v.to === "bahama" ? v.from : v.to).replace(/^the /, ""),
+      "Wreck Ship": "Santa Clara",
+    };
+    var t = String(text || "").replace(/\[Officer:([^\]]+)\]/g, function (m, k) {
+      if (k === "warm") return warmOf(["warm"]);
+      if (k === "warm or neutral") return warmOf(["warm", "neutral"]);
+      var byT = ofType(state, k) || hasVoice(state, k);
+      if (byT) return oName(byT);
+      if (k === "Navigator") return fills.Mentor;
+      if (k === "Carpenter") return fills.Quartermaster;
+      if (k === "Shanty-Singer") return warmOf(["warm", "neutral"]);
+      return "one of the hands";
+    }).replace(/\[([A-Za-z ]+)\]/g, function (m, k) { return fills[k] != null ? fills[k] : m; });
+    // A woman officer's pronouns (§33.3.12).
+    var who = o || (/\{qm\./.test(t) ? q : null);
+    var fem = who && who.gender === "f";
+    t = t.replace(/\{(?:qm|officer)\.(He|he|His|his|Him|him)\}/g, function (m, f) {
+      var map = { He: fem ? "She" : "He", he: fem ? "she" : "he", His: fem ? "Her" : "His", his: fem ? "her" : "his", Him: fem ? "Her" : "Him", him: fem ? "her" : "him" };
+      return map[f];
+    });
+    if (fem && o) t = t.replace(/\b(he|his|him|He|His|Him|himself)\b/g, function (w) { return { he: "she", his: "her", him: "her", He: "She", His: "Her", Him: "Her", himself: "herself" }[w]; });
+    t = t.replace(/(^|\.\s+|"\s*)one of the hands/g, function (m, a) { return a + "One of the hands"; });
+    return PC.text.render(t, state);
+  }
+
+  function choiceShown(state, v, c) {
+    var s = c.shows || {};
+    if (s.minAp && v.ap < s.minAp) return false;
+    if (s.sweeps && !(PC.weather && PC.weather.hasSweeps(state.ship.type))) return false;
+    if (s.storesUnopened && PC.crew.usedThisSeason(state, "stores")) return false;
+    if (s.low && !grumbleLow(state)) return false;
+    if (s.tag && (state.captain.tags || []).indexOf(s.tag) < 0) return false;
+    return true;
+  }
+
+  function checkOf(state, v, c) {
+    if (!c.check) return null;
+    var ch = c.check, dr = ch.dr, extra = [];
+    if (ch.foulDr != null && outlookOf(state, v) === "Foul") dr = ch.foulDr;
+    if (ch.gunnerDr != null && ofType(state, "Gunner")) dr = ch.gunnerDr;
+    if (ch.smallShip && (state.ship.size || 1) <= 2) extra.push({ label: "A small ship", value: ch.smallShip });
+    if (ch.type === "Ride Out Storm") {
+      if (v.read && (v.read.outcome === "clean" || v.read.outcome === "partial")) extra.push({ label: "Read Weather", value: 1 });
+      if (aboard(state).some(function (o) { return o.type === "Navigator" && (o.level || 1) >= 2; })) extra.push({ label: "Navigator", value: 1 });
+      if (hasVoice(state, "Old Salt")) extra.push({ label: "Old Salt aboard", value: 1 });
+    }
+    return { type: ch.type, dr: dr, extra: extra };
+  }
+
+  function view(state) {
+    var v = state.voyage;
+    if (!v || !v.cur) return null;
+    var cur = v.cur;
+    var where = v.mode === "port" ? PC.world.placeName(v.to) : v.mode === "leg" ? "At sea · " + PC.data.hunt.WATERS[v.waters].name : "At sea · bound for " + PC.world.placeName(v.to);
+    var out = { where: where, phase: cur.phase, mode: v.mode, slot: v.i, slots: v.slots };
+    if (cur.encounter) {
+      var E = V().encounters[cur.encounter];
+      out.title = E.name; out.reg = E.reg; out.text = E.text; out.encounter = cur.encounter;
+      return out;
+    }
+    var e = byId(cur.id), ctx = ctxOf(state, v);
+    out.id = e.id; out.reg = e.reg || e.id; out.title = e.name; out.group = e.group;
+    if (cur.phase === "placeholder") { out.text = "PLACEHOLDER (" + e.name + "): " + e.placeholder; return out; }
+    if (cur.phase === "vote") return voteView(state, v, e, out);
+    var setup = e.id === "ve_c01_grumbling" && state.flags.soreGotAway ? e.setupGotAway : e.setup;
+    out.text = tokens(state, v, setup, ctx);
+    if (e.trigger === "fear" && ctx.officer) out.text = tokens(state, v, "[Name]: \"" + V().fearLines[e.fear] + "\"", ctx) + "\n\n" + out.text;
+    (e.variants || []).forEach(function (x) {
+      if (x.when.firstStorm && state.flags.firstStormSeen === "pending") out.text += "\n\n" + tokens(state, v, x.text, ctx);
+      if (x.when.voice && hasVoice(state, x.when.voice)) out.text += "\n\n" + tokens(state, v, x.text, ctx);
+    });
+    if (cur.phase === "result") { out.result = cur.result; return out; }
+    out.choices = (e.choices || []).map(function (c, i) {
+      if (!choiceShown(state, v, c)) return null;
+      var label = c.labelBy ? c.labelBy[(state.articles && state.articles.terms.quarrels) || "captains_judgment"] : c.label;
+      var lock = null;
+      if (c.cost && c.cost.purse && state.money.purse < c.cost.purse) lock = "Needs " + c.cost.purse + " gold in your purse";
+      if (c.needsPurse && state.money.purse < c.needsPurse) lock = "Needs " + c.needsPurse + " gold in your purse";
+      if (c.needsAp && state.ap.left < c.needsAp) lock = "Needs an action";
+      return { index: i, label: tokens(state, v, label, ctx), check: checkOf(state, v, c), lock: lock,
+        meta: (c.cost && c.cost.purse ? "Costs " + c.cost.purse + " gold from your purse" : "") + (c.breachIf && state.articles && state.articles.terms.discipline === c.breachIf ? " Breaks your Lenient Articles." : "") || null };
+    }).filter(Boolean);
+    return out;
+  }
+
+  function ctxOf(state, v) {
+    var cur = v.cur || {};
+    var o = cur.officer ? (state.officers || []).filter(function (x) { return x.id === cur.officer; })[0] : null;
+    return { officer: o, gotAway: state.flags.soreGotAway || null, low: grumbleLow(state) };
+  }
+
+  function voteView(state, v, e, out) {
+    var cur = v.cur;
+    out.text = tokens(state, v, e.setup, {});
+    if (!cur.vote) {
+      out.candidates = PC.officers.voteScores(state, null).map(function (x) { return { id: x.id, name: x.name }; });
+      out.voteStep = "pre";
+    } else if (!cur.reacted) {
+      out.voteStep = "result";
+      out.winner = cur.vote.winner;
+      out.text = "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select " + cur.vote.winner + " to represent their interests.";
+      out.reactions = Object.keys(V().voteReact).map(function (k) { return { id: k, label: V().voteReact[k].label }; });
+    } else {
+      out.voteStep = "done"; out.result = cur.result;
+    }
+    return out;
+  }
+
+  // ---- Choosing -------------------------------------------------------------------------
+
+  function choose(state, index, opts) {
+    var v = state.voyage;
+    if (!v || !v.cur || v.cur.phase !== "choose") throw new Error("Nothing to choose.");
+    var e = byId(v.cur.id), c = e.choices[index], ctx = ctxOf(state, v);
+    if (!c || !choiceShown(state, v, c)) throw new Error("No such choice.");
+    if (c.cost && c.cost.purse) { if (state.money.purse < c.cost.purse) throw new Error("Not enough in your purse."); state.money.purse -= c.cost.purse; }
+    var res = { label: tokens(state, v, c.labelBy ? c.labelBy[(state.articles && state.articles.terms.quarrels) || "captains_judgment"] : c.label, ctx), approval: c.approval || [], chips: [], text: "" };
+    if (c.bottle) return bottle(state, v, e, c, res);
+    var outcome = null, branch;
+    if (c.check) {
+      var key = [state.world.seed, stamp(state), v.key, e.id, "check", index].join("|");
+      var r = PC.checks.resolve(state, checkOf(state, v, c), key, { conditions: e.storm ? ["Storm"] : [] });
+      outcome = r.outcome; res.roll = { dice: r.dice, edge: r.assessment.edge, total: r.total };
+      branch = c[outcome];
+    } else branch = c.result;
+    res.outcome = outcome || "result";
+    res.text = tokens(state, v, branch.text, ctx);
+    if (c.spendAp) { state.ap.left = Math.max(0, state.ap.left - c.spendAp); res.chips.push({ icon: "ap", text: plural(c.spendAp, "action") }); }
+    applyAll(state, v, branch.fx || [], res, ctx);
+    if (e.storm) state.flags.firstStormSeen = true;
+    // Foundering (§44.7): the Hurricane at Sea's setback breaks her up; a
+    // second setback, she founders.
+    if (c.founderSecond) { if (outcome === "setback") founder(state, v, res); }
+    v.cur.phase = "result";
+    v.cur.result = res;
+    PC.state.addLog(state, "At sea: " + e.name + " — " + res.label + (outcome ? " (" + outcome + ")" : "") + ".");
+    return res;
+  }
+
+  function bottle(state, v, e, c, res) {
+    var r = rnd(state, v, "bottle");
+    var d = 1 + Math.floor(r() * 6);
+    var used = (state.world.bottleUsed = state.world.bottleUsed || {});
+    var key = d <= 2 ? "wreck" : d === 3 ? "love" : d === 4 ? "fool" : d === 5 ? "map" : "plea";
+    if (used[key]) key = ["love", "fool", "wreck", "map", "plea"].filter(function (k) { return !used[k]; })[0] || "fool";
+    used[key] = true;
+    var R = e.results[key];
+    res.text = tokens(state, v, R.text, {});
+    if (R.check) {
+      var rr = PC.checks.resolve(state, R.check, [state.world.seed, stamp(state), v.key, "bottle-map"].join("|"), { conditions: [] });
+      res.outcome = rr.outcome; res.roll = { dice: rr.dice, edge: rr.assessment.edge };
+      res.text += "\n\n" + R[rr.outcome].text;
+      applyAll(state, v, R[rr.outcome].fx, res, {});
+    } else {
+      res.outcome = "result";
+      applyAll(state, v, (R.fx || []).concat(c.bottle === "aloud" ? (R.aloud || []) : []), res, {});
+    }
+    v.cur.phase = "result"; v.cur.result = res;
+    return res;
+  }
+
+  // The Vote (§25.9, §25.15): speak for a candidate or stay out of it, then
+  // react to the result.
+  function vote(state, speakFor) {
+    var v = state.voyage;
+    if (!v || !v.cur || v.cur.phase !== "vote" || v.cur.vote) throw new Error("Not the moment for that.");
+    var r = PC.officers.runVote(state, speakFor || null, [state.world.seed, stamp(state), v.key, "vote"].join("|"));
+    v.cur.vote = { winner: (r.winner.first + " " + (r.winner.last || "")).trim(), winnerId: r.winner.id, spokeFor: speakFor || null };
+    return v.cur.vote;
+  }
+  function voteReact(state, id) {
+    var v = state.voyage, R = V().voteReact[id];
+    if (!v || !v.cur || !v.cur.vote || v.cur.reacted || !R) throw new Error("Not the moment for that.");
+    var res = { label: R.label, approval: R.approval, chips: [], text: R.text, outcome: "result" };
+    var w = (state.officers || []).filter(function (o) { return o.id === v.cur.vote.winnerId; })[0];
+    applyAll(state, v, R.fx, res, { winner: w });
+    v.cur.reacted = true; v.cur.result = res;
+    return res;
+  }
+
+  // Continue after a result or a placeholder card: the voyage runs on.
+  function next(state) {
+    var v = state.voyage;
+    if (!v) return;
+    if (v.cur && v.cur.queue) { var q = v.cur.queue; v.cur = null; openCard(state, v, { id: q }); return; }
+    v.cur = null;
+    if (state.gameOver) { v.slots = v.i; }
+    run(state, v);
+  }
+
+  // ---- Encounters -------------------------------------------------------------------------
+
+  // Meet the ship: the hunt's scouting card and battle, run as a hunt game
+  // with no batches; when it ends, the voyage runs on (PC.hunt).
+  function meet(state, pass) {
+    var v = state.voyage, cur = v && v.cur;
+    if (!cur || !cur.encounter) throw new Error("No ship to meet.");
+    if (pass) { v.cur = null; run(state, v); return null; }
+    var r = rnd(state, v, "encounter" + v.i);
+    var grp = cur.encounter === "hunter" ? PC.huntGen.sighting(state, v.waters, r, { kind: "hunter", flag: cur.flag }) : PC.huntGen.sighting(state, v.waters, r);
+    var condition = PC.weather ? PC.weather.rollCondition(state, v.zone, [state.world.seed, stamp(state), v.key, "enc-cond"].join("|")) : "Fair";
+    v.cur = null;
+    return PC.hunt.startEncounter(state, grp, { voyage: v.key, waters: v.waters, condition: condition, home: v.from });
+  }
+  function resume(state) {
+    var v = state.voyage;
+    if (!v) return;
+    state.current = { screen: "event" };
+    run(state, v);
+  }
+
+  // ---- Effects ----------------------------------------------------------------------------
+
+  function legLots(state, legs) { return Math.round(PC.world.headsAtSea(state) / 5 * legs); }
+
+  function loseCrew(state, n) {
+    var c = state.crew, lost = 0;
+    PC.data.economy.TIER_ORDER.forEach(function (t) { var k = Math.min(n - lost, c.tiers[t] || 0); if (k > 0) { c.tiers[t] -= k; c.count -= k; lost += k; } });
+    return lost;
+  }
+  function wound(state, n) {
+    var c = state.crew, done = 0;
+    c.woundedTiers = c.woundedTiers || {};
+    PC.data.economy.TIER_ORDER.forEach(function (t) { var k = Math.min(n - done, c.tiers[t] || 0); if (k > 0) { c.tiers[t] -= k; c.count -= k; c.wounded = (c.wounded || 0) + k; c.woundedTiers[t] = (c.woundedTiers[t] || 0) + k; done += k; } });
+    return done;
+  }
+
+  function factionOfZone(zone) { return zone === "south" ? "frisia" : "avalon"; }
+
+  var RUMOR_WEIGHTS = { B: { "Danger": 45, "Quest": 30, "Merchant": 25 }, C: { "World State": 45, "Node": 30, "Legend": 5, "Reputation": 20 }, Reputation: { "Reputation": 1 }, Legend: { "Legend": 1 } };
+
+  function applyAll(state, v, fx, res, ctx) {
+    var r = rnd(state, v, "fx" + v.i + (v.cur ? v.cur.id : ""));
+    (fx || []).forEach(function (f) { applyOne(state, v, f, res, ctx, r); });
+  }
+
+  function applyOne(state, v, f, res, ctx, r) {
+    var chips = res.chips, sh = state.ship;
+    var target = function () { return f.who === "qm" ? qm(state) : f.who === "winner" ? ctx.winner : ctx.officer; };
+    if ("prov" in f) {
+      var legs = f.prov * (f.fisherman && (state.captain.tags || []).indexOf("Fisherman") >= 0 ? 1.5 : 1);
+      var n = legLots(state, Math.abs(legs));
+      if (legs > 0) { n = Math.min(n, PC.crew.slotsFree(state)); state.provisions += n; if (n) chips.push({ icon: "prov", text: "+" + plural(n, "provisions lot"), ink: "good" }); }
+      else { n = Math.min(n, state.provisions); state.provisions -= n; if (n) chips.push({ icon: "prov", text: "−" + plural(n, "provisions lot"), ink: "mid" }); }
+    }
+    if ("provPct" in f) { var p = Math.ceil(state.provisions * Math.abs(f.provPct)); state.provisions -= p; if (p) chips.push({ icon: "prov", text: "−" + plural(p, "provisions lot"), ink: "bad" }); }
+    if ("morale" in f) {
+      var m = f.morale;
+      if (ctx.low && f.low != null) m = f.low;
+      if (ctx.low && f.lowPressure) { state.crew.pressure = clamp((state.crew.pressure || 0) + f.lowPressure, 0, 5); chips.push({ icon: "pressure", text: "The crew's grievances grow", ink: "bad" }); m = 0; }
+      if (f.shantySinger && hasVoice(state, "Shanty-Singer")) m = f.shantySinger;
+      if (m) { PC.crew.addMorale(state, m); chips.push({ icon: "morale", text: "Crew morale " + (m > 0 ? "+" : "−") + Math.abs(m), ink: m > 0 ? "good" : "bad" }); }
+    }
+    if ("hullPct" in f) { var h = Math.max(1, Math.round(sh.hullMax * Math.abs(f.hullPct))); sh.hull = Math.max(1, sh.hull - h); chips.push({ icon: "hull", text: "Hull −" + h, ink: "bad" }); }
+    if (f.hullOrMorale) { if (r() < 0.5) applyOne(state, v, { hullPct: -0.05 }, res, ctx, r); else applyOne(state, v, { morale: -3 }, res, ctx, r); }
+    if (f.stormTable) stormTable(state, v, res, r);
+    if ("crewLost" in f) { var l = loseCrew(state, f.crewLost); if (l) chips.push({ icon: "officer", text: plural(l, "hand") + " lost", ink: "bad" }); }
+    if ("wounded" in f) { var w = wound(state, f.wounded); if (w) chips.push({ icon: "officer", text: plural(w, "hand") + " hurt", ink: "bad" }); }
+    if ("purse" in f) { state.money.purse = Math.max(0, state.money.purse + f.purse); chips.push({ icon: "gold", text: (f.purse > 0 ? "+" : "−") + Math.abs(f.purse) + " your purse", ink: f.purse > 0 ? "good" : "mid" }); }
+    if ("crewGold" in f) { state.money.crew = Math.max(0, state.money.crew + f.crewGold); chips.push({ icon: "gold", text: (f.crewGold > 0 ? "+" : "−") + Math.abs(f.crewGold) + " crew gold", ink: f.crewGold > 0 ? "good" : "mid" }); }
+    if ("dread" in f) { state.meters.dread = clamp((state.meters.dread || 0) + f.dread, 0, 100); chips.push({ icon: "dread", text: "Dread +" + f.dread }); }
+    if ("heatZone" in f) { var fz = factionOfZone(v.zone); state.meters.heat[fz] = clamp((state.meters.heat[fz] || 0) + f.heatZone, 0, 100); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
+    if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; state.meters.heat[hf] = clamp((state.meters.heat[hf] || 0) + f.heatHere, 0, 100); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
+    if ("pressure" in f) { state.crew.pressure = clamp((state.crew.pressure || 0) + f.pressure, 0, 5); chips.push({ icon: "pressure", text: f.pressure > 0 ? "The crew's grievances grow" : "The talk dies down", ink: f.pressure > 0 ? "bad" : "good" }); }
+    if ("rumor" in f) {
+      var weights = RUMOR_WEIGHTS[f.rumor] || RUMOR_WEIGHTS.C;
+      var rec = state.location ? PC.rumors.draw(state, weights, [state.world.seed, stamp(state), v.key, "rumor", v.i].join("|"), "at sea", null, { noA: true }) : null;
+      chips.push({ icon: "rumor", text: rec ? "A rumor heard · added to your Rumors" : "Nothing new to hear", ink: rec ? null : "mid" });
+    }
+    if ("rumorLine" in f) {
+      state.rumors.push({ id: "bottle_wreck", type: "Legend", text: f.rumorLine, source: "a bottle", heard: { year: state.time.year, season: state.time.season }, expires: null });
+      chips.push({ icon: "rumor", text: "Added to your Rumors" });
+    }
+    if ("apRefund" in f) { v.refund = (v.refund || 0) + f.apRefund; chips.push({ icon: "ap", text: "+" + plural(f.apRefund, "action") + " back", ink: "good" }); }
+    if ("flag" in f) state.flags[f.flag] = true;
+    if ("tag" in f) {
+      var tags = state.captain.tags;
+      if (tags.indexOf(f.tag) < 0) tags.push(f.tag);
+      state.captain.tagsUntil = state.captain.tagsUntil || {}; state.captain.tagsUntil[f.tag] = stamp(state);
+      chips.push({ icon: "tag", text: f.tag + " (until the season ends)", ink: "bad" });
+    }
+    if (f.captainWounded) { var tg = state.captain.tags; if (tg.indexOf("Wounded") < 0) tg.push("Wounded"); chips.push({ icon: "person", text: "You're Wounded", ink: "bad" }); }
+    if ("guns" in f) { var g = Math.min(sh.guns, Math.abs(f.guns)); sh.guns -= g; if (g) chips.push({ icon: "hull", text: plural(g, "gun") + " lost", ink: "bad" }); }
+    if ("good" in f) { var gn = Math.min(f.n, PC.crew.slotsFree(state)); if (gn) { PC.crew.addGood(state, f.good, gn, false); chips.push({ icon: "treasure", text: "+" + gn + " " + f.good, ink: "good" }); } }
+    if (f.openStores) {
+      var ch = PC.crew.storeChoices ? PC.crew.storeChoices(state) : [];
+      var ok = ch.filter(function (x) { return x.ok !== false; })[0];
+      if (ok && !PC.crew.usedThisSeason(state, "stores")) { var gm = PC.crew.openStores(state, ok.good || ok.id || ok); chips.push({ icon: "morale", text: "The stores are opened · morale +" + gm, ink: "good" }); }
+    }
+    if ("item" in f) { state.captain.items.push(f.item); chips.push({ icon: "item", text: f.item, ink: "good" }); }
+    if ("points" in f) { var o1 = target(); if (o1) { points(state, o1, f.points); chips.push({ icon: "person", text: oName(o1) + (f.points > 0 ? " approves" : " disapproves") }); } }
+    if ("rung" in f) { var o2 = target(); if (o2) { rung(state, o2, f.rung); chips.push({ icon: "person", text: oName(o2) + (f.rung > 0 ? " thinks better of you" : " thinks less of you"), ink: f.rung > 0 ? "good" : "bad" }); } }
+    if ("officerFlag" in f) { var o3 = ctx.officer; if (o3) { o3.flags = o3.flags || {}; o3.flags[f.officerFlag] = true; } }
+    if ("season" in f) chips.push({ icon: "officer", text: "The new hands are drilled hard (seasoning isn't built yet)", ink: "mid" });
+    if ("spendAp" in f) { state.ap.left = Math.max(0, state.ap.left - f.spendAp); chips.push({ icon: "ap", text: plural(f.spendAp, "action") }); }
+    if (f.breakingUp) { v.cur.queue = "ve_w02_breaking"; chips.push({ icon: "hull", text: "She's breaking up", ink: "bad" }); }
+  }
+
+  // The storm setback table (§44.7): one roll; Hurricane season hits harder.
+  function stormTable(state, v, res, r) {
+    var S = V().STORM_SETBACK, hur = seasonName(state) === "Hurricane", L = V().lines.stormTable;
+    var d = 1 + Math.floor(r() * 4);
+    if (d === 1) {
+      var rng = hur ? S.hurricaneHull : S.hull, pct = rng[0] + r() * (rng[1] - rng[0]);
+      res.text += "\n\n" + L.hull;
+      applyOne(state, v, { hullPct: -pct }, res, {}, r);
+    } else if (d === 2) {
+      var hr = hur ? S.hurricaneHands : S.hands, n = hr[0] + Math.floor(r() * (hr[1] - hr[0] + 1));
+      n = Math.min(n, Math.max(0, state.crew.count - 1));
+      res.text += "\n\n" + L.hands.replace("[number]", n);
+      applyOne(state, v, { crewLost: n }, res, {}, r);
+    } else if (d === 3) {
+      var plan = PC.crew.jettisonPlan(state, Math.max(1, Math.ceil(PC.crew.slotsUsed(state) * 0.15)));
+      (plan || []).forEach(function (x) { if (x.what === "provisions") state.provisions -= x.n; else if (x.what === "treasure") state.cargo.treasure[x.dirty ? "dirty" : "clean"] -= x.n; else PC.crew.removeGood(state, x.what, x.n, x.dirty); });
+      res.text += "\n\n" + L.cargo;
+      res.chips.push({ icon: "treasure", text: (plan || []).length ? "Over the side: " + plan.map(function (x) { return x.n + " " + x.what; }).join(", ") : "Nothing worth throwing over", ink: "bad" });
+    } else {
+      state.ship.speed = Math.max(0, state.ship.speed - 1);
+      state.ship.rigging = "frayed";
+      res.text += "\n\n" + L.mast;
+      res.chips.push({ icon: "hull", text: "Sprung mast: Speed −1 until a yard repair", ink: "bad" });
+    }
+  }
+
+  // She founders (§44.7). With a fleet, survivors cross to a fleet ship;
+  // alone, the captain's Endure check (§21.8). A captain rescued alone is
+  // set ashore shipless, which the game can't play yet: the run ends there.
+  function founder(state, v, res) {
+    var F = V().FOUNDER, r = rnd(state, v, "founder");
+    var fleetShip = (state.fleet || []).filter(function (f) { return f.kind === "fleet" && !f.out; })[0];
+    if (fleetShip) {
+      var lost = Math.round(state.crew.count * (F.fleetCrewLost[0] + r() * (F.fleetCrewLost[1] - F.fleetCrewLost[0])));
+      loseCrew(state, lost);
+      (state.officers || []).forEach(function (o) { if (!o.gone && (o.aboard || "flagship") === "flagship" && r() < F.fleetOfficerLost) { o.gone = true; o.goneHow = "lost at sea"; } });
+      PC.hunt.promoteFleetShip(state, fleetShip);
+      res.text += "\n\n" + V().lines.founderedFleet.replace("[Ship]", state.ship.name);
+      res.chips.push({ icon: "hull", text: "Your flagship is lost; " + plural(lost, "hand") + " drowned", ink: "bad" });
+      return;
+    }
+    res.text += "\n\n" + V().lines.founderedAlone;
+    var e = PC.checks.resolve(state, { type: "Endure", dr: 2 }, [state.world.seed, stamp(state), v.key, "founder-endure"].join("|"), { conditions: ["Storm"] });
+    res.chips.push({ icon: "person", text: "Endure: " + e.outcome, ink: e.outcome === "setback" ? "bad" : "mid" });
+    if (e.outcome === "setback") {
+      res.text += "\n\n" + V().lines.drowned;
+      state.gameOver = { how: "died", line: "drowned" };
+    } else {
+      res.text += "\n\n" + V().lines.rescued.replace("[Node]", PC.world.placeName(v.to));
+      if (e.outcome === "partial") { var t = state.captain.tags; if (t.indexOf("Wounded") < 0) t.push("Wounded"); }
+      state.gameOver = { how: "captured", line: "shipwrecked" };
+    }
+  }
+
+  // ---- Port events (§44.3) -----------------------------------------------------------------
+
+  // Leaving a place where AP was spent: an officer's port event may come due.
+  function portLeave(state, place, apSpent) {
+    if (PC.voyageEvents.off) return null;
+    var id = state.location && state.location.node;
+    if (!id || !apSpent || PC.node.isOcean(id) || id === "talanee" || id === "haven") return null;
+    var v = newRun(state, { mode: "port", from: id, to: id, ap: 0, slots: 0, zone: PC.world.zoneOf(id), waters: PC.world.zoneOf(id), lines: [], chips: [], place: place });
+    var oc = officerCard(state, v, V().officerInPort);
+    if (!oc) return null;
+    var r = rnd(state, v, "port");
+    if (r() >= V().PORT_OFFICER_CHANCE) return null;
+    openCard(state, v, oc);
+    if (!v.cur) return null;
+    v.pending = true;
+    state.voyage = v;
+    state.current = { screen: "event" };
+    return v;
+  }
+
+  PC.voyageEvents = {
+    byId: byId, all: all, isWritten: isWritten, voyage: voyage, huntLeg: huntLeg, run: run, view: view, choose: choose, next: next,
+    vote: vote, voteReact: voteReact, meet: meet, resume: resume, portLeave: portLeave,
+    stormChance: stormChance, generalPool: generalPool, triggered: triggered, passage: passage, points: points, finish: finish,
+  };
 })();
 </script>
   <script>
@@ -15557,6 +16419,556 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Voyage events (§44 and its appendix; §25 appendix for the officer
+ * events). The author's language and the approved records; the rules are
+ * in js/voyage_events.js.
+ *
+ * Every approved event is here (§44.10). Written events play; approved but
+ * unwritten ones play a placeholder card (their name, the registry's short
+ * description, Continue, no effects). Weights are §44.12's placeholders.
+ *
+ * A record: { id, name, group (S, M or O), cat, status, weight, when,
+ * cooldown, once, setup, choices }. A choice: { label, check, approval,
+ * shows, cost, clean/partial/setback or result: { text, fx } }.
+ * Effects (fx), each an object:
+ *   prov: legs (± a fraction; 1 leg = crew ÷ 5 lots) · provPct · morale ·
+ *   hullPct · crewLost · wounded · purse · dread · heatZone · pressure ·
+ *   rumor: tier · apRefund · flag · tag (temporary) · captainWounded ·
+ *   guns · good+n · openStores · item · stormTable · hullOrMorale ·
+ *   points/rung with who (officer, qm, winner).
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+
+  function ph(id, name, group, cat, weight, when, placeholder) {
+    return { id: id, name: name, group: group, cat: cat, status: "approved", weight: weight || 0, when: when || {}, placeholder: placeholder, cooldown: 4 };
+  }
+
+  var STORM_CHOICES = function (dr) {
+    return [
+      { label: "Take in sail and ride it out.", check: { type: "Ride Out Storm", dr: dr, foulDr: dr + 1 }, approval: ["Order"],
+        clean: { text: "The men fight the canvas for hours, and she comes through with nothing worse than a wet hold.", fx: [{ prov: -1 }] },
+        partial: { text: "She comes through, but not without a beating.", fx: [{ prov: -1 }, { hullOrMorale: true }] },
+        setback: { text: "By the time the wind drops, you're still counting what it cost.", fx: [{ prov: -1 }, { stormTable: true }] } },
+      { label: "Run before the wind.", shows: { minAp: 2 }, check: { type: "Ride Out Storm", dr: dr + 1, foulDr: dr + 2 }, approval: ["Risk", "Glory"],
+        clean: { text: "She flies before it, and you reach land well ahead of schedule, a few planks the worse for wear.", fx: [{ apRefund: 1 }, { hullPct: -0.05 }, { prov: -1 }] },
+        partial: { text: "You make good time, but she groans the whole way.", fx: [{ apRefund: 1 }, { hullPct: -0.10 }, { prov: -1 }] },
+        setback: { text: "The wind takes her where it likes, and it isn't kind about it.", fx: [{ prov: -1 }, { stormTable: true }] } },
+      { label: "Drop sail and wait it out.", approval: ["Caution", "Retreat"],
+        result: { text: "The storm batters you for two miserable days, the men soaked and cursing, until the sea finally lets you go.", fx: [{ prov: -2 }, { morale: -2 }] } },
+    ];
+  };
+
+  var written = [
+    // ---- Weather and sea ----
+    { id: "ve_w01_noreaster", reg: "VE-W01", name: "Nor'easter", group: "S", cat: "weather", storm: true,
+      setup: "The sky to the northeast goes the color of a bruise. By the second watch the wind is screaming through the rigging and seawater is pouring over the bow. [Quartermaster] has to shout to be heard.\n\n\"She's a nor'easter, Captain! What'll it be?\"",
+      variants: [{ when: { firstStorm: true }, text: "[Mentor]: \"Hold fast and keep her steady. It'll pass soon enough.\"" }, { when: { voice: "Old Salt" }, text: "[Officer:Old Salt] spits over the rail. 'Seen worse. Once.'" }],
+      choices: STORM_CHOICES(2) },
+    { id: "ve_w03_squall", reg: "VE-W03", name: "Summer Squall", group: "S", cat: "weather", storm: true,
+      setup: "The afternoon is hot and still until it isn't. A black wall of cloud walks across the water toward you, dragging a curtain of rain behind it. The first gust hits her so hard the cook's pots go flying.",
+      variants: [{ when: { firstStorm: true }, text: "[Mentor]: \"Hold fast and keep her steady. It'll pass soon enough.\"" }],
+      choices: STORM_CHOICES(1) },
+    { id: "ve_w05_becalmed", reg: "VE-W05", name: "Becalmed", group: "S", cat: "weather", weight: 10, cooldown: 4, when: { seasons: ["Summer"], outlookMult: { Fair: 2 } },
+      setup: "The wind dies at dawn and doesn't come back. The sails hang like laundry. By noon the tar is bubbling between the deck planks and the men are lying in whatever shade they can find. Someone starts whistling for a wind, which is bad luck, and the crew is quick to shut him up.",
+      choices: [
+        { label: "Put the men on the oars.", shows: { sweeps: true }, check: { type: "Rally Crew", dr: 1 }, approval: ["Order"],
+          clean: { text: "The men row in time to a rude song about the governor, and you lose barely a day.", fx: [] },
+          partial: { text: "You make headway, but the men are sore and sour about it.", fx: [{ morale: -2 }] },
+          setback: { text: "Arms give out long before the wind comes back.", fx: [{ morale: -4 }, { prov: -1 }] } },
+        { label: "Tow her with the boats.", check: { type: "Small Boat Handling", dr: 2 }, approval: ["Risk"],
+          clean: { text: "The boats drag her into a breath of wind by evening.", fx: [{ morale: -1 }] },
+          partial: { text: "It works, slowly.", fx: [{ prov: -0.5 }] },
+          setback: { text: "The towline snaps twice, and the boat crews come back blistered and furious.", fx: [{ prov: -1 }, { morale: -3 }] } },
+        { label: "Wait for the wind.", approval: ["Caution"], result: { text: "Three days of glassy sea and short tempers.", fx: [{ prov: -1 }, { morale: -2 }] } },
+        { label: "Break out the rum. Might as well enjoy it.", shows: { storesUnopened: true }, approval: ["Revelry"],
+          result: { text: "If you're going to sit still, you may as well sit still drunk. The men agree heartily.", fx: [{ prov: -1 }, { openStores: true }] } },
+      ] },
+    { id: "ve_w07_gulf_stream", reg: "VE-W07", name: "The Gulf Stream Runs Fast", group: "S", cat: "weather", weight: 8, cooldown: 4, when: { northbound: true, outlooks: ["Fair", "Unsettled"], officerMult: { Navigator: 2 } },
+      setup: "[Officer:Navigator] taps the chart. \"Stream's running hard this week, Captain. Get her out into the blue water and she'll carry us like a gift from God. Miss it, and we'll waste a day looking for it.\"",
+      choices: [
+        { label: "Find the Stream.", check: { type: "Navigate", dr: 2 }, approval: ["Risk"],
+          clean: { text: "The water turns a deep, warm blue, and the [Ship Name] tears across the sea.", fx: [{ prov: 1 }] },
+          partial: { text: "You catch the edge of it.", fx: [{ prov: 0.5 }] },
+          setback: { text: "You find nothing but contrary currents and a lot of open sea.", fx: [{ prov: -0.5 }] } },
+        { label: "Keep to the coast. No sense gambling.", approval: ["Caution"], result: { text: "You hold your course along the coast, slow and steady.", fx: [] } },
+      ] },
+    { id: "ve_w11_man_overboard", reg: "VE-W11", name: "Man Overboard", group: "S", cat: "weather", weight: 8, cooldown: 4, when: { outlookMult: { Unsettled: 1.5, Foul: 2 } },
+      setup: "A wave comes out of nowhere, taller than the mainmast, and breaks across the deck. When the water drains away, one of the newer hands is gone. Then someone shouts and points: there he is, thrashing in the wake, already falling behind.",
+      choices: [
+        { label: "Throw him a line!", check: { type: "Strike First", dr: 2 }, approval: ["Mercy"],
+          clean: { text: "The line lands across his arms, and the men haul him in like a prize marlin.", fx: [{ morale: 2 }] },
+          partial: { text: "You get him aboard, half-drowned and cut up by the barnacles on the hull.", fx: [{ wounded: 1 }] },
+          setback: { text: "The line falls short. Then he's gone.", fx: [{ crewLost: 1 }, { morale: -3 }] } },
+        { label: "Bring her about and lower a boat.", check: { type: "Small Boat Handling", dr: 3 }, approval: ["Mercy", "Risk"],
+          clean: { text: "The boat reaches him just as he goes under, and comes back with him grinning and spitting seawater.", fx: [{ morale: 3 }] },
+          partial: { text: "You save him, but lose half a day doing it.", fx: [{ prov: -0.5 }] },
+          setback: { text: "The boat nearly swamps. You lose him, and very nearly the boat crew.", fx: [{ crewLost: 1 }, { wounded: 1 }, { morale: -3 }] } },
+        { label: "Dive in after him yourself.", check: { type: "Dive", dr: 3 }, approval: ["Glory", "Mercy"],
+          clean: { text: "You come up with a fistful of his collar, and the whole ship cheers you back aboard.", fx: [{ morale: 5 }] },
+          partial: { text: "You get him, but swallow half the sea doing it.", fx: [{ morale: 3 }, { tag: "Waterlogged" }] },
+          setback: { text: "They pull you out alone, choking.", fx: [{ crewLost: 1 }, { morale: -2 }, { captainWounded: true }] } },
+        { label: "He's gone. Hold your course.", approval: ["Caution"], result: { text: "The men watch the wake for a long time after he disappears. Nobody says anything to you.", fx: [{ crewLost: 1 }, { morale: -5 }] } },
+      ] },
+
+    // ---- Ships met at sea ----
+    { id: "ve_s13_fishing_boat", reg: "VE-S13", name: "The Fishing Boat", group: "S", cat: "ships", weight: 8, cooldown: 4, when: { maxAp: 1, seasons: ["Spring", "Summer", "Winter"] },
+      setup: "A fishing boat is working the shallows off your bow. Her two-man crew are hauling nets and pretending very hard not to have noticed you.",
+      choices: [
+        { label: "Buy some of their catch.", cost: { purse: 20 }, check: { type: "Haggle", dr: 1 }, approval: ["Honor"],
+          clean: { text: "A fair price for good fish.", fx: [{ prov: 1 }] },
+          partial: { text: "They drive a hard bargain.", fx: [{ prov: 0.5 }] },
+          setback: { text: "They sell you the bottom of the barrel.", fx: [{ prov: 0.25 }] } },
+        { label: "Pay them for news.", cost: { purse: 10 }, check: { type: "Gather Intelligence", dr: 1 }, approval: ["Generosity"],
+          clean: { text: "Fishermen see everything.", fx: [{ rumor: "B" }] },
+          partial: { text: "Mostly gossip, but some of it's useful.", fx: [{ rumor: "C" }] },
+          setback: { text: "They know nothing, or say they don't.", fx: [] } },
+        { label: "Take the catch. Take the nets too.", check: { type: "Intimidate", dr: 0 }, approval: ["Cruelty", "Plunder"],
+          clean: { text: "They hand it all over without a word.", fx: [{ prov: 1 }, { dread: 3 }, { heatZone: 5 }] },
+          partial: { text: "They hand it over, cursing your name, which they'll be sure to repeat in port.", fx: [{ prov: 1 }, { heatZone: 5 }, { rumor: "Reputation" }] },
+          setback: { text: "They cut their nets and run for the shallows.", fx: [{ heatZone: 5 }] } },
+        { label: "Leave them be.", approval: ["Mercy"], result: { text: "The older one raises a hand as you pass. You return it.", fx: [] } },
+      ] },
+
+    // ---- Crew, morale and the Articles ----
+    { id: "ve_c01_grumbling", reg: "VE-C01", name: "Talk at the Mess Tables", group: "S", cat: "crew", weight: 6, cooldown: 2, grumbling: true,
+      setup: "There's talk below about the shares again. It dies the moment you come down the ladder, which tells you everything.",
+      setupGotAway: "Ever since the [Ship Name] slipped away, there's been talk at the mess tables. Not loud. Not yet. One of the hands finally says what the rest are thinking: \"We had her, Captain. We had her, and we let her go.\"",
+      choices: [
+        { label: "Remind them of the last fat share.", check: { type: "Rally Crew", dr: 2 }, approval: ["Glory"],
+          clean: { text: "By the end, they're banging their cups on the table.", fx: [] },
+          partial: { text: "They quiet down. They don't cheer.", fx: [{ morale: -3, low: -2 }] },
+          setback: { text: "Somebody laughs at the wrong moment, and it spreads.", fx: [{ morale: -6, lowPressure: 1 }] } },
+        { label: "Promise them you'll capture a prize soon.", check: { type: "Leadership", dr: 1 }, approval: ["Honor"],
+          clean: { text: "They take you at your word.", fx: [{ flag: "promise_next_prize" }] },
+          partial: { text: "They'll believe it when they see it.", fx: [{ morale: -2 }, { flag: "promise_next_prize" }] },
+          setback: { text: "\"Heard that before,\" someone mutters.", fx: [{ morale: -4, lowPressure: 1 }] } },
+        { label: "Find out who's stirring the pot.", shows: { low: true }, check: { type: "Read People", dr: 2 }, approval: ["Order", "Deceit"],
+          clean: { text: "You know exactly whose voice it is. So does he, now.", fx: [{ pressure: -1 }] },
+          partial: { text: "You've only got a rough guess.", fx: [] },
+          setback: { text: "Your questions only feed the talk.", fx: [{ pressure: 1 }] } },
+        { label: "Let them grumble. Sailors always do.", approval: ["Caution"], result: { text: "It doesn't stop.", fx: [{ morale: -5, lowPressure: 1 }] } },
+      ] },
+    { id: "ve_c05_fight_below", reg: "VE-C05", name: "Fight Below Decks", group: "S", cat: "crew", weight: 10, cooldown: 4, when: { pressureMult: 1.5, voiceMult: { Prankster: 1.5, Proud: 1.5 } },
+      setup: "A crash below decks, then a roar of voices. You find two hands rolling across the gun deck in a puddle of spilled rum, with a ring of men cheering them on and coins changing hands. It's about a woman in [Node]. Or a goat. The accounts differ.",
+      choices: [
+        { label: "Wade in and break it up.", check: { type: "Brawling", dr: 2 }, approval: ["Order"],
+          clean: { text: "Two cracked heads later, it's over, and nobody argues with you.", fx: [{ morale: 2 }] },
+          partial: { text: "It's over, but one of them won't be hauling a line for a week.", fx: [{ wounded: 1 }] },
+          setback: { text: "You end up on your back in the rum. The fight stops so both men can help you up.", fx: [{ morale: -2 }] } },
+        { label: "QUARRELS", labelBy: { captains_judgment: "You'll judge this yourself, by the Articles.", settled_ashore: "They can settle it ashore, as the Articles say.", no_blood: "No blood among brothers. Shake hands." },
+          check: { type: "Pirate Code", dr: 1 }, approval: ["Order", "Honor"],
+          clean: { text: "Grudging nods all round. The Articles are the Articles.", fx: [{ morale: 1 }] },
+          partial: { text: "They stop, but one of them is still muttering about the goat.", fx: [{ morale: -1 }] },
+          setback: { text: "Both sides think you've ruled for the other.", fx: [{ morale: -3 }] } },
+        { label: "Let them finish it.", approval: ["Revelry"], result: { text: "The big one wins. Everyone else seems to have had a lovely time.", fx: [{ morale: 2 }, { wounded: 1 }] } },
+        { label: "Put five on the big one.", cost: { purse: 20 }, check: { type: "Read People", dr: 2 }, approval: ["Risk"],
+          clean: { text: "You picked right, and the men like a captain who gambles.", fx: [{ purse: 40 }, { morale: 3 }] },
+          partial: { text: "You win, but the loser's mates don't like it.", fx: [{ purse: 40 }, { morale: -1 }] },
+          setback: { text: "The small one has a head like an anvil.", fx: [{ morale: 1 }] } },
+      ] },
+    { id: "ve_c08_asleep_on_watch", reg: "VE-C08", name: "Asleep on Watch", group: "S", cat: "crew", weight: 8, cooldown: 4, when: { voiceMult: { Sot: 1.5 } },
+      setup: "In the dead of night you find the lookout wedged in the crosstrees and snoring, an empty bottle tucked into his shirt like a baby. The ship has been sailing blind for an hour.",
+      choices: [
+        { label: "A light punishment. Six lashes.", approval: ["Mercy", "Order"], result: { text: "He takes his six and thanks you for them. A few of the older hands mutter that he got off easy.", fx: [{ morale: -1 }] } },
+        { label: "The standard punishment. Twelve lashes.", breachIf: "lenient", check: { type: "Discipline", dr: 1 }, approval: ["Order"],
+          clean: { text: "The men watch in silence. The point is taken.", fx: [{ morale: -2 }] },
+          partial: { text: "The point is taken, but some think you went too far.", fx: [{ morale: -4 }] },
+          setback: { text: "Too far, by half the crew's reckoning.", fx: [{ morale: -4 }, { pressure: 1 }] } },
+        { label: "He could have killed us all. Fifty lashes.", breachIf: "lenient", approval: ["Cruelty"],
+          result: { text: "He pleads desperately as you tie him to the rigging, but his pleas fall on deaf ears. He passes out after thirty lashes. You wait for him to come round before giving him the other twenty. The crew watch in complete silence.", fx: [{ dread: 3 }, { morale: -6 }, { wounded: 1 }] } },
+        { label: "Climb the rigging and wake him with a bucket of seawater.", approval: ["Revelry"], result: { text: "He comes awake shrieking and nearly falls out of the crosstrees. The whole crew is in stitches.", fx: [{ morale: 3 }] } },
+      ] },
+    { id: "ve_c09_shanty", reg: "VE-C09", name: "Give Us a Song", group: "S", cat: "crew", weight: 8, cooldown: 4, when: { minBand: "Steady" },
+      setup: "The men are hauling up the mainsail in sullen silence. One of the hands calls out from the line: \"Give us a song, Captain! Something to pull to!\" A few of the others laugh. They don't think you'll do it.",
+      choices: [
+        { label: "Lead them in a shanty.", check: { type: "Rally Crew", dr: 1 }, approval: ["Revelry"],
+          clean: { text: "By the second verse the whole ship is roaring it.", fx: [{ morale: 4 }] },
+          partial: { text: "You're badly off-key, and they love you for it.", fx: [{ morale: 2 }] },
+          setback: { text: "You forget the second verse. And then the third. Someone hums it every time you walk past for the rest of the voyage.", fx: [{ morale: -1 }] } },
+        { label: "Let [Officer:Shanty-Singer] lead it.", approval: ["Generosity"], result: { text: "He has a voice like a foghorn, and the men pull like oxen.", fx: [{ morale: 2, shantySinger: 4 }] } },
+        { label: "Save your breath for hauling.", approval: ["Order"], result: { text: "They haul. Quietly.", fx: [{ morale: -2 }] } },
+        { label: "Fetch your fiddle.", shows: { tag: "Fiddler" }, approval: ["Revelry"], result: { text: "The mainsail goes up in record time, and half the watch below comes up to dance.", fx: [{ morale: 5 }] } },
+      ] },
+
+    // ---- Health and provisions ----
+    { id: "ve_h01_bread_room", reg: "VE-H01", name: "Water in the Bread Room", group: "S", cat: "health", weight: 8, cooldown: 4, when: { outlookMult: { Unsettled: 1.5, Foul: 1.5 }, lowHullMult: 2 },
+      setup: "[Officer:Carpenter] comes up from the hold wet to the knees. \"Seam's opened under the bread room, Captain. Half of it's soup.\" Below, the smell of wet biscuit and spoiled salt pork would turn a strong stomach.",
+      choices: [
+        { label: "Salvage what you can.", check: { type: "Ration Stores", dr: 2 }, approval: ["Order"],
+          clean: { text: "You save most of it, laid out to dry on every flat surface aboard.", fx: [{ provPct: -0.15 }] },
+          partial: { text: "You save some.", fx: [{ provPct: -0.25 }] },
+          setback: { text: "What you save goes green by morning.", fx: [{ provPct: -0.35 }, { morale: -2 }] } },
+        { label: "Serve it anyway. Waste not.", approval: ["Plunder"], result: { text: "The men eat it. Then the men regret it.", fx: [{ provPct: -0.10 }, { morale: -4 }] } },
+        { label: "Over the side with all of it.", approval: ["Caution"], result: { text: "Better hungry than poisoned.", fx: [{ provPct: -0.30 }, { morale: -1 }] } },
+      ] },
+    { id: "ve_h06_mackerel", reg: "VE-H06", name: "The Shoal of Mackerel", group: "S", cat: "health", weight: 8, cooldown: 4, when: { seasons: ["Spring", "Summer"] },
+      setup: "The sea around the ship is suddenly boiling with silver: a shoal of mackerel, so thick the men are pulling them up in buckets. [Officer:warm or neutral] holds up a fish in each fist, grinning like he's just taken a Spanish galleon.",
+      choices: [
+        { label: "All hands fishing! We'll eat well tonight.", approval: ["Revelry"], result: { text: "Fried fish for every man aboard, and singing after.", fx: [{ prov: 0.5, fisherman: true }, { morale: 2 }] } },
+        { label: "Fish, gut and salt it down.", check: { type: "Ration Stores", dr: 1 }, approval: ["Order"],
+          clean: { text: "Barrel after barrel, salted and stowed.", fx: [{ prov: 1, fisherman: true }] },
+          partial: { text: "You put up a fair amount before the shoal moves on.", fx: [{ prov: 0.5, fisherman: true }] },
+          setback: { text: "Not enough salt. By morning the whole lot stinks.", fx: [{ morale: -1 }] } },
+        { label: "No time. Keep sailing.", approval: ["Caution"], result: { text: "The men watch a free dinner swim away.", fx: [{ morale: -1 }] } },
+      ] },
+
+    // ---- Ship trouble ----
+    { id: "ve_t03_loose_cannon", reg: "VE-T03", name: "Loose Cannon", group: "S", cat: "ship", weight: 6, cooldown: 4, when: { conditionMult: { Rough: 2, Foul: 2 } },
+      setup: "The ship rolls hard to starboard and something below goes CRACK. A gun has torn loose from its ropes and is careening across the gun deck like a drunk bull: half a ton of iron, looking for a leg to break.",
+      choices: [
+        { label: "Jam a hammock under its wheels!", check: { type: "Strike First", dr: 2 }, approval: ["Risk", "Glory"],
+          clean: { text: "The gun bucks once and stops dead. The men stare at you.", fx: [{ morale: 2 }] },
+          partial: { text: "You stop it, but not before it catches a man's foot.", fx: [{ wounded: 1 }] },
+          setback: { text: "It throws you aside and goes straight out through a gunport.", fx: [{ captainWounded: true }, { guns: -1 }, { hullPct: -0.05 }] } },
+        { label: "Order the gun crew to rope her.", check: { type: "Leadership", dr: 2, gunnerDr: 1 }, approval: ["Order"],
+          clean: { text: "Four lines, one heave, and she's tied up like a hog.", fx: [] },
+          partial: { text: "She's caught, with one man's ribs the worse for it.", fx: [{ wounded: 1 }] },
+          setback: { text: "She breaks two men and her own carriage before she stops.", fx: [{ wounded: 2 }, { guns: -1 }] } },
+        { label: "Everyone clear! Let her roll.", approval: ["Caution"], result: { text: "She crashes through the gun deck before being stopped in her tracks by the mainmast.", fx: [{ hullPct: -0.05 }] } },
+      ] },
+
+    // ---- Discovery and flotsam ----
+    { id: "ve_d02_bottle", reg: "VE-D02", name: "Message in a Bottle", group: "S", cat: "discovery", weight: 6, cooldown: 4, bottle: true,
+      setup: "[Officer:warm] fishes a green bottle out of the sea with a boathook and presents it to you with great ceremony. There's a paper rolled up inside.",
+      choices: [
+        { label: "Read it aloud to the crew.", approval: ["Revelry"], bottle: "aloud" },
+        { label: "Read it alone in your cabin.", approval: ["Caution"], bottle: "alone" },
+        { label: "Throw it back. Dead men's letters are bad luck.", approval: ["Faith"], result: { text: "[Officer:warm] looks crushed. A few of the older hands nod approvingly.", fx: [] } },
+      ],
+      results: {
+        wreck: { text: "\"...and if anyone finds this, the [Wreck Ship] went down at Lilyhook's Graveyard with her hold full.\"", fx: [{ flag: "bottle_wreck_double" }, { rumorLine: "PLACEHOLDER: A wreck at Lilyhook's Graveyard, her hold still full. The next dive there pays double." }] },
+        love: { text: "A love letter, very badly spelled.", aloud: [{ morale: 2 }] },
+        fool: { text: "\"IF YOU ARE READING THIS YOU ARE A BLOODY FOOL.\"", aloud: [{ morale: 2 }] },
+        map: { check: { type: "Decipher & Research", dr: 2 }, text: "A treasure map.",
+          clean: { text: "It's a fake, but a beautiful one. It might fetch something from a collector.", fx: [{ item: "Forged Treasure Map" }] },
+          partial: { text: "It's a fake. Into the fire.", fx: [] },
+          setback: { text: "You're sure it's real.", fx: [{ flag: "fake_map" }] } },
+        plea: { text: "\"Help us. We are held on an island south of here.\" A plea, years old.", fx: [{ flag: "bottle_plea" }] },
+      } },
+    { id: "ve_d06_rum", reg: "VE-D06", name: "Rum on the Water", group: "S", cat: "discovery", weight: 5, cooldown: 4, when: { afterHurricaneMult: 2 },
+      setup: "Barrels in the water: a dozen of them, bobbing off the bow in a line like ducklings. The nearest has a distiller's brand burned into the head. Rum. Somebody's very bad day is about to become your crew's very good one.",
+      choices: [
+        { label: "Get the boats out and haul them in.", check: { type: "Small Boat Handling", dr: 1 }, approval: ["Plunder"],
+          clean: { text: "Every one of them, dry and sound.", fx: [{ good: "Kill-devil rum", n: 10 }] },
+          partial: { text: "You catch most before the sea scatters them.", fx: [{ good: "Kill-devil rum", n: 5 }] },
+          setback: { text: "The boat crew broach the first barrel before they're back alongside, and the rest drift off while they sing.", fx: [{ morale: 1 }] } },
+        { label: "Broach one right here.", approval: ["Revelry"], result: { text: "An impromptu party on the open sea. You lose the rest to the current, and nobody cares.", fx: [{ morale: 4 }] } },
+        { label: "Leave them. Could be a trap.", approval: ["Caution"], result: { text: "The men watch them bob away with real grief.", fx: [{ morale: -2 }] } },
+      ] },
+  ];
+
+  // ---- The Hurricane at Sea (VE-W02): approved, unwritten. Its mechanics
+  // are §44.7's (foundering); its words are PLACEHOLDERS (PH11).
+  var hurricane = { id: "ve_w02_hurricane", reg: "VE-W02", name: "Hurricane at Sea", group: "M", cat: "weather", storm: true, hurricane: true, status: "approved",
+    setup: "PLACEHOLDER (VE-W02, the author's Major event): The sky turns green, then black. By nightfall the sea is a mountain range, and every man aboard knows this is no ordinary storm.",
+    choices: [
+      { label: "PLACEHOLDER: Take in sail and ride it out.", check: { type: "Ride Out Storm", dr: 3, foulDr: 4 }, approval: ["Order"], founder: true,
+        clean: { text: "PLACEHOLDER: She comes through it, battered and half-drowned.", fx: [{ prov: -1 }] },
+        partial: { text: "PLACEHOLDER: She comes through, but the sea takes its toll.", fx: [{ prov: -1 }, { hullOrMorale: true }] },
+        setback: { text: "PLACEHOLDER: A sea stoves in her side. She's breaking up.", fx: [{ prov: -1 }, { breakingUp: true }] } },
+      { label: "PLACEHOLDER: Run before it.", shows: { minAp: 2 }, check: { type: "Ride Out Storm", dr: 4, foulDr: 5 }, approval: ["Risk", "Glory"], founder: true,
+        clean: { text: "PLACEHOLDER: She flies before the hurricane and outruns the worst of it.", fx: [{ apRefund: 1 }, { hullPct: -0.05 }, { prov: -1 }] },
+        partial: { text: "PLACEHOLDER: You outrun it, but she groans the whole way.", fx: [{ apRefund: 1 }, { hullPct: -0.10 }, { prov: -1 }] },
+        setback: { text: "PLACEHOLDER: The hurricane catches her. She's breaking up.", fx: [{ prov: -1 }, { breakingUp: true }] } },
+    ] };
+  var BU = function (label, type, appr) {
+    return { label: label, check: { type: type, dr: 3, smallShip: 1 }, approval: appr, founderSecond: true,
+      clean: { text: "PLACEHOLDER: She holds together. By dawn the wind has dropped, and she's still afloat.", fx: [{ hullPct: -0.10 }] },
+      partial: { text: "PLACEHOLDER: She holds, just. Half the crew are at the pumps until land is sighted.", fx: [{ hullPct: -0.20 }, { morale: -5 }] },
+      setback: { text: "PLACEHOLDER: The last of her strength gives out.", fx: [] } };
+  };
+  var breakingUp = { id: "ve_w02_breaking", name: "She's Breaking Up", group: "M", cat: "weather", status: "approved",
+    setup: "PLACEHOLDER (VE-W02): Timbers scream below decks. Water is coming in faster than the pumps can throw it out. She's breaking up.",
+    choices: [
+      BU("PLACEHOLDER: Hold her together.", "Ride Out Storm", ["Order"]),
+      BU("PLACEHOLDER: Shore her up from below.", "Repair & Refit", ["Caution"]),
+      BU("PLACEHOLDER: Keep the men at the pumps.", "Leadership", ["Order"]),
+    ] };
+
+  // ---- Ships met at sea: the encounter's card (§44.4); the battle is the hunt's.
+  var encounters = {
+    hunter: { reg: "VE-S02", name: "Pirate Hunter Closing", text: "PLACEHOLDER (VE-S02): A pirate hunter closes in on you, flying her colors and running out her guns." },
+    ship: { reg: "VE-S01", name: "Sail on the Horizon", text: "PLACEHOLDER (VE-S01): The lookout calls a sail on the horizon. Engage, or let her pass." },
+    pirate: { reg: "VE-S01", name: "Sail on the Horizon", text: "PLACEHOLDER (VE-S01): A pirate! She's seen you, and she doesn't like the odds for you." },
+  };
+
+  // ---- The registry: every approved event not written yet (§44.12). ----
+  var approved = [
+    ph("ve_w04", "Fog Bank", "S", "weather", 8, { seasons: ["Spring"], zone: "north", outlooks: ["Unsettled"] }, "Thick fog closes in. Keep watch, slow down or push on; something may be out there."),
+    ph("ve_w06", "Waterspout", "S", "weather", 5, { seasons: ["Summer", "Hurricane"], zone: "south" }, "A waterspout bears down on the ship. Outrun it or brace for the hit."),
+    ph("ve_w08", "Diamond Shoals in Poor Light", "S", "weather", 6, { zone: "north" }, "Shoals ahead in failing light. Pick a way through or stand off and lose time."),
+    ph("ve_w09", "Lightning in the Rigging", "S", "weather", 5, { outlooks: ["Unsettled", "Foul"] }, "Lightning strikes the mast and fire breaks out aloft. Fight it, cut it away, or pray."),
+    ph("ve_w12", "Winter Cold Snap", "S", "weather", 8, { zone: "north", seasons: ["Winter"] }, "Bitter cold at sea. Open the stores, keep the men moving, or let them suffer through it."),
+    ph("ve_w13", "The Christmas Winds", "S", "weather", 6, { zone: "south", seasons: ["Winter"], outlooks: ["Fair"] }, "The steady winter trades blow warm and fair. A good passage lifts spirits and saves time."),
+    ph("ve_s03", "Navy Ship Bears Down", "S", "ships", 6, { minHeat: 50 }, "A navy warship turns toward you. Fight, flee, or run into a squall."),
+    ph("ve_s04", "The Named Hunter", "M", "ships", 0, {}, "A famous hunter has come for you by name."),
+    ph("ve_s05", "The Sicilians Come Looking", "M", "ships", 0, {}, "Sicilian ships hunt the captain who took one of theirs."),
+    ph("ve_s07", "Frisian Sweep", "S", "ships", 4, { zone: "south" }, "A Frisian squadron sweeping its waters. Show your papers, bluff, hide or run."),
+    ph("ve_s08", "A Fellow Pirate Hails", "S", "ships", 6, {}, "A pirate ship hails you. Trade news, trade goods, or watch your back."),
+    ph("ve_s09", "Wolf Pack", "S", "ships", 0, {}, "Several pirate sloops shadow you, after your cargo. They'll attack if they like the odds."),
+    ph("ve_s10", "False Colors", "S", "ships", 3, {}, "A friendly-looking ship that isn't. Spot the trick before she's alongside."),
+    ph("ve_s11", "Merchant in Distress", "S", "ships", 6, {}, "A crippled merchant signals for help. Rescue her, rob her, or sail on."),
+    ph("ve_s12", "Captives on Another Ship", "M", "ships", 3, {}, "Another ship carries captives. What you do about it is up to you."),
+    ph("ve_s14", "The Swedish Blockade Runner", "M", "ships", 4, {}, "A Swedish runner slipping guns through. Help her, ignore her, or sell her out."),
+    ph("ve_s15", "Dettman's Straggler", "M", "ships", 4, { maxYear: 1755 }, "One of Dettman's French pirates, limping home alone."),
+    ph("ve_s16", "Jack's Colors", "M", "ships", 0, {}, "Amber Jack's colors on the horizon."),
+    ph("ve_s18", "The Rich Man's Yacht", "M", "ships", 3, {}, "A wealthy passenger's vessel. Ransom, charm or let pass."),
+    ph("ve_s19", "The Frisian Treasure Fleet", "M", "ships", 1, { zone: "south" }, "The Frisian treasure fleet passes, far too strong to touch."),
+    ph("ve_s20", "Someone Flying Your Name", "M", "ships", 0, {}, "Someone is raiding under your name."),
+    ph("ve_s21", "The French Treasure Fleet", "M", "ships", 1, { zone: "south" }, "The French treasure fleet passes, far too strong to touch."),
+    ph("ve_c02", "A Hand Breaks an Article", "S", "crew", 6, {}, "A hand is caught breaking one of the Articles. Punish him by the book, go easy, or look away."),
+    ph("ve_c03", "The Crew Presses to Amend", "S", "crew", 5, { greedAtLeast: 2 }, "The crew wants the Articles changed in their favor. Give ground or hold firm."),
+    ph("ve_c04", "Dicing for Shares", "S", "crew", 6, {}, "The hands are gambling their shares below decks. Join in, stop it, or let it run."),
+    ph("ve_c06", "A Thief in the Forecastle", "M", "crew", 6, {}, "Something's been stolen from a hand's sea chest. Find the thief and decide his fate."),
+    ph("ve_c07", "The Stowaway", "M", "crew", 4, {}, "A stowaway turns up in the hold. Who is he, and what do you do with him?"),
+    ph("ve_c11", "A Man Wants His Share Now", "S", "crew", 5, {}, "A hand demands his share early. Pay, refuse, or settle it by the Articles."),
+    ph("ve_c12", "Fall from the Rigging", "S", "crew", 6, { outlooks: ["Unsettled", "Foul"] }, "A hand falls from aloft. Treat him, and decide what the ship can spare."),
+    ph("ve_c13", "Burial at Sea", "S", "crew", 0, {}, "The dead are buried at sea. Say a few words, or get it done."),
+    ph("ve_c15", "Green Hands, Green Faces", "S", "crew", 6, { greenCrew: true }, "The new hands are seasick and useless. Drill them, coddle them, or leave them to it."),
+    ph("ve_c16", "A Bad Omen", "S", "crew", 5, { voice: "Superstitious" }, "The crew sees a bad omen. Reassure them, mock it, or take it seriously."),
+    ph("ve_c17", "The Captain's Fine Coat", "M", "crew", 0, {}, "The crew has opinions about the captain's expensive new clothes."),
+    ph("ve_c18", "Crossing the Line", "S", "crew", 3, { once: true }, "An old sailors' ceremony for the new hands. Join the fun or put a stop to it."),
+    ph("ve_h02", "Rats", "S", "health", 6, {}, "Rats have got into the stores. Hunt them down or cut your losses."),
+    ph("ve_h03", "Scurvy Signs", "S", "health", 0, {}, "Bleeding gums and loose teeth among the crew. Find fresh food or push on."),
+    ph("ve_h05", "Foul Water", "S", "health", 5, { seasons: ["Summer"] }, "The water casks have gone bad. Ration, detour for fresh water, or drink it anyway."),
+    ph("ve_h07", "Bad Rum", "S", "health", 4, { storesOpened: true }, "A bad barrel of rum makes the men sick. Strong stomachs only."),
+    ph("ve_h08", "Turtle Island", "M", "health", 3, { zone: "south" }, "An island of sea turtles: fresh meat, if you'll spend the time."),
+    ph("ve_t01", "A Sprung Plank", "S", "ship", 6, { lowHullMult: 2 }, "A plank springs and the ship takes on water. Patch it, pump, or make for port."),
+    ph("ve_t02", "Fouled Bottom", "S", "ship", 5, {}, "Weed and barnacles slow the ship. Scrape what you can, or live with it until port."),
+    ph("ve_t04", "Fire in the Galley", "S", "ship", 5, {}, "Fire in the galley. Put it out fast before it reaches the powder."),
+    ph("ve_t05", "Damp Powder", "S", "ship", 5, { outlooks: ["Unsettled", "Foul"] }, "Seawater has got into the powder. Dry it, or fight the next battle with what's left."),
+    ph("ve_t06", "The Prize Crew Signals Distress", "S", "ship", 6, { prizeShips: true }, "One of your prize ships is in trouble. Help her or leave her."),
+    ph("ve_t07", "The Prize Crew Wants Her", "M", "ship", 3, { prizeShips: true }, "Your prize crew wants to keep the ship for themselves."),
+    ph("ve_t08", "Hard Aground", "S", "ship", 5, { zone: "north" }, "The ship runs aground on a sandbar. Haul her off or lighten her."),
+    ph("ve_d01", "The Castaway", "M", "discovery", 0, {}, "A castaway on a spit of sand. Who is he, and what does he know?"),
+    ph("ve_d03", "Floating Wreckage", "S", "discovery", 6, {}, "Wreckage in the water. Salvage what you can; sometimes there's a survivor."),
+    ph("ve_d04", "A Longboat of Survivors", "S", "discovery", 4, {}, "Survivors adrift in a ship's boat. Whose men are they, and what's it worth to save them?"),
+    ph("ve_d05", "The Empty Ship", "M", "discovery", 3, {}, "A ship adrift with no one aboard, and no sign of why."),
+    ph("ve_d07", "An Uncharted Cay", "S", "discovery", 4, { zone: "south" }, "A small island on no chart. Explore it, chart it, or leave it alone."),
+    ph("ve_d08", "The Drowned Man's Letter", "M", "discovery", 0, {}, "A drowned man with a letter in his coat."),
+    ph("ve_d09", "Canoes off the Coast", "M", "discovery", 0, {}, "Native canoes come out to meet the ship."),
+    ph("ve_u01", "Ghost Ship", "M", "uncanny", 2, { conditionMult: { Fog: 3 } }, "A silent ship drifts out of the fog."),
+    ph("ve_u04", "The Whale Carcass", "M", "uncanny", 1, {}, "A dead whale with an enormous bite taken out of it."),
+    ph("ve_u05", "Something Came Aboard", "M", "uncanny", 1, {}, "Something came aboard in the night."),
+    ph("ve_u06", "Serpent in the Wake", "M", "uncanny", 1, {}, "Something long and dark keeps pace with the ship."),
+    ph("ve_u07", "Serpent Across the Bow", "M", "uncanny", 1, {}, "A serpent crosses the bow in the fog."),
+    ph("ve_u09", "The Singing", "M", "uncanny", 1, { zone: "south" }, "Singing on the water at night. A hand goes to the rail."),
+    ph("ve_u10", "The Arm on the Rail", "M", "uncanny", 1, {}, "A huge arm slides over the rail in the dark."),
+    ph("ve_u11", "Lights Under the Water", "M", "uncanny", 3, {}, "Lights glow beneath the sea, and nobody can explain them."),
+    ph("ve_u12", "Lilyhook's Yarn", "M", "uncanny", 3, { near: "ocracoke" }, "A crew yarn about Lilyhook on a dark night."),
+    ph("ve_f01", "News from a Passing Ship", "S", "world", 8, {}, "A passing ship shares the latest news from Europe and the colonies."),
+    ph("ve_f02", "Key's Buildup", "M", "world", 0, {}, "Signs that Admiral Key is gathering ships."),
+    ph("ve_f03", "French Sails off Florida", "M", "world", 0, {}, "French sails where they shouldn't be."),
+    ph("ve_f04", "After the Battle", "M", "world", 0, {}, "The wreckage and survivors of a great battle."),
+    ph("ve_f05", "A Friend Under the Same Letter", "S", "world", 0, {}, "A privateer under the same letter hails you as a friend."),
+    ph("ve_f06", "The Rendezvous", "M", "world", 0, {}, "A smugglers' meeting at sea that isn't going to plan."),
+  ];
+
+  // ---- Officer events (§25.15; the §25 appendix). Each fires only when
+  // its trigger is met (§44.4). The priority order (§44.12.9).
+  var officerAtSea = [
+    { id: "vo_vote", reg: "VE-O03", name: "The Vote", trigger: "vote",
+      setup: "As the crew prepares to vote on a new Quartermaster, a few men glance your way, waiting to see if you'll weigh in.", vote: true },
+    { id: "vo_qm_opinion", reg: "VE-O04", name: "The Quartermaster's Opinion", trigger: "qmOpinion",
+      setup: "As the crew goes about its work, you're approached by [Quartermaster]. {qm.He} tells you that the crew is grumbling about your recent decision.",
+      choices: [
+        { label: "Gather the crew to explain your decision and take questions", check: { type: "Leadership", dr: 2 },
+          clean: { text: "Your words seem to assuage the crew's concerns. [Quartermaster] thanks you for taking their concerns seriously.", fx: [{ morale: 5 }] },
+          partial: { text: "You stumble over your words a bit, but the crew seems to understand.", fx: [{ morale: 2 }] },
+          setback: { text: "Your defensive explanation doesn't seem to satisfy the crew. Instead, you hear them whispering.", fx: [{ morale: -2 }, { pressure: 1 }] } },
+        { label: "Apologize directly to the Quartermaster", result: { text: "[Quartermaster] nods, grateful that you've heard him out.", fx: [{ points: 3, who: "qm" }, { morale: 2 }] } },
+        { label: "Reply that you understand the crew's concerns, but your decision is final", result: { text: "[Quartermaster] nods curtly and walks away, unwilling to press the matter further.", fx: [] } },
+        { label: "You're the captain of this ship, and it's none of their concern", result: { text: "[Quartermaster] seems taken aback, but doesn't say anything further before storming off.", fx: [{ rung: -1, who: "qm" }, { pressure: 1 }] } },
+      ] },
+    { id: "vo_fear_poverty", reg: "VE-O07", name: "Fear Trigger: Poverty", trigger: "fear", fear: "Poverty", needs: "provisionsOut",
+      setup: "[Name] has been rummaging through the hold for hours, looking for any crumbs that the rats haven't gotten to yet. Now he sits against the hull, rocking back and forth, whispering the same words over and over: \"We won't starve, Mama. We won't starve, Mama.\"",
+      choices: [
+        { label: "Sit by his side and reassure him", result: { text: "[Name] buries his head in your shoulder and eventually calms down. \"Thank you, Captain.\"", fx: [{ rung: 1, who: "officer" }] } },
+        { label: "Convince him you'll make it through", result: { text: "[Name] listens quietly and finally nods, wiping a tear from his eye. \"You're right, I'm sorry to be such a bother.\"", fx: [{ points: 3, who: "officer" }] } },
+        { label: "Ignore him", result: { text: "The wailing continues for hours until [Name] finally falls asleep.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Tell him to shut up", result: { text: "He quiets down, but continues rocking back and forth for hours.", fx: [{ rung: -1, who: "officer" }] } },
+      ] },
+    { id: "vo_fear_violence", reg: "VE-O07", name: "Fear Trigger: Violence & Death", trigger: "fear", fear: "Violence & Death", needs: "executed",
+      setup: "After the corpses have been thrown overboard, [Name] storms up to you. \"That was needlessly cruel, Captain! I'm only alive because another captain spared my life in a moment just like that. I can't bear to watch you throw away lives like they're worthless.\"",
+      choices: [
+        { label: "Apologize and tell [Name] that it won't happen again.", result: { text: "[Name] seems satisfied with your promise. He will hold you to it.", fx: [{ rung: 1, who: "officer" }, { flag: "promised_no_executions" }] } },
+        { label: "Apologize, but make no promises about future captured crews.", result: { text: "[Name] nods curtly. \"If you say so.\"", fx: [{ points: 2, who: "officer" }] } },
+        { label: "Insist that what you did was necessary.", result: { text: "[Name] shoots you a skeptical look before walking away.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Explain that their lives *were* worthless.", result: { text: "[Name] opens his mouth to protest, but thinks better of it when you give him a menacing look.", fx: [{ rung: -1, who: "officer" }] } },
+      ] },
+    { id: "vo_fear_disgrace", reg: "VE-O07", name: "Fear Trigger: Disgrace", trigger: "fear", fear: "Disgrace", needs: "standingLost",
+      setup: "As you write in your logbook, [Name] throws open the door to your cabin. \"Captain, you've been dragging our name through the mud. You're turning some powerful people against us, and if this continues, I can't be a part of it. My family's name already lies in ruins thanks to my father - my name cannot meet the same fate.\"",
+      choices: [
+        { label: "Apologize and promise to take more care in the future.", result: { text: "[Name] seems satisfied, for now.", fx: [{ points: 3, who: "officer" }] } },
+        { label: "Ask [Name] to trust you. It's all part of the plan.", check: { type: "Persuade", dr: 2 },
+          clean: { text: "[Name] nods. \"Don't let me down, Captain.\"", fx: [{ points: 2, who: "officer" }] },
+          partial: { text: "[Name] nods. \"Don't let me down, Captain.\"", fx: [{ points: 2, who: "officer" }] },
+          setback: { text: "[Name] doesn't seem convinced. You hear him muttering as he walks away.", fx: [{ rung: -1, who: "officer" }] } },
+        { label: "Remind [Name] that you're the Captain, and you make the decisions.", result: { text: "[Name] huffs but doesn't question your authority.", fx: [{ points: -3, who: "officer" }] } },
+      ] },
+    { id: "vo_drive_faith", reg: "VE-O06", name: "A Drive Comes Due: Faith", trigger: "drive", drive: "Faith",
+      setup: "As you stand at the railing, looking out over the glistening sea, [Name] walks up next to you. \"Captain, I've noticed that some members of the crew are struggling with their faith and other personal matters. Many ships have a chaplain to help the crew with things like these, and I'd like your permission to take on the role myself. It feels like God is calling me to do this. Of course, this may mean I'll have less time for my other duties.\"",
+      choices: [
+        { label: "A great idea - [Name] would make an excellent chaplain.", result: { text: "[Name] flashes you a bright smile as you hand over a small amount of gold to buy the proper vestments and a new Bible. He assures you that the chaplain's services are available to you as well.", fx: [{ crewGold: -100 }, { rung: 1, who: "officer" }, { officerFlag: "chaplain" }] } },
+        { label: "Grant [Name] their request, but make them swear that it will not interfere with their other duties.", result: { text: "[Name] nods dutifully and heads below deck. Later, you notice him in deep conversation with one of the newer crew members.", fx: [{ points: 2, who: "officer" }, { officerFlag: "chaplain" }] } },
+        { label: "This is a pirate ship. You raid, kill, and plunder. You don't need a sniveling priest to help the crew pray over their troubles.", result: { text: "[Name]'s face scrunches in anger. \"I need to go before I take the Lord's name in vain,\" he growls before storming off.", fx: [{ rung: -1, who: "officer" }] } },
+      ] },
+    { id: "vo_drive_order", reg: "VE-O06", name: "A Drive Comes Due: Order", trigger: "drive", drive: "Order", needs: "signedGreen",
+      setup: "Early in the morning, [Name] approaches you. \"These new crewmen seem greener than usual, Captain. The boy over there looks completely lost on deck and barely knows which end of a rope to hold. Permission to drill them harder until they start pulling their weight.\"",
+      choices: [
+        { label: "Permission granted. Get them up to speed, whatever it takes.", result: { text: "For the next few days, [Name] drills the new recruits hard. They struggle at first, but quickly catch up, although you hear them grumbling at times.", fx: [{ rung: 1, who: "officer" }, { season: 0.10 }, { morale: -5 }] } },
+        { label: "Permission granted, but don't be too hard on them.", result: { text: "For the next few days, [Name] drills the new recruits regularly. You notice some modest improvement.", fx: [{ points: 2, who: "officer" }, { season: 0.05 }] } },
+        { label: "Permission denied, but keep a close eye on them. They'll learn by watching, and if they don't, we'll throw them overboard.", result: { text: "For the next few days, [Name] watches the new recruits vigilantly, shaking his head.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Permission denied. They'll be fine.", result: { text: "[Name] shakes his head and walks away. Later, you hear him complaining about the undisciplined recruits.", fx: [{ points: -3, who: "officer" }] } },
+      ] },
+  ];
+
+  // Port events (§44.3): they come due as AP is spent in a place and fire
+  // when the captain leaves it.
+  var officerInPort = [
+    { id: "vp_drive_wealth", name: "A Drive Comes Due: Wealth", trigger: "drive", drive: "Wealth",
+      setup: "As you walk through town [Name] suddenly stops and grabs your sleeve. \"Remember when I told you that someone owes me money? That's him.\" {officer.He} points at a thin young man with black hair and small, beady eyes, puffing on a pipe as he strolls out of the tavern.",
+      choices: [
+        { label: "Corner the sailor and demand [Name]'s due", check: { type: "Intimidate", dr: 2 },
+          clean: { text: "The debtor quickly rushes off, and [Name] thanks you profusely for your help.", fx: [{ rung: 1, who: "officer" }] },
+          partial: { text: "The debtor complains loudly as he hands over the gold. You feel several pairs of eyes upon you as he storms off.", fx: [{ points: 2, who: "officer" }, { heatHere: 5 }] },
+          setback: { text: "The debtor bolts and you give chase, but quickly lose him. [Name] thanks you for trying.", fx: [{ points: 2, who: "officer" }] } },
+        { label: "Follow the sailor and ambush him", check: { type: "Plan & Ambush", dr: 2 },
+          clean: { text: "You follow closely until the debtor strides through a dark alley. You quickly sneak up behind him and hold your knife to his neck. He pays his debt, and then some.", fx: [{ rung: 1, who: "officer" }, { purse: 50 }] },
+          partial: { text: "You follow closely until the debtor strides through a dark alley. You quickly sneak up behind him but he turns around at the last moment. After a brief scuffle, you manage to restrain him and collect the debt.", fx: [{ points: 2, who: "officer" }, { heatHere: 5 }] },
+          setback: { text: "You follow closely until the debtor strides through a dark alley. As you attempt to sneak up on him, he looks over his shoulder and sprints away. You quickly lose him in the town's winding back alleys. A disappointed [Name] thanks you for trying.", fx: [{ points: 2, who: "officer" }] } },
+        { label: "Assault the man and take whatever he's got on him.", check: { type: "Brawling", dr: 2 },
+          clean: { text: "You confront the debtor, and before he can defend himself, you smash his face with your pistol. The bloodied man quickly pays up, with interest.", fx: [{ purse: 150 }, { rung: 1, who: "officer" }, { heatHere: 5 }, { dread: 3 }] },
+          partial: { text: "You confront the debtor, and before he can defend himself, you smash his face with your pistol. The bloodied man quickly pays up, but you're forced to flee when the town watch appears.", fx: [{ purse: 150 }, { rung: 1, who: "officer" }, { heatHere: 15 }, { dread: 3 }] },
+          setback: { text: "You confront the debtor, but he puts up a fight. You take a punch to the jaw that knocks you out cold. When you awake, the debtor is gone. A disappointed [Name] thanks you for trying.", fx: [{ captainWounded: true }, { heatHere: 5 }, { points: 2, who: "officer" }] } },
+        { label: "Tell him to let it go", result: { text: "[Name] hangs his head, but doesn't press the matter further.", fx: [{ points: -3, who: "officer" }] } },
+      ] },
+    { id: "vp_drive_security", name: "A Drive Comes Due: Security", trigger: "drive", drive: "Security",
+      setup: "[Name] finds you on the streets of [Node]. \"Great news, Captain! I won big at dice, and now I've got some gold to spend. I know the crew probably needs it, but I like it here and it seems like a good place to build a life. I was wondering if perhaps I could use the gold to buy some land around here.\"",
+      choices: [
+        { label: "Agree with [Name]'s proposal - they won the gold, after all", result: { text: "A large grin spreads across [Name]'s face and he runs off. Later, he tells you that he bought a nice parcel of land with a garden and a small cottage.", fx: [{ rung: 1, who: "officer" }, { officerFlag: "land" }] } },
+        { label: "Allow [Name] to buy a small parcel, but keep the lion's share for the crew.", result: { text: "[Name] smiles and nods before running off. Later, he tells you that he bought a small townhouse, and hands over the remainder of his winnings.", fx: [{ crewGold: 200 }, { points: 2, who: "officer" }, { officerFlag: "land" }] } },
+        { label: "Tell [Name] that he's completely right. The crew does need the gold.", result: { text: "He reluctantly hands over his winnings.", fx: [{ crewGold: 300 }, { points: -3, who: "officer" }] } },
+      ] },
+    { id: "vp_drive_power", name: "A Drive Comes Due: Power", trigger: "drive", drive: "Power",
+      setup: "[Name] and two crewmen find you outside the tavern. The two crewmen are covered in scrapes, cuts, and bruises. \"Captain,\" says [Name], \"These men say that a group of thugs in there was spouting foul slander against us. They apparently attacked our mates most savagely. We must answer this disrespect.\"",
+      choices: [
+        { label: "Storm in with [Name] and fight the thugs.", check: { type: "Brawling", dr: 2 },
+          clean: { text: "You and [Name] burst into the tavern and quickly teach the four thugs a lesson. You leave them on the floor in a bloody heap.", fx: [{ rung: 1, who: "officer" }, { morale: 3 }, { dread: 3 }] },
+          partial: { text: "You and [Name] burst into the tavern and quickly teach the four thugs a lesson, but not before one of them delivers a painful blow to your ribs.", fx: [{ rung: 1, who: "officer" }, { morale: 3 }, { dread: 3 }, { captainWounded: true }] },
+          setback: { text: "You and [Name] burst into the tavern, intent on teaching the thugs a lesson. It's a valiant attempt, but you're outnumbered, and they beat you both senseless before tossing you back out the front door.", fx: [{ captainWounded: true }, { points: 2, who: "officer" }] } },
+        { label: "Approach the thugs and demand restitution for your injured crew.", check: { type: "Intimidate", dr: 2 },
+          clean: { text: "The thugs, not wanting to cross you further, quickly offer a pouch of gold pieces as restitution.", fx: [{ crewGold: 100 }, { rung: 1, who: "officer" }] },
+          partial: { text: "The thugs grumble but don't seem willing to fight you. They toss you a few coins to go away.", fx: [{ crewGold: 50 }, { points: 2, who: "officer" }] },
+          setback: { text: "The thugs laugh in your face, and you hear the other patrons snickering. You and [Name] leave the tavern empty-handed.", fx: [{ morale: -3 }, { points: -2, who: "officer" }] } },
+        { label: "The thugs aren't worth the trouble. Focus on tending to your crewmen's wounds.", result: { text: "You bandage the wounded crewmen and bring them back to the ship. Those thugs aren't worth the trouble.", fx: [{ points: -3, who: "officer" }, { morale: 2 }] } },
+      ] },
+    { id: "vp_drive_knowledge", name: "A Drive Comes Due: Knowledge", trigger: "drive", drive: "Knowledge", place: "merchant",
+      setup: "As you walk past the assorted market stalls, [Name] grabs you by the arm. \"Captain, that woman over there is selling some very interesting books. I'd like to peruse her volumes and perhaps buy one or two, but I don't have the coin on me. Do we have any coin to spare?\"",
+      choices: [
+        { label: "The pursuit of knowledge is a worthwhile endeavor. Give [Name] a handful of gold from your own purse.", needsPurse: 50, result: { text: "[Name] beams as you hand him a hefty pouch of gold. He spends the next hour rummaging through the bookseller's stall and returns with an armful of books.", fx: [{ purse: -50 }, { rung: 1, who: "officer" }, { rumor: "Legend" }] } },
+        { label: "Sigh deeply and tell [Name] that they can buy one book only, tossing them a few coins.", needsPurse: 15, result: { text: "[Name] nods as you hand him a few coins. He takes his time looking through the volumes, before selecting a worn old tome about sea creatures.", fx: [{ purse: -15 }, { points: 2, who: "officer" }] } },
+        { label: "Tell [Name] that you don't have the coin to spare. They'll have to make do with the books you already have on board.", result: { text: "[Name] says he understands, but you can tell he's disappointed.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Reading is for fools. Laugh at [Name] and continue walking.", result: { text: "[Name] stands there, stunned. \"I didn't know you felt that way, Captain. Your loss.\"", fx: [{ rung: -1, who: "officer" }] } },
+      ] },
+    { id: "vp_drive_pleasure", name: "A Drive Comes Due: Pleasure", trigger: "drive", drive: "Pleasure",
+      setup: "As you walk down the town's main street, the sound of music and mirth carries through the air. \"Hear that?\" says [Name], \"Sounds like there's a party happening nearby. Let's go crash it!\"",
+      choices: [
+        { label: "Sure, why not?", needsAp: 1, result: { text: "You and [Name] find the raucous party in the garden of a well-off merchant's home and slip in without anyone noticing. It's the birthday celebration of the merchant's beloved father, Eugene, and the attendees are the friends and family he's accumulated over his 90 years. You mingle, make friends, and partake in the merriment until dawn. As you leave, [Name] turns to you and says, \"Thanks, Captain. I really needed that.\"", fx: [{ spendAp: 1 }, { rung: 1, who: "officer" }, { tag: "Hangover" }, { rumor: "C" }] } },
+        { label: "We don't have time for this. Let's keep going.", result: { text: "[Name] hangs his head, and seems uncharacteristically quiet for the rest of the day.", fx: [{ points: -3, who: "officer" }] } },
+        { label: "Bring the whole crew", needsAp: 1, result: { text: "You gather as many crew members as you can find and bring them to a raucous party in the garden of a well-off merchant’s home. It’s the birthday celebration of the merchant’s beloved father, Eugene, and the attendees are the friends and family he’s accumulated over his 90 years. The arrival of your crew turns heads, but the frightened guests don't dare ask you all to leave. Eugene doesn't seem to mind, instead finding his son's exasperation quite amusing. Your crew drinks the cellar dry and partakes in the merriment until dawn, causing quite a bit of damage in the process. A good amount of fine silverware leaves with them. As you depart, [Name] turns to you and says, “Thanks, Captain. We all needed that.”", fx: [{ spendAp: 1 }, { morale: 5 }, { crewGold: 150 }, { heatHere: 5 }, { rung: 1, who: "officer" }] } },
+      ] },
+    { id: "vp_fear_loss", name: "Fear Trigger: Loss", trigger: "fear", fear: "Loss",
+      setup: "[Name] runs up to you on the street, out of breath. \"Captain, a pickpocket has stolen something precious from me! It's a silver ring, the only thing I have left of my father. Help me find the thief and get it back.\"",
+      choices: [
+        { label: "Agree immediately and go hunting for the pickpocket, prepared to beat him senseless.", needsAp: 1, check: { type: "Gather Intelligence", dr: 2 }, spendAp: 1,
+          clean: { text: "After hours of searching, you finally catch up with the pickpocket and corner him in an alley. You beat him senseless and take back the ring. [Name] thanks you for your help.", fx: [{ rung: 1, who: "officer" }] },
+          partial: { text: "After hours of searching, you finally catch up with the pickpocket and corner him in an alley. You beat him senseless and take back the ring, but not before several townsfolk take notice. [Name] thanks you for your help.", fx: [{ heatHere: 5 }] },
+          setback: { text: "After hours of searching, you can't find the pickpocket. [Name] is heartbroken.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Agree and search for the pickpocket, prepared to negotiate for the ring.", needsAp: 1, check: { type: "Haggle", dr: 2 }, spendAp: 1,
+          clean: { text: "After hours of searching, [Name] points out the suspected pickpocket in the crowded market. He turns to run, but stops when you assure him that you're prepared to pay for the ring. After you explain the ring's sentimental value, he accepts a small amount of coin for it. [Name] is overjoyed and thanks you profusely.", fx: [{ purse: -30 }, { rung: 1, who: "officer" }] },
+          partial: { text: "After hours of searching, [Name] points out the suspected pickpocket in the crowded market. He turns to run, but stops when you assure him that you're prepared to pay for the ring. He drives a hard bargain, and you end up a fair bit poorer. [Name], however, is overjoyed and thanks you profusely.", fx: [{ purse: -100 }, { rung: 1, who: "officer" }] },
+          setback: { text: "You head into the market to search for the pickpocket. After hours of searching with no luck, [Name] gives up and returns to the ship heartbroken.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Refuse. The thief is probably long gone, and it would take too much time to find him.", result: { text: "[Name] is sorely disappointed.", fx: [{ points: -3, who: "officer" }] } },
+      ] },
+    { id: "vp_fear_obscurity", name: "Fear Trigger: Obscurity", trigger: "fear", fear: "Obscurity",
+      setup: "As you walk past a graveyard, you notice [Name] sitting in front of an unmarked tombstone. As you approach, they turn to you with tears in their eyes. \"This is where my brother is buried. They…they didn't even carve his name. Promise me that when I die, you'll give me a proper funeral, and carve my name into the stone.\"",
+      choices: [
+        { label: "Promise [Name] a proper funeral and grave, and offer to help carve their brother's name into this tombstone (1 action)", needsAp: 1, result: { text: "You spend the rest of the day helping [Name] carve his brother's name into the stone. You watch as he places a wildflower on the grave and bows his head. As you depart, he thanks you for your help.", fx: [{ spendAp: 1 }, { rung: 1, who: "officer" }, { officerFlag: "funeralPromised" }] } },
+        { label: "Promise [Name] a proper funeral and grave, and sit with them for a while.", result: { text: "After promising him a proper funeral, the two of you sit in silence for a long while. Eventually, you leave him to his thoughts.", fx: [{ points: 3, who: "officer" }, { officerFlag: "funeralPromised" }] } },
+        { label: "Sit with [Name] silently but make no promises. Sailors usually end up at the bottom of the sea, anyway.", result: { text: "The two of you sit in silence for a long while. Eventually, you leave him to his thoughts.", fx: [{ points: -2, who: "officer" }] } },
+        { label: "Roll your eyes and walk away. You don't have the patience for sentimental nonsense.", result: { text: "Unmoved, you leave [Name] to his mourning.", fx: [{ rung: -1, who: "officer" }] } },
+      ] },
+    { id: "vp_fear_exposure", name: "Fear Trigger: Exposure", trigger: "fear", fear: "Exposure",
+      setup: "As you walk down the main street, [Name] is stopped by a man in a fancy coat, who calls him another name. The blood drains from [Name]'s face and he looks to you for help.",
+      choices: [
+        { label: "Tell the man he's mistaken", check: { type: "Bluff & Disguise", dr: 2 },
+          clean: { text: "The confused man continues on his way. [Name] looks grateful, but he doesn't want to talk about it. You drop the subject.", fx: [{ rung: 1, who: "officer" }] },
+          partial: { text: "The confused man continues on his way. [Name] looks grateful, but he doesn't want to talk about it. You drop the subject.", fx: [{ rung: 1, who: "officer" }] },
+          setback: { text: "\"No, I'm certain it's you! You had to flee town, right?\" [Name] grabs your arm and whisks you away. He looks like he's seen a ghost, but he doesn't want to talk about it. You drop the subject.", fx: [{ points: -2, who: "officer" }, { officerFlag: "exposed" }] } },
+        { label: "Pay him to forget", needsPurse: 100, result: { text: "The man quickly takes the coin, then walks away whistling a jaunty tune. [Name] looks grateful, but he doesn't want to talk about it. You drop the subject.", fx: [{ purse: -100 }, { rung: 1, who: "officer" }] } },
+        { label: "Threaten him", check: { type: "Intimidate", dr: 2 },
+          clean: { text: "The man flees in terror. [Name] looks grateful, but he doesn't want to talk about it. You drop the subject.", fx: [{ rung: 1, who: "officer" }] },
+          partial: { text: "The man flees in terror, but the commotion turns a few heads. [Name] looks grateful, but he doesn't want to talk about it. You drop the subject.", fx: [{ rung: 1, who: "officer" }, { heatHere: 5 }] },
+          setback: { text: "\"You don't frighten me, sir. I'd know that face anywhere! Did you know he had to flee town?\" [Name] grabs your arm and whisks you away. He looks like he's seen a ghost, but he doesn't want to talk about it. You drop the subject.", fx: [{ points: -2, who: "officer" }, { officerFlag: "exposed" }] } },
+        { label: "Let [Name] handle it", result: { text: "[Name] tells the man he's mistaken, and you continue on your way, leaving the confused man scratching his head. He doesn't want to talk about it.", fx: [{ points: -2, who: "officer" }] } },
+      ] },
+  ];
+  // The officer's fear line opens a Fear Trigger (§25 appendix Part 1, §6).
+  var fearLines = { "Poverty": "We'll be living on the streets as beggars!", "Violence & Death": "I can't bear to watch this.", "Disgrace": "You're throwing our good names in the gutter!",
+    "Betrayal": "I knew I shouldn't have trusted you.", "Loss": "We had it all, and now we'll be left with nothing.", "Uncanny": "I don't want to find out what that eerie feeling is about.",
+    "Exposure": "I wish I could go home...", "Obscurity": "Our names will mean nothing after this." };
+
+  // The Vote's reactions (§25 appendix Part 2).
+  var voteReact = {
+    congratulate: { label: "Congratulate the winner - the crew made the right choice", approval: ["Honor"], text: "The crew seem pleased that you agree with their decision.", fx: [{ morale: 3 }] },
+    silent: { label: "Observe and keep silent", approval: ["Caution"], text: "Your silence leaves the crew to guess as to your feelings about the new Quartermaster.", fx: [] },
+    sulk: { label: "Sulk in your cabin", approval: ["Retreat"], text: "You don't stick around to watch the crew congratulate their new Quartermaster.", fx: [{ points: -2, who: "winner" }, { morale: -2 }] },
+    disagree: { label: "Loudly disagree with the crew's decision", approval: ["Defiance"], text: "The crew grumbles, but nobody challenges you directly.", fx: [{ rung: -1, who: "winner" }, { morale: -5 }, { pressure: 1 }] },
+  };
+
+  PC.data.voyageEvents = {
+    SLOT_CHANCE: 0.75,               // §44.1 (placeholder)
+    STORM: { Fair: 0.05, Unsettled: 0.20, Foul: 0.45, hurricaneFloor: 0.20, perExtraAp: 0.05 }, // §44.7
+    ENCOUNTER_CHANCE: 0.20,          // DEFAULT: §44.4 sets no chance for an "other ships" encounter
+    OFFICER_CHANCE: 0.25,            // §25.15: 25% a voyage, 2 a season
+    OFFICER_SEASON_CAP: 2,
+    PORT_OFFICER_CHANCE: 0.25,       // DEFAULT: §44.3 ties port events to AP spent; the same 25% a place
+    COOLDOWN: 4,
+    STORM_SETBACK: { hull: [0.10, 0.15], hands: [1, 3], hurricaneHull: [0.15, 0.25], hurricaneHands: [2, 5] },
+    FOUNDER: { fleetCrewLost: [0.25, 0.50], fleetOfficerLost: 0.10, aloneOfficerSurvive: 0.50, aloneCrewSurvive: [0.10, 0.30] },
+    written: written, hurricane: hurricane, breakingUp: breakingUp, encounters: encounters, approved: approved,
+    officerAtSea: officerAtSea, officerInPort: officerInPort, fearLines: fearLines, voteReact: voteReact,
+    lines: {
+      founderedFleet: "PLACEHOLDER: She goes down at last. Your men scramble across to the [Ship] as the sea takes your flagship.",
+      founderedAlone: "PLACEHOLDER: She goes down, and you go into the sea with her.",
+      rescued: "PLACEHOLDER: A passing ship hauls you out of the water and sets you ashore at [Node], shipless.",
+      drowned: "PLACEHOLDER: The sea closes over you.",
+      stormTable: { hull: "PLACEHOLDER: A sea stoves in planking along her side.", hands: "PLACEHOLDER: [number] hands are swept overboard.", cargo: "PLACEHOLDER: You throw cargo over the side to keep her afloat.", mast: "PLACEHOLDER: The mainmast is sprung. She'll be slow until a yard fixes it." },
+      quietTitle: "At sea",
+    },
+    passage: [
+      { when: { outlook: "Fair" }, text: "The wind carries you across the sea under a clear sky." },
+      { text: "Your journey passes uneventfully." },
+      { when: { outlook: "Fair", zone: "south" }, text: "The water turns so clear you can see the sand thirty feet below." },
+      { when: { outlook: "Fair", zone: "north" }, text: "Gulls follow the ship all the way, arguing over the cook's scraps." },
+      { when: { outlook: "Fair", season: "Summer" }, text: "Flying fish skitter across the waves ahead of the bow." },
+      { when: { outlook: "Fair", season: "Winter", zone: "south" }, text: "The trade winds blow steady and warm. It's hard to remember it's winter." },
+      { when: { outlook: "Unsettled" }, text: "Grey skies and a choppy sea, but she holds her course." },
+      { when: { outlook: "Unsettled", zone: "north" }, text: "A cold drizzle follows you most of the way." },
+      { when: { outlook: "Foul" }, text: "The sky threatens the whole way, but the worst of it never quite arrives." },
+      { text: "The stars are out in their thousands, and the watch is quiet." },
+      { text: "Dolphins run in the bow wave for an hour, and the men lean over the rail to watch." },
+      { when: { season: "Winter", zone: "north" }, text: "Spray freezes in the rigging, and the men stamp their feet on watch." },
+      { when: { season: "Hurricane" }, text: "A long, oily swell rolls in from the southeast. Somewhere out there, a storm is brewing." },
+    ],
+  };
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -17591,7 +19003,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function huntStatus(v) {
-    var bits = ["Action " + v.apUsed + " of up to " + v.maxAp];
+    var bits = v.encounter ? ["A ship met on your voyage"] : ["Action " + v.apUsed + " of up to " + v.maxAp];
     if (v.batch) bits.push("sighting " + Math.min(v.batch.next, v.batch.n) + " of " + v.batch.n + " this action");
     bits.push("hold " + (v.holdMax - v.holdFree) + " of " + v.holdMax);
     if (v.prizesTaken) bits.push(plural(v.prizesTaken, "prize") + " taken");
@@ -17622,7 +19034,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function huntPanel(v) {
     var homeNd = N().nodeData(state.minigame.home || N().here(state));
     var homeLabel = homeNd.kind === "ocean" ? "Stop hunting" : "Sail home to " + homeNd.name;
-    var H = v.hunt, html = mgHead((homeNd.kind === "ocean" ? homeNd.title : homeNd.name) + " · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
+    var H = v.hunt, html = mgHead(H.encounter ? "At sea · " + H.waters : (homeNd.kind === "ocean" ? homeNd.title : homeNd.name) + " · Hunting " + H.waters, H.phase === "battle" ? "Battle" : H.phase === "after" ? "After the Battle" : H.phase === "gameover" ? "Your Story Ends" : "Hunt for Prizes");
     if (H.phase === "gameover") return html + gameOverPanel(v);
     html += huntStatus(H);
     // In a battle the result sits under the two ships' stats, right above
@@ -17630,8 +19042,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (H.phase === "battle") html += battleShips(H.battle);
     html += mgLatest(v.log, v);
     if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
-    var home = H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
-    if (H.phase === "empty") {
+    var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
+    if (H.phase === "encounterEnd") {
+      html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
+    } else if (H.phase === "empty") {
       html += '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
     } else if (H.phase === "scout" || H.phase === "hunter") {
       var sv = H.scout;
@@ -17657,6 +19071,57 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
     return html + mgLog(v.log);
+  }
+
+  // ---- Voyage events (§44): the card at sea, or in port as you leave ----
+
+  function eventPanel() {
+    var v = PC.voyageEvents.view(state);
+    if (!v) return '<div class="actions"><button class="primary" data-act="evnext">Continue</button></div>';
+    var html = '<div class="where">' + esc(v.where) + "</div>" + banner(v.title.toLowerCase()) + '<h2 class="title">' + esc(v.title) + "</h2>";
+    if (settings.dev) html += '<p class="note">' + esc((v.reg || "") + (v.slots ? " · slot " + v.slot + " of " + v.slots : "")) + "</p>";
+    var cont = '<div class="actions"><button class="primary" data-top="1" data-act="evnext">Continue</button></div>';
+    if (v.encounter) {
+      html += '<div class="prose dropcap">' + prose(v.text) + "</div>";
+      return html + '<div class="actions"><button class="primary" data-act="evmeet">' + (v.encounter === "hunter" ? "Face her" : "Close and look her over") + "</button>" +
+        (v.encounter === "hunter" ? "" : '<button class="secondary" data-act="evpass">Let her pass</button>') + "</div>";
+    }
+    if (v.phase === "placeholder") return html + '<div class="prose dropcap">' + prose(v.text) + "</div>" + cont;
+    if (v.phase === "vote") {
+      html += '<div class="prose dropcap">' + prose(v.text) + "</div>";
+      if (v.voteStep === "pre") {
+        var bonus = PC.officers.speakBonus(state);
+        return html + opts(v.candidates.map(function (c) { return opt({ act: "evvote", attrs: 'data-for-officer="' + esc(c.id) + '"', label: "Speak for " + c.name, meta: "Order · " + (bonus > 0 ? "+" + bonus : bonus) + " to the count" }); })
+          .concat([opt({ act: "evvote", attrs: 'data-for-officer=""', label: "Stay out of it", meta: "The crew decide alone" })]));
+      }
+      if (v.voteStep === "result") return html + opts(v.reactions.map(function (r) { return opt({ act: "evreact", attrs: 'data-react="' + r.id + '"', label: r.label }); }));
+      return html + DIVIDER + resultBits(v.result, false) + cont;
+    }
+    html += '<div class="prose' + (v.phase === "choose" ? " dropcap" : "") + '">' + prose(v.text) + "</div>";
+    if (v.phase === "result") return html + DIVIDER + resultBits(v.result, false) + cont;
+    return html + DIVIDER + opts(v.choices.map(function (c) {
+      var check = c.check ? PC.checks.assess(state, c.check, { conditions: [] }) : null;
+      return opt({ act: "evchoose", attrs: 'data-i="' + c.index + '"', label: c.label, check: check, lock: c.lock, meta: c.meta ? esc(c.meta) : null });
+    }));
+  }
+
+  // The Developer's readout of the last voyage's slots (§44).
+  function devReadout() {
+    var rd = (state.voyage && state.voyage.readout) || state.world.lastReadout || [];
+    if (!rd.length) return '<p class="note">No voyage yet.</p>';
+    var pct = function (x) { return Math.round(100 * x) + "%"; };
+    return '<ul class="small">' + rd.map(function (s) {
+      if (s.forced) return "<li>Slot " + (s.i + 1) + ": forced " + esc(s.forced) + "</li>";
+      var bits = [];
+      if (s.roll != null) bits.push("fires " + (s.roll < s.chance ? "yes" : "no") + " (" + s.roll.toFixed(2) + " vs " + pct(s.chance) + ")");
+      if (s.storm) bits.push("storm " + pct(s.storm.chance) + " rolled " + s.storm.roll.toFixed(2) + (s.storm.redraw != null ? ", redrawn " + s.storm.redraw.toFixed(2) : ""));
+      if (s.hunter) bits.push("hunter " + pct(s.hunter.chance));
+      if (s.ship) bits.push("other ship " + pct(s.ship.chance));
+      if (s.officerChance != null) bits.push("officer " + pct(s.officerChance));
+      if (s.weights) bits.push("pool of " + Object.keys(s.weights).length);
+      bits.push(s.officer ? "→ " + s.officer : s.event ? "→ " + s.event : s.quiet ? "→ quiet" : "→ a ship");
+      return "<li>Slot " + (s.i + 1) + ": " + esc(bits.join(" · ")) + "</li>";
+    }).join("") + "</ul>";
   }
 
   // Sail on from the hunting grounds to another live place (§22.1).
@@ -18325,6 +19790,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       grp("Time", '<div class="actions">' + b("addap", "+1 action") + b("fillap", "Top up actions") + b("devnewseason", "End the season now") + b("tohub", "Back to the town menu") + "</div>" +
         (state.location ? '<p class="small">Skip to (every turn runs; a Winter on the way is held, no split): ' + PC.state.SEASONS.map(function (n, i) { return b("devskipto", n, ' data-season="' + i + '"'); }).join("") + "</p>" : "")) +
       (state.location ? grp("Milestone 7", '<label class="tog"><input type="checkbox" data-act="devfreesail"' + (devFreeSail ? " checked" : "") + "> Sail anywhere live at 0 actions</label>" +
+ '<p class="small">Force the next voyage event: <select class="devevent">' + Object.keys(PC.voyageEvents ? (function () { PC.voyageEvents.byId("x"); return PC.voyageEvents.all(); })() : {}).sort().map(function (id) {
+          return '<option value="' + esc(id) + '">' + esc(id + (PC.voyageEvents.isWritten(PC.voyageEvents.byId(id)) ? "" : " (placeholder)")) + "</option>"; }).join("") + "</select> " + b("devevent", "Force") +
+          (state.flags.devForceEvent ? ' <span class="note">Next: ' + esc(state.flags.devForceEvent) + "</span>" : "") + "</p>" +
+        '<p class="small">This season\'s outlook: ' + ["north", "south"].map(function (z) { return (z === "north" ? "North " : " · South ") + ["Fair", "Unsettled", "Foul"].map(function (o) {
+          return '<button class="' + (PC.weather.outlook(state, z) === o ? "primary" : "secondary") + '" data-act="devoutlook" data-zone="' + z + '" data-o="' + o + '">' + o + "</button>"; }).join(""); }).join("") + "</p>" +
+        '<div class="small">The last voyage\'s slots:' + devReadout() + "</div>" +
         '<p class="small">Avalon Standing (' + (state.meters.standing.avalon || 0) + "): " + [-75, -45, 0, 25].map(function (v) { return b("devstanding", String(v), ' data-f="avalon" data-v="' + v + '"'); }).join("") + "</p>") : "") +
       (state.location ? grp("Money and cargo", '<div class="actions">' + b("devgold", "+500 crew gold") + b("devpurse", "+500 purse") + b("devtreasure", "+10 clean treasure", ' data-dirty="0"') +
         b("devtreasure", "+10 dirty treasure", ' data-dirty="1"') + b("devdamage", "Damage the hull (−5)") + b("devarrive", "The arrival popup (back from a hunt, 4 wounded)") + "</div>") : "") +
@@ -19466,6 +20937,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       seasonTurn(PC.world.endSeason(state));
     },
     "devskipto": function (el) { menu = null; if (!state.location) return; var o = PC.world.devSkipTo(state, Number(el.dataset.season)); if (o) seasonTurn(o); },
+    "evchoose": function (el) { PC.voyageEvents.choose(state, Number(el.dataset.i)); },
+    "evnext": function () { PC.voyageEvents.next(state); },
+    "evvote": function (el) { PC.voyageEvents.vote(state, el.dataset.forOfficer || null); },
+    "evreact": function (el) { PC.voyageEvents.voteReact(state, el.dataset.react); },
+    "evmeet": function () { PC.voyageEvents.meet(state, false); },
+    "evpass": function () { PC.voyageEvents.meet(state, true); },
+    "devevent": function () { var sel = document.querySelector(".devevent"); if (sel) state.flags.devForceEvent = sel.value; },
+    "devoutlook": function (el) {
+      var w = state.world, st = PC.state.stamp(state);
+      if (!w.devOutlook || w.devOutlook.stamp !== st) w.devOutlook = { stamp: st };
+      w.devOutlook[el.dataset.zone] = el.dataset.o;
+    },
     "devfreesail": function () { devFreeSail = !devFreeSail; },
     "devstanding": function (el) { state.meters.standing[el.dataset.f] = Number(el.dataset.v); },
     "devarrive": function () {

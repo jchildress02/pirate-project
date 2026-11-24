@@ -50,7 +50,8 @@
       game.readWeather = PC.weather.autoRead(state, waters, [state.world.seed, PC.state.stamp(state), game.key, "read"].join("|"));
       M().noteRoll(game, { label: "Read Weather", outcome: game.readWeather.outcome, effect: { clean: "a storm on the way out is redrawn once, and +1 to ride one out", partial: "+1 to ride out a storm", setback: "no help from the sky" }[game.readWeather.outcome] });
     }
-    if (PC.voyageEvents && PC.voyageEvents.huntLeg) PC.voyageEvents.huntLeg(state, game, "out");
+    var leg = PC.voyageEvents ? PC.voyageEvents.huntLeg(state, game, "out") : null;
+    if (leg && leg.pending) return game; // an event first; afterLeg() starts the batch
     if (state.minigame !== game || game.over) return game;
     newBatch(state, game);
     return game;
@@ -173,6 +174,11 @@
   // The next roll of the batch: a ship, or an empty horizon. At least one
   // roll in every batch finds a ship.
   function reveal(state, game) {
+    if (game.encounter) { // a ship met on a voyage (§44.4): one sighting, then the voyage runs on
+      game.phase = "encounterEnd"; game.over = true; game.sighting = null;
+      M().say(state, game, "PLACEHOLDER: You put her astern and carry on with your voyage.");
+      return;
+    }
     var b = game.batch, r = M().rand(state, game, "sighting");
     if (b.next >= b.n) { game.phase = "batchEnd"; game.sighting = null; return; }
     var i = b.next; b.next += 1;
@@ -424,6 +430,7 @@
     var crewChoice = ch.crew || "release";
     if (crewChoice === "execute") {
       var ex = canExecute(state, e);
+      state.flags.executedCrew = PC.state.stamp(state); // a Fear of Violence & Death trigger (§25.15)
       PC.scenes.applyEffect(state, { dread: H().EXECUTE_DREAD });
       PC.scenes.applyEffect(state, { standing: { faction: "pirates", delta: 1 } });
       chips.push(mchip("dread", "dread", H().EXECUTE_DREAD, "Dread {+n}", "bad"));
@@ -630,7 +637,12 @@
   // the port fee), back on the open sea at an ocean node, or sailing on to
   // another place from the hunting grounds (§4, §22.1).
   function exit(state, game) {
-    if (game.phase === "gameover") { state.gameOver = game.gameOver; return "node"; }
+    if (game.phase === "gameover") { state.gameOver = game.gameOver; if (game.encounter) state.voyage = null; return "node"; }
+    if (game.encounter) { // back to the voyage it interrupted (§44.4)
+      state.minigame = null;
+      PC.voyageEvents.resume(state);
+      return null;
+    }
     if (game.sailOn) {
       var from = OCEAN_OF[game.waters] || "hatteras";
       state.minigame = null;
@@ -641,7 +653,10 @@
       state.location.popup = { title: PC.node.nodeData(game.home).title, lines: [], chips: [{ icon: "port", text: "PLACEHOLDER: The hunt is over. You're still out on " + PC.node.nodeData(game.home).name + "." }] };
       return "node";
     }
-    PC.node.arrive(state, game.home, { fromHunt: true });
+    // The leg back (§44.2): one event slot before the arrival.
+    var leg = PC.voyageEvents ? PC.voyageEvents.huntLeg(state, game, "back") : null;
+    if (leg && leg.pending) return null; // afterLeg() arrives when it's done
+    PC.node.arrive(state, game.home, { fromHunt: true, voyage: leg && leg.lines.length ? { lines: leg.lines, chips: [] } : undefined });
     return "node";
   }
   var OCEAN_OF = { north: "hatteras", south: "bahama" };
@@ -732,7 +747,7 @@
       phase: game.phase, apUsed: game.apUsed, apLeft: state.ap.left, maxAp: H().MAX_AP,
       vote: game.vote || null, lastApproval: game.lastApproval || null,
       batch: game.batch ? { n: game.batch.n, next: game.batch.next } : null,
-      condition: game.batch ? game.batch.condition : null, outlook: PC.weather.outlook(state, game.waters),
+      condition: game.batch ? game.batch.condition : game.condition || null, outlook: PC.weather.outlook(state, game.waters),
       canReadAhead: canReadAhead(state, game), readAhead: game.readAhead || null,
       readCheck: PC.weather.readCheck(state, game.waters),
       waters: H().WATERS[game.waters].name, scout: sv, advice: advice(state, game, sv), qm: qm ? qm.first || qm.full : null,
@@ -743,6 +758,7 @@
         repairDone: game.after.repairDone, hpLost: game.after.hpLost, repairCheck: repairCheck(state),
         prize: cur ? prizeView(state, game, cur) : null, lastPrize: game.after.lastPrize || null, left: game.after.queue.length,
       } : null,
+      encounter: !!game.encounter, pirateFirst: !!game.pirateFirst,
       canContinue: canContinue(state, game), prizesTaken: game.prizesTaken, gameOver: game.gameOver || null,
       holdFree: PC.crew.slotsFree(state), holdMax: PC.crew.holdCapacity(state),
     };
@@ -800,11 +816,71 @@
     return { ship: cls, officer: o.first + " " + (o.last || "") };
   }
 
+  // ---- Voyage events on the hunt's legs (§44.2) ---------------------------------------
+
+  // A hunt leg's events are done. Out: the quiet lines go in the hunt's log
+  // and (if the leg waited on a card) the first batch starts. Back: the
+  // arrival, with the leg's lines first.
+  function afterLeg(state, v) {
+    var game = state.minigame;
+    if (state.gameOver) { state.minigame = null; PC.summary.end(state); return; }
+    if (v.dir === "out") {
+      if (!game || game.key !== v.game) return;
+      v.lines.forEach(function (l) { M().say(state, game, l); });
+      state.current = { screen: "minigame" };
+      if (!v.sync) newBatch(state, game);
+      return;
+    }
+    if (v.sync) return; // exit() goes on to the arrival
+    PC.node.arrive(state, v.home, { fromHunt: true, voyage: v.lines.length ? { lines: v.lines, chips: [] } : undefined });
+    state.current = { screen: "node" };
+  }
+
+  // A ship met on a voyage (§44.4, §44.8): the hunt's scouting card and
+  // battle, with no batches and no actions; the voyage runs on after.
+  // DEFAULT: a pirate engages first when the odds are Even or better for
+  // her (§44.4); she plays as a hunter would (no strike, no run before).
+  function startEncounter(state, grp, o) {
+    var game = {
+      kind: "hunt", key: "enc-" + (state.rolls.hunt = (state.rolls.hunt || 0) + 1), waters: o.waters, zone: o.waters,
+      apUsed: H().MAX_AP, batch: null, phase: grp.hunter ? "hunter" : "scout", sighting: grp, battle: null, after: null,
+      prizesTaken: 0, prizeMorale: 0, captives: 0, force: null, home: o.home, encounter: o.voyage, condition: o.condition,
+    };
+    M().start(state, game, "node");
+    M().say(state, game, "The weather: " + PC.weather.badge(o.condition) + ".");
+    if (!grp.hunter && grp.ships[0].flag === "Pirate") {
+      var sv = scoutView(state, game);
+      if (sv && sv.ca <= 0) { game.phase = "hunter"; game.pirateFirst = true; M().say(state, game, "PLACEHOLDER: She's a pirate, and she likes her odds. She's coming for you."); return game; }
+    }
+    M().say(state, game, grp.hunter ? L().hunter : L().sail);
+    return game;
+  }
+
+  // The flagship founders with a fleet ship in company (§44.7): the fleet
+  // ship becomes the flagship and the survivors cross to her. DEFAULT: the
+  // cargo was the fleet's and stays, down to what her hold can carry.
+  function promoteFleetShip(state, rec) {
+    var c = H().CLASSES[rec.cls] || {};
+    state.fleet = fleet(state).filter(function (f) { return f !== rec; });
+    state.ship = {
+      name: rec.name || rec.cls, type: rec.cls, hull: Math.max(1, Math.round(rec.hull)), hullMax: rec.hullMax || c.hull, baseHull: c.hull || rec.hullMax,
+      guns: rec.guns, gunsMax: rec.gunsMax || c.guns, cargo: rec.cargo != null ? c.cargo : c.cargo, size: rec.size || c.size, crewMin: rec.crewMin || c.crewMin,
+      crewMax: rec.crewMax || c.crewMax, speed: rec.speed || c.speed, speedMax: c.speed || rec.speed, handling: rec.handling != null ? rec.handling : c.handling,
+      rigging: "sound", upgrades: rec.upgrades || { hull: 1, rigging: 1, guns: 1 }, dirty: !!rec.dirty, prizeOf: rec.flag,
+    };
+    var t = rec.crewTiers || { Green: rec.crew || 0 };
+    Object.keys(t).forEach(function (k) { state.crew.tiers[k] = (state.crew.tiers[k] || 0) + t[k]; state.crew.count += t[k]; });
+    (state.officers || []).forEach(function (o) { if (!o.gone && o.aboard === rec.id) o.aboard = "flagship"; });
+    PC.crew.jettisonOverflow(state);
+    return state.ship;
+  }
+
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
+    afterLeg: afterLeg, startEncounter: startEncounter, promoteFleetShip: promoteFleetShip,
   };
 })();

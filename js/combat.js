@@ -782,6 +782,10 @@
   function letHerGo(state, game) {
     var b = game.battle;
     fightingEnemies(b).forEach(function (e) { e.out = "escaped"; });
+    // The prize got away: the crew are sore until the next voyage ends
+    // (§44.9), and the mess-table talk names her (VE-C01).
+    var gone = fightingEnemies(b)[0] || b.enemies.filter(function (e) { return e.out === "escaped"; })[0];
+    state.flags.soreFlag = true; state.flags.soreGotAway = gone && gone.name ? gone.name : null;
     endBattle(state, game);
   }
 

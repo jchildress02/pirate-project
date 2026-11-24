@@ -261,6 +261,7 @@
     // Each walk into a place is one visit (one action covers every officer
     // hire on a Tavern visit, §25.7).
     state.location.visit = (state.location.visit || 0) + 1;
+    state.location.apAtEnter = state.ap.left; // port events come due by the AP spent here (§44.3)
     state.location.sales = {}; // this visit's sales by buyer (R6)
     var id = here(state);
     // The persistent Minors count as met once the captain walks into their
@@ -294,6 +295,11 @@
       if (!flag(state, F.dyingWish)) queue.push("ocr_dpw_1");
     }
     state.location.queue = (state.location.queue || []).concat(queue);
+    var spent = Math.max(0, (state.location.apAtEnter != null ? state.location.apAtEnter : state.ap.left) - state.ap.left);
+    state.location.apAtEnter = null;
+    // An officer's port event fires as the captain leaves the place (§44.3);
+    // the queued scenes wait until it's done.
+    if (spent && PC.voyageEvents && !(state.location.queue || []).length && PC.voyageEvents.portLeave(state, place, spent)) return null;
     return nextQueued(state);
   }
 

@@ -98,6 +98,7 @@
     if (out.short > 0) {
       // Hunger (§20.6): -10 morale and a Go Without check, DR by the shortfall.
       PC.crew.addMorale(state, -10);
+      state.flags.provisionsRanOut = stamp(state); // a Fear of Poverty trigger (§25.15)
       var share = out.short / Math.max(1, need), dr = 4;
       for (var i = 0; i < GO_WITHOUT.length; i++) if (share <= GO_WITHOUT[i][0]) { dr = GO_WITHOUT[i][1]; break; }
       var key = [state.world.seed, stamp(state), "go-without", state.rolls.goWithout = (state.rolls.goWithout || 0) + 1].join("|");
