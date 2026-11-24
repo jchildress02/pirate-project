@@ -351,6 +351,15 @@ textarea.note-box { width: 100%; font: inherit; font-size: 18px; padding: 8px 10
 .card .small { color: var(--faded); }
 .card.on { border: 2px solid var(--oxblood); background: rgba(201,159,69,.2); padding: 8px 11px; }
 .card.on b::before { content: "✓ "; color: var(--oxblood); }
+/* The mentor's two trait groups, each its own color (Playtest Pins 0.8, #4). */
+.traitgroup { border-left: 4px solid var(--sea); padding-left: 10px; margin: 10px 0; }
+.traitgroup.voice h3 { color: var(--sea); }
+.traitgroup.secondary { border-left-color: var(--good); }
+.traitgroup.secondary h3 { color: var(--good); }
+.traitgroup.voice .card.on { border-color: var(--sea); background: rgba(35,80,102,.14); }
+.traitgroup.voice .card.on b::before { color: var(--sea); }
+.traitgroup.secondary .card.on { border-color: var(--good); background: rgba(47,90,34,.14); }
+.traitgroup.secondary .card.on b::before { color: var(--good); }
 .card.blocked, .card:disabled { opacity: .5; }
 .card .lock { color: var(--bad); }
 .cycler { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 16px 0; }

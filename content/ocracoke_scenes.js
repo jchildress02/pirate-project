@@ -1031,7 +1031,7 @@
         "twopenny"
       ],
       "setup": [
-        "\"Your best bet to find what you're looking for would be the tavern.\" He points at a structure that appears to be several smaller shacks pushed together, with a door that's falling off its hinges. A crude wooden sign hanging near the door depicts a cup.",
+        "\"Your best bet to find [Loss Target] would be the tavern.\" He points at a structure that appears to be several smaller shacks pushed together, with a door that's falling off its hinges. A crude wooden sign hanging near the door depicts a cup.",
         {
           "when": {
             "loss": [

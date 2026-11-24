@@ -177,14 +177,22 @@
     var set = sets[Math.floor(r() * sets.length)];
     return "fav_" + id + "_" + set + "_" + type;
   }
+  // On offer in a season on a seeded 50% roll; once a season; gone once done
+  // (Playtest Pins 0.8, #22). No action to do it.
+  function favorOnOffer(state) {
+    var r = PC.rng.fromKey([state.world.seed, stamp(state), here(state), "favor-offer"].join("|"));
+    return r() < D().FAVOR_CHANCE;
+  }
   function favorOffer(state) {
     var sc = favorScene(state);
     if (!sc) return null;
+    if (!favorOnOffer(state)) return null;
     var c = PC.scenes.canEnter(state, sc);
     var anyDone = Object.keys(state.seen).some(function (k) { return k.indexOf("fav_" + here(state) + "_") === 0 && state.seen[k] === PC.scenes.seasonStamp(state); });
+    if (anyDone) return null;
     if (here(state) === "ocracoke" && !PC.node.firstTavernDone(state)) return null;
     var refuse = PC.npcs.serviceLevel ? PC.npcs.serviceLevel(state, PC.node.slotNpc(here(state), "keeper")) == null : false;
-    return { scene: sc, ok: c.ok && !anyDone && !refuse && state.ap.left >= 1, why: anyDone ? "Once a season" : refuse ? "He won't serve you" : state.ap.left < 1 ? "No actions left this season" : c.ok ? null : c.why };
+    return { scene: sc, ok: c.ok && !refuse, why: refuse ? PC.text.render("{keeper.He} won't serve you", state) : c.ok ? null : c.why };
   }
 
   // ---- The registered scene tests, effects and values ------------------------------

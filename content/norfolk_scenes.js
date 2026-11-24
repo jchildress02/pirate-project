@@ -44,6 +44,7 @@
     TIMBER_BILL: 100,       // The Apprentices, fix it, partial (ruled placeholder)
     FAVOR_COST: 25,         // DEFAULT: a barkeep favor's partial "at a cost" (§16.6 names none)
     FAVOR_TYPES: ["fight", "tab", "bar"],
+    FAVOR_CHANCE: 0.5,              // on offer in half the seasons, by seed (Playtest Pins 0.8, #22; placeholder)
     FAVORS: { norfolk: ["a", "b"], ocracoke: ["o"] },
   };
 
@@ -391,8 +392,9 @@
   });
 
   // ---- Barkeep favors (§16.6; Part 4 §10) --------------------------------------------------
-  // fav_<node>_<set>_<type>: once a season; 0 AP to accept, 1 to do. Clean:
-  // the keeper +1 rung; partial: +1 at a cost; setback: nothing.
+  // fav_<node>_<set>_<type>: on offer in a season on a seeded 50% roll, once
+  // a season, and it costs no action (Playtest Pins 0.8, #22; was PH22's
+  // 1 AP). Clean: the keeper +1 rung; partial: +1 at a cost; setback: nothing.
 
   var HORACE_DONE = "\n\n\"Well, that could have gone worse.\"";
   function favor(node, set, type, setup, approaches, outs) {
@@ -403,50 +405,50 @@
       kind: "check", repeat: "season", setup: offer + setup, manyChoices: true,
       choices: approaches.map(function (a) {
         return K(a.label, a.approval, a.check,
-          R(outs[0] + done, [{ hook: "keeper_rung", delta: 1 }, { ap: -1 }]),
-          R(outs[1], [{ hook: "keeper_rung", delta: 1 }, { hook: "pay_gold", amount: 25 }, { ap: -1 }]),
-          R(outs[2], [{ ap: -1 }]),
-          a.more || { lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" });
+          R(outs[0] + done, [{ hook: "keeper_rung", delta: 1 }]),
+          R(outs[1], [{ hook: "keeper_rung", delta: 1 }, { hook: "pay_gold", amount: 25 }]),
+          R(outs[2], []),
+          a.more || {});
       }).concat([C("Not tonight.", [], R(""))]),
     }, place));
   }
   var FIGHT = function (l1, l2) { return [{ label: l1, approval: ["Risk"], check: { type: "Brawling", dr: 2 } }, { label: l2, approval: ["Order"], check: { type: "Intimidate", dr: 2 } }]; };
   var TAB = function (l1, l2, merchant) {
     var a = [{ label: l1, approval: ["Honor"], check: { type: "Persuade", dr: 2 } }, { label: l2, approval: ["Order"], check: { type: "Intimidate", dr: 2 } }];
-    if (merchant) a.push({ label: merchant, approval: ["Honor"], check: { type: "Persuade", dr: 1 }, more: { hiddenUnless: { profession: "Merchant" }, lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" } });
+    if (merchant) a.push({ label: merchant, approval: ["Honor"], check: { type: "Persuade", dr: 1 }, more: { hiddenUnless: { profession: "Merchant" } } });
     return a;
   };
   var BAR = function (l) { return [{ label: l, approval: ["Revelry"], check: { type: "Tavern Talk", dr: 2 } }]; };
 
   // Horace, set A
   favor("norfolk", "a", "fight", "A scuffle between two marines has turned into an all-out brawl. Horace points their way. \"Would you mind doing something about them?\"",
-    FIGHT("*walk up and start swinging*", "Break it up, or you won't have teeth by the end of the night."),
+    FIGHT("*Walk up and start swinging*", "Break it up, or you won't have teeth by the end of the night."),
     ["The marines slink back to their seats, rubbing their new bruises.", "You break it up, but not before a stool goes through the bay window.", "Someone's fist finds your jaw, and the whole room joins in."]);
   favor("norfolk", "a", "tab", "\"See the fancy lieutenant in the corner? He owes me forty in gold and a bottle of brandy. Go remind him.\"",
-    TAB("Let's settle up before your captain hears about this.", "*loom over him and crack your knuckles*", "Let's work out a payment plan."),
+    TAB("Let's settle up before your captain hears about this.", "*Loom over him and crack your knuckles*", "Let's work out a payment plan."),
     ["He pays up with a sheepish grin.", "He pays half, and spits on your boots for good measure.", "He laughs in your face and orders another round on Horace's tab."]);
   favor("norfolk", "a", "bar", "\"I need a smoke and some quiet. You're on the bar. Don't let Martha kill anyone.\"",
-    BAR("*pour with a flourish and start up a shanty*"),
+    BAR("*Pour with a flourish and start up a shanty*"),
     ["When Horace returns, the whole room is singing and the till is full.", "The till is full, but the floor is covered in broken glass.", "You lose count of the free drinks you've poured. Horace comes back to an empty till."]);
   // Horace, set B
   favor("norfolk", "b", "fight", "Two sailors are rolling across the floor, fighting over the last bottle of rum. Horace looks at you forlornly.",
-    FIGHT("*pull them apart by their belts*", "Next man to swing goes into the river."),
+    FIGHT("*Pull them apart by their belts*", "Next man to swing goes into the river."),
     ["They let go of each other, and the bottle.", "They stop, but the bottle smashes on the floor.", "They both turn on you."]);
   favor("norfolk", "b", "tab", "\"That fellow by the door has been drinking on credit for weeks. Think you could have a word?\"",
     TAB("Time to pay the man, friend.", "Pay up or I'll toss you in the river.", "Let's work out a payment plan."),
     ["He empties his pockets onto the bar.", "He hands over a few coins and a rusty knife.", "He bolts out the door and disappears down the alley."]);
   favor("norfolk", "b", "bar", "\"Watch the bar a minute, would you? And don't drink it all.\"",
-    BAR("*pour generous servings and tell your best story*"),
+    BAR("*Pour generous servings and tell your best story*"),
     ["Horace returns to a bar filled with raucous laughter.", "Everyone's happy, but the rum barrel is nearly empty.", "A brawl breaks out over your story's ending."]);
   // Ocracoke's keeper (role lines, †, approved)
   favor("ocracoke", "o", "fight", "Two pirates are rolling across the floor, fighting over the last bottle of kill-devil. The keeper looks at you hopefully.",
-    FIGHT("*pull them apart by their belts*", "Next man to swing goes in the sound."),
+    FIGHT("*Pull them apart by their belts*", "Next man to swing goes in the sound."),
     ["They let go of each other, and the bottle.", "They stop, but the bottle smashes on the floor.", "They both turn on you."]);
   favor("ocracoke", "o", "tab", "\"That fellow by the door has been drinking on credit since spring. Think you could have a word?\"",
-    TAB("Time to pay the man, friend.", "*rest your hand on your cutlass*", null),
+    TAB("Time to pay the man, friend.", "*Rest your hand on your cutlass*", null),
     ["He empties his pockets onto the bar.", "He hands over a few coins and a rusty knife.", "He bolts out the door and into the dunes."]);
   favor("ocracoke", "o", "bar", "\"Watch the bar a minute, would you? And don't drink it all.\"",
-    BAR("*pour generous measures and tell your best story*"),
+    BAR("*Pour generous measures and tell your best story*"),
     ["The sad sacks are laughing for the first time in weeks.", "Everyone's happy, but the rum barrel is nearly empty.", "A brawl breaks out over your story's ending."]);
 
   Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });

@@ -86,7 +86,14 @@
       });
       var label = npcLabel(state, ctx.npc);
       // Capitalise a label that opens the line ("The tavern keeper ...").
-      t = t.replace(/(^"?)\[NPC\]/, function (w, q) { return q + label.charAt(0).toUpperCase() + label.slice(1); }).replace(/\[NPC\]/g, label);
+      // The name-plus-label form ("Elise Bonnet, the tavern keeper") closes
+      // its comma when the sentence carries on (Playtest Pins 0.8, #10).
+      var appos = label.indexOf(", ") >= 0;
+      t = t.replace(/(^"?)?\[NPC\](.?)/g, function (w, q, next, at) {
+        var l = at === 0 ? label.charAt(0).toUpperCase() + label.slice(1) : label;
+        if (appos && next && !/[.,;:!?"'\u201d)]/.test(next)) l += ",";
+        return (q || "") + l + next;
+      });
     }
     var c = state.captain;
     t = t.replace(/\[Player\]/g, (c.first + " " + c.last).trim()).replace(/\[Ship\]/g, state.ship.name);

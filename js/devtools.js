@@ -52,5 +52,41 @@
     return done.length ? "Skipped: " + done.join(", ") + "." : "Nothing left to skip.";
   }
 
-  PC.devtools = { skipQuests: skipQuests };
+  // Arrive at Norfolk as if for the first time (Playtest Pins 0.8, #1): the
+  // three opening beats' scenes count as unseen again, the ship moves to
+  // Norfolk and the arrival runs, so beat 1's inspection fires.
+  function arriveNorfolkFirst(state) {
+    Object.keys(PC.data.scenes).forEach(function (id) {
+      if (/^nor_(fv1|ht_)/.test(id)) delete state.seen[id];
+    });
+    ["nor_jailed", "saw_howe_advert"].forEach(function (f) { delete state.flags[f]; });
+    state.voyage = null;
+    state.location = { node: "norfolk", place: null, queue: [] };
+    state.current = { screen: "node" };
+    PC.node.initNode(state, "norfolk");
+    PC.state.addLog(state, "Developer: arrived at Norfolk as a first visit.");
+    return PC.node.arrive(state, "norfolk", {});
+  }
+
+  // Where a jumped-to scene is set (the place its menu returns to).
+  function jumpPlace(id) {
+    if (/^ocr_.*_(uw|oap)|^ocr_(uw|oap)|^nor_ht|^nor_godfrey|^fav_/.test(id)) return "tavern";
+    if (/_rr_|^nor_appr/.test(id)) return "docks";
+    return null;
+  }
+  function jumpNode(id) { return /^nor_|^fav_norfolk/.test(id) ? "norfolk" : /^ocr_|^fav_ocracoke/.test(id) ? "ocracoke" : null; }
+  function jumpTo(state, id) {
+    var node = jumpNode(id);
+    if (state.location && node && state.location.node !== node) {
+      state.location = { node: node, place: null, queue: [] };
+      PC.node.initNode(state, node);
+    }
+    if (state.location) state.location.place = jumpPlace(id);
+    PC.scenes.enterScene(state, id);
+  }
+  function jumpable() {
+    return Object.keys(PC.data.scenes).filter(function (id) { return /^(ocr_|nor_|fav_)/.test(id); }).sort();
+  }
+
+  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace };
 })();

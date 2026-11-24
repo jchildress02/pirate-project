@@ -408,7 +408,7 @@
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
       (state.location && PC.weather ? wxBadge(PC.weather.outlook(state, PC.weather.zoneHere(state)), "This season's weather here (" + PC.weather.zoneHere(state) + ")") : "") +
       // On a phone the strip scrolls away, so the gold rides in the sticky bar (the author's phone notes).
-      '<span class="pgold">Purse ' + gold(state.money.purse) + " · Crew " + gold(state.money.crew) + "</span>" +
+      '<span class="pgold">Purse · ' + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) + "</span>" +
       '<span class="grow"></span>' + seal() +
       '<div class="line2">' + b("menu", "Menu", "menu") + b("journal", "Journal", "journal") + b("rumor", "Rumors", "rumors") + b("captain", "Captain", "captain") + b("ship", "Ship", "ship") + "</div></header>";
   }
@@ -460,7 +460,7 @@
   function phoneStrip() {
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
-      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse " + gold(state.money.purse) + " · Crew " + gold(state.money.crew) +
+      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
       "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + state.provisions + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
@@ -1034,7 +1034,7 @@
     if (place === "tavern") {
       var fav = PC.norfolk.favorOffer(state);
       if (fav) list.push(opt({ act: "enter", attrs: 'data-scene="' + esc(fav.scene) + '"', label: "A favor for " + esc(PC.npcs.get(state, who("keeper")).first),
-        meta: "Once a season · no action to hear him out, 1 to do it. Clean: he thinks better of you. Partial: the same, at a cost.", lock: fav.ok ? null : fav.why }));
+        meta: PC.text.render("Once a season · no action. Clean: {keeper.he} thinks better of you. Partial: the same, at a cost.", state), lock: fav.ok ? null : fav.why }));
       if (id === "norfolk" && f.horace_met) {
         var NL = N().nodeData(id).lines;
         if (!f.nor_drunken_sailors) list.push(opt({ act: "dsask", label: f.asked_horace_help ? NL.drunkenSailors.askAgain : NL.drunkenSailors.ask, meta: "No action" }));
@@ -2262,11 +2262,21 @@
 
   function menuHtml() {
     if (!menu) return dialogHtml();
-    var body = menu === "menu" ? menuMain() : menu === "settings" ? menuSettings() : !state ? "" :
-      menu === "journal" ? menuJournal() : menu === "rumors" ? menuRumors() : menu === "captain" ? menuCaptain() : menu === "notes" ? menuNotes() : menu === "ship" ? menuShip() :
-      menu === "dev" ? menuDev() : menu.indexOf("officer:") === 0 ? menuOfficer(menu.slice(8)) : "";
+    var body;
+    try { body = menuBody(); } catch (err) {
+      // A menu that fails to draw closes instead of jamming every redraw (Bug Log B2).
+      if (globalThis.console) console.error(err);
+      menu = null;
+      return dialogHtml();
+    }
     return '<div class="modal" data-act="closemenu"><div class="panel' + (menu === "captain" || menu === "dev" || menu === "ship" ? " wide" : "") + '" data-stop="1">' +
       '<button class="secondary close" data-act="closemenu" aria-label="Close">' + ic("x") + "</button>" + body + "</div></div>" + dialogHtml();
+  }
+
+  function menuBody() {
+    return menu === "menu" ? menuMain() : menu === "settings" ? menuSettings() : !state ? "" :
+      menu === "journal" ? menuJournal() : menu === "rumors" ? menuRumors() : menu === "captain" ? menuCaptain() : menu === "notes" ? menuNotes() : menu === "ship" ? menuShip() :
+      menu === "dev" ? menuDev() : menu.indexOf("officer:") === 0 ? menuOfficer(menu.slice(8)) : "";
   }
 
   function menuMain() {
@@ -2446,9 +2456,10 @@
       (state.location ? grp("Story", (PC.devtools && PC.devtools.skipQuests ? '<div class="actions">' + b("devskip", "Skip the mandatory quests") + "</div>" : "") +
         '<p class="small">Loss variant: ' + ["A", "B", "C"].map(function (x) { return '<button class="' + (state.captain.loss === x ? "primary" : "secondary") + '" data-act="devloss" data-loss="' + x + '">' + x + "</button>"; }).join(" ") +
         " · Frisian posture: " + PC.state.POSTURES.map(function (p) { return '<button class="' + (state.world.posture === p ? "primary" : "secondary") + '" data-act="devposture" data-posture="' + p + '">' + p + "</button>"; }).join(" ") + "</p>" +
-        '<p class="small">Jump to a scene: <select class="devscene">' + Object.keys(PC.data.scenes).filter(function (id) { return id.indexOf("ocr_") === 0; }).map(function (id) {
+        '<p class="small">Jump to a scene: <select class="devscene">' + PC.devtools.jumpable().map(function (id) {
           return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
-        }).join("") + "</select> " + b("devjump", "Go") + "</p>") : "") +
+        }).join("") + "</select> " + b("devjump", "Go") + "</p>" +
+        '<div class="actions">' + b("devnorfolk", "Arrive at Norfolk (first visit)") + "</div>") : "") +
       (state.location ? grp("The hunt", '<p class="small">Next sighting: ' + b("devforce", "Avalon hunter", ' data-kind="hunter" data-flag="Avalon"') + b("devforce", "Frisian hunter", ' data-kind="hunter" data-flag="Frisia"') +
         b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
         b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
@@ -2457,7 +2468,12 @@
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
       grp("Info", '<p class="small">World seed ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
-        (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) { var g = state.generated[sl.id]; return esc(sl.label + ": " + g.full + " (" + (g.gender === "f" ? "woman" : "man") + ", " + g.age + "; " + g.traits.join(", ") + ")"); }).join(" · ") + "</p>" : "") +
+        (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) {
+          // Fixed Named NPCs (Horace, Christoph) live in PC.data.npcs, not state.generated (Bug Log B2).
+          var g = state.generated[sl.id] || (PC.data.npcs || {})[sl.id];
+          if (!g) return esc(sl.label + ": (none)");
+          var full = g.full || [g.first, g.last].filter(Boolean).join(" ");
+          return esc(sl.label + ": " + full + " (" + (g.gender === "f" ? "woman" : "man") + (g.age ? ", " + g.age : "") + "; " + (g.traits || []).join(", ") + ")" + (sl.fixed ? " · Named" : "")); }).join(" · ") + "</p>" : "") +
         "<p><b>Content check: errors</b></p>" + list(v.errors) + "<p><b>Warnings</b></p>" + list(v.warnings));
   }
 
@@ -3114,7 +3130,7 @@
     opts = opts || {};
     var on = act === "pick" ? getField(field) === value : (getField(field) || []).indexOf(value) >= 0;
     var blocked = !on && (opts.blocked || opts.full);
-    return '<button class="card' + (on ? " on" : "") + (blocked ? " blocked" : "") + '" data-act="' + act + '" data-field="' + field + '" data-value="' + esc(value) + '"' +
+    return '<button class="card' + (on ? " on" : "") + (blocked ? " blocked" : "") + '" data-act="' + act + '"' + (opts.unpick ? ' data-unpick="1"' : "") + ' data-field="' + field + '" data-value="' + esc(value) + '"' +
       (opts.max ? ' data-max="' + opts.max + '"' : "") + (blocked ? " disabled" : "") + ' aria-pressed="' + on + '">' +
       "<b>" + esc(title) + "</b>" + (body ? '<span class="small">' + esc(body) + "</span>" : "") + (opts.extra || "") +
       (!on && opts.blocked ? '<span class="small lock">' + esc(opts.blocked) + "</span>" : "") + "</button>";
@@ -3294,16 +3310,22 @@
       "<h3>Type</h3>" + '<div class="cards">' + Dc.OFFICER_TYPES.map(function (t) {
         return card("pick", "mentor.type", t.id, t.id, t.perk + ". Teaches: " + t.lessons + ".");
       }).join("") + "</div>";
+    // Two labeled groups, each its own color (Playtest Pins 0.8, #4). Once
+    // one is picked the rest of that group grey out; tap the pick again to
+    // clear it.
     function traitCards(field, blockFn) {
+      var picked = getField(field);
       return ["warm", "neutral", "cold"].map(function (w) {
         return "<h4>" + { warm: "Warm", neutral: "Steady", cold: "Dark" }[w] + '</h4><div class="cards small-cards">' +
           Dc.OFFICER_TRAITS.filter(function (t) { return t.warmth === w; }).map(function (t) {
-            return card("pick", field, t.id, t.id, t.hook + ". Likes " + t.likes + ", dislikes " + t.dislikes + ".", { blocked: blockFn ? blockFn(t.id) : null });
+            return card("pick", field, t.id, t.id, t.hook + ". Likes " + t.likes + ", dislikes " + t.dislikes + ".",
+              { blocked: blockFn ? blockFn(t.id) : null, full: !!picked && picked !== t.id, unpick: true });
           }).join("") + "</div>";
       }).join("");
     }
-    html += '<h3>Voice trait</h3><p class="note">How your mentor talks and what they care about.</p>' + traitCards("mentor.voice") +
-      "<h3>Secondary trait</h3>" + (draft.mentor.voice ? traitCards("mentor.secondary", function (id) { return C.secondaryBlocked(draft, id); }) : '<p class="note">Pick a voice trait first.</p>') +
+    var picks = function (v) { return v ? ' <span class="note">· picked: ' + esc(v) + " (tap it again to change)</span>" : ""; };
+    html += '<div class="traitgroup voice"><h3>Voice trait (pick 1)' + picks(draft.mentor.voice) + '</h3><p class="note">How your mentor talks and what they care about.</p>' + traitCards("mentor.voice") + "</div>" +
+      '<div class="traitgroup secondary"><h3>Secondary trait (pick 1)' + picks(draft.mentor.secondary) + "</h3>" + (draft.mentor.voice ? traitCards("mentor.secondary", function (id) { return C.secondaryBlocked(draft, id); }) : '<p class="note">Pick a voice trait first.</p>') + "</div>" +
       '<p class="note">Your mentor\'s drive and fear are rolled when the game begins, and stay hidden until you learn them.</p>';
     return html;
   }
@@ -3379,7 +3401,9 @@
     },
     "pick": function (el) {
       var f = el.dataset.field, v = el.dataset.value;
+      if (el.dataset.unpick && getField(f) === v) v = null; // tap a pick again to clear it
       setField(f, v);
+      if (f === "mentor.voice" && !v) draft.mentor.secondary = null;
       if (f === "profession") PC.creator.fitToProfession(draft);
       if (f === "mentor.voice" && draft.mentor.secondary && PC.creator.secondaryBlocked(draft, draft.mentor.secondary)) draft.mentor.secondary = null;
     },
@@ -3509,7 +3533,8 @@
     },
     "quickstart": function () {
       dialog = null; menu = null;
-      state = PC.state.newGame(PC.data.testCaptain);
+      // Quick start brings the test mentor, Jesse Dew (Playtest Pins 0.8, #3).
+      state = PC.state.newGame(Object.assign({}, PC.data.testCaptain, { officers: [PC.data.testMentor] }));
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; creating = false; menu = null; },
@@ -3597,11 +3622,10 @@
     "devheat": function (el) { state.meters.heat[el.dataset.f] = Number(el.dataset.v); },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {
-      var id = document.querySelector(".devscene").value;
-      if (state.location) state.location.place = /_(uw|oap)/.test(id) ? "tavern" : /_rr_/.test(id) ? "docks" : null;
-      PC.scenes.enterScene(state, id);
+      PC.devtools.jumpTo(state, document.querySelector(".devscene").value);
       menu = null;
     },
+    "devnorfolk": function () { menu = null; PC.devtools.arriveNorfolkFirst(state); },
     "devnewseason": function () {
       menu = null;
       if (!state.location) { PC.scenes.endSeason(state); return; }

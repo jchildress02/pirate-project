@@ -3110,9 +3110,14 @@ test("The Apprentices: cover for them (clean) earns a free repair; a setback cos
   eq(t.flags.nor_appr_failed, PC.scenes.seasonStamp(t)); ok(!t.flags.nor_appr_done);
 });
 
-test("barkeep favors: one a season at each Tavern, by seed; clean moves the keeper up a rung for an action", function () {
+test("barkeep favors: on offer half the seasons by seed, once a season, no action; clean moves the keeper up a rung", function () {
   var s = m7("nf13"); PC.world.sail(s, "norfolk"); s.location.popup = null; s.flags.horace_met = true;
   PC.node.enter(s, "tavern");
+  // About half the seasons offer one (Playtest Pins 0.8, #22).
+  var offered = 0;
+  for (var i = 0; i < 200; i++) { var t = m7("nfo" + i); t.location = { node: "norfolk", place: "tavern", queue: [] }; t.flags.horace_met = true; if (PC.norfolk.favorOffer(t)) offered++; }
+  ok(offered > 70 && offered < 130, "about half: " + offered);
+  var keep = PC.data.norfolkRules.FAVOR_CHANCE; PC.data.norfolkRules.FAVOR_CHANCE = 1;
   var f = PC.norfolk.favorOffer(s);
   ok(f.ok); ok(/^fav_norfolk_[ab]_(fight|tab|bar)$/.test(f.scene)); eq(PC.norfolk.favorScene(s), f.scene);
   PC.scenes.enterScene(s, f.scene);
@@ -3120,10 +3125,11 @@ test("barkeep favors: one a season at each Tavern, by seed; clean moves the keep
   var v = PC.scenes.viewScene(s);
   ok(/Hey, you\. Yes, you\./.test(v.setup));
   withDice([6, 6], function () { PC.scenes.choose(s, v.choices[0].index); PC.scenes.commit(s); });
-  eq(PC.npcs.rung(s, "horace"), r0 + 1); eq(s.ap.left, ap - 1);
-  ok(!PC.norfolk.favorOffer(s).ok, "once a season");
+  eq(PC.npcs.rung(s, "horace"), r0 + 1); eq(s.ap.left, ap, "no action");
+  ok(!PC.norfolk.favorOffer(s), "once a season, then gone");
   var o = huntReady("nf14"); o.location.place = "tavern";
   ok(/^fav_ocracoke_o_/.test(PC.norfolk.favorScene(o)));
+  PC.data.norfolkRules.FAVOR_CHANCE = keep;
 });
 
 test("Variant C: Horace's wanted bill is lead 3, once", function () {
