@@ -1255,7 +1255,7 @@
     var c = N().docksRollCheck(state);
     if (!c.ok) return "";
     return opts([opt({ act: "docksroll", label: "Size up the hands (optional)",
-      check: PC.checks.assess(state, N().docksCheck(state), { conditions: ["Harbor", "Underworld"] }),
+      check: PC.checks.assess(state, N().docksCheck(state), { conditions: N().docksConditions(state) }),
       meta: "No action · once a visit, before you sign. Clean: a third of the hands you sign come a tier better. Setback: a third of the pool's Seasoned and Veteran hands are gone." })]);
   }
 

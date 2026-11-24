@@ -797,6 +797,13 @@
   // of the hands signed this visit come aboard a tier better (minimum 1).
   // Partial: the pool as listed. Setback: a third of the pool's Seasoned and
   // Veteran hands have signed elsewhere (minimum 1, if there are any).
+  // Who the Docks roll talks to (§11.8.5): pirates at a haven (Dread and
+  // black Standing count), townsfolk in an Avalon or Frisian port (that
+  // faction's Standing counts).
+  function docksConditions(state) {
+    var nd = nodeData(here(state));
+    return nd.faction === "avalon" || nd.faction === "frisia" ? ["Harbor", "Town"] : ["Harbor", "Underworld"];
+  }
   var DOCKS_DR = 2; // DEFAULT: §11.4 sets no DR for the Docks roll
   var NEXT_TIER = { Green: "Able", Able: "Seasoned", Seasoned: "Veteran" };
 
@@ -812,7 +819,7 @@
     var c = docksRollCheck(state);
     if (!c.ok) throw new Error(c.why);
     var key = [state.world.seed, PC.state.stamp(state), "docks-roll", state.location.visit].join("|");
-    var r = PC.checks.resolve(state, docksCheck(), key, { conditions: ["Harbor", "Underworld"] });
+    var r = PC.checks.resolve(state, docksCheck(), key, { conditions: docksConditions(state) });
     var out = { visit: state.location.visit, outcome: r.outcome, upgraded: 0, signed: 0, lost: 0, dice: r.dice, edge: r.assessment.edge };
     if (r.outcome === "setback") {
       var avail = poolAvailable(state), S = avail.Seasoned || 0, V = avail.Veteran || 0;
@@ -1089,7 +1096,7 @@
     salePrice: salePrice,
     shopPrice: shopPrice,
     demandOf: demandOf,
-    standingBand: standingBand,
+    standingBand: standingBand, docksConditions: docksConditions,
     purchaseMult: purchaseMult,
     slotNpc: slotNpc,
     greeting: greeting,
