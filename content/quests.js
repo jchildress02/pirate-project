@@ -38,7 +38,7 @@
         // The author's lines (approved November 18). [Trident Waters] is her
         // hunting ground, seeded per world. The birthmark is the brother's mark.
         drinking: { node: null, journal: {
-          A: "A pirate you drank under the table swears the *Trident* hunts [Trident Waters], with a carpenter with a birthmark chained at her pumps.",
+          A: "A pirate you drank under the table swears the *Trident* hunts [Trident Waters], with a shipwright with a birthmark chained at her pumps.",
           B: "A pirate you drank under the table bragged about a chest of fine jewels aboard the *Trident*. They sound like yours.",
           C: "A pirate you drank under the table says Gregoire's *Trident* hunts [Trident Waters].",
           any: "A lead won over drinks.",

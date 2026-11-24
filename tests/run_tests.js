@@ -2425,5 +2425,35 @@ test("R5: a new captain records the tags he started with, so the end screen list
   eq(PC.summary.summary(s).tags.join(","), "Prize Taker");
 });
 
+
+console.log("Milestone 7, PR 1: the next build's fixes (§37.12)");
+
+test("N1: Battle Rating counts hull ÷ 10", function () {
+  eq(PC.data.hunt.BR_HULL_DIV, 10);
+  var sh = { guns: 0, hull: 50, crew: 0, crewMin: 0 };
+  eq(Math.round(PC.combat.br(sh) * 10) / 10, 5);
+});
+
+test("N2: grapeshot kills men by the attacker's manned guns (1 per 3 heavy, 1 per 6 light)", function () {
+  eq(PC.data.hunt.GRAPE_BY_GUNS.heavy, 1 / 3);
+  eq(PC.data.hunt.GRAPE_BY_GUNS.light, 1 / 6);
+});
+
+test("N4: a battle lists every roll with its outcome word and what it did", function () {
+  var s = huntReady("n4");
+  var bq = aShip(s, "Barque", "Trade", "Avalon");
+  var g = huntWith(s, { ships: [bq], shape: "single", hunter: false });
+  withDice([6, 6], function () { PC.hunt.engage(s, g); });
+  var v = PC.minigames.view(s);
+  var r = v.rollList.filter(function (x) { return x.label === "Call on her to strike"; })[0];
+  ok(r, "the pre-battle strike roll is listed");
+  eq(r.outcome, "clean"); eq(r.effect, "she strikes without a fight");
+});
+
+test("N5: Variant A's drinking lead names a shipwright, not a carpenter", function () {
+  ok(/shipwright with a birthmark/.test(PC.data.quests.what_was_lost.leads.drinking.A) || JSON.stringify(PC.data.quests).indexOf("a shipwright with a birthmark") >= 0);
+  ok(JSON.stringify(PC.data.quests).indexOf("carpenter with a birthmark") < 0);
+});
+
 console.log("\n" + passed + " passed, " + failed + " failed");
 process.exit(failed ? 1 : 0);

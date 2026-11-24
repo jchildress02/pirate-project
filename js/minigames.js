@@ -82,7 +82,27 @@
     // box beside the lines it wrote (§41.1, G4 of the M5 playtest).
     game.rollSeq = (game.rollSeq || 0) + 1;
     game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null, logAt: game.log.length, seq: game.rollSeq, chips: [], op: p.op };
+    var eng = engine(game);
+    noteRoll(game, { seq: game.rollSeq, label: p.check.type, outcome: p.outcome, op: p.op, mine: true,
+      effect: eng.rollEffect ? eng.rollEffect(state, game, p.op, p.outcome) : null });
     return engine(game).settle(state, game, p);
+  }
+
+  // Every roll a game makes, in order (N4, §37.12): the screen shows each
+  // one's outcome word and what it did, not only the last roll's box.
+  // entry: { label, outcome, effect, op, seq, mine }. effect can be filled in
+  // later (setRollEffect) once the roll's consequences are known.
+  function noteRoll(game, entry) {
+    var list = (game.rollList = game.rollList || []);
+    entry.logAt = game.log.length;
+    if (entry.seq == null) { game.rollSeq = (game.rollSeq || 0) + 1; entry.seq = game.rollSeq; }
+    list.push(entry);
+    if (list.length > 40) list.splice(0, list.length - 40);
+    return entry;
+  }
+  function setRollEffect(game, effect) {
+    var list = game.rollList || [];
+    if (list.length && !list[list.length - 1].effect) list[list.length - 1].effect = effect;
   }
 
   function reroll(state) {
@@ -130,6 +150,7 @@
     v.over = !!game.over;
     v.log = game.log.slice();
     v.lastRoll = game.lastRoll || null;
+    v.rollList = (game.rollList || []).slice();
     return v;
   }
 
@@ -146,6 +167,8 @@
     weighted: weighted,
     between: between,
     roll: roll,
+    noteRoll: noteRoll,
+    setRollEffect: setRollEffect,
     settle: settle,
     reroll: reroll,
     leave: leave,

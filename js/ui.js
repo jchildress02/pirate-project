@@ -1219,8 +1219,22 @@
     var lr = v && v.lastRoll && v.lastRoll.logAt >= mgMark && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
     if (!fresh.length && !lr) return "";
     var key = "mg:" + (v ? v.kind : "") + ":" + lines.length + ":" + (lr ? lr.seq : 0);
-    var inner = (lr ? rollBadge(lr.outcome, OP_NAME[lr.op] || lr.type) : "") + fresh.map(function (l) { return prose(l); }).join("") + (lr && lr.chips && lr.chips.length ? chips(lr.chips) : "");
+    var inner = (lr ? rollBadge(lr.outcome, OP_NAME[lr.op] || lr.type) : "") + fresh.map(function (l) { return prose(l); }).join("") + (lr && lr.chips && lr.chips.length ? chips(lr.chips) : "") +
+      rollList(v, lines);
     return rbox(lr ? lr.outcome : null, inner, key, "mglatest");
+  }
+  // N4 (§37.12): in a battle, every roll since the player's last move, one
+  // line each: the roll, the outcome word, and what it did.
+  var OUT_WORD = { clean: "Clean", partial: "Partial", setback: "Setback" };
+  function rollList(v, lines) {
+    if (!v || v.kind !== "hunt") return "";
+    var rs = (v.rollList || []).filter(function (r) { return r.logAt >= mgMark && r.logAt <= lines.length; });
+    if (!rs.length) return "";
+    return '<ul class="rolllist">' + rs.map(function (r) {
+      var o = OUTCOME[r.outcome];
+      return '<li><span class="tier ' + (o ? o[1] : "t-mid") + '">' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + "</span> " +
+        "<b>" + esc(OP_NAME[r.op] || r.label) + "</b>" + (r.effect ? ": " + esc(r.effect) : "") + "</li>";
+    }).join("") + "</ul>";
   }
   function mgLog(lines) {
     var old = lines.slice(0, Math.min(mgMark, lines.length)).slice(-6);
@@ -3189,9 +3203,13 @@
   // The pips dim to preview an option's cost on hover or focus (§41.1).
   function previewAP(n) {
     var pips = root.querySelectorAll(".topbar .pip.on");
-    pips.forEach(function (p, i) { p.classList.toggle("preview", n > 0 && i >= pips.length - n); p.classList.toggle("on", !(n > 0 && i >= pips.length - n)); });
+    // B1 (Bug Log): the dimmed pip's class is "pip-prev". It used to be
+    // "preview", which the creator's preview card also styles (a 290px
+    // panel), so hovering any option that costs an action swelled a pip and
+    // pushed the page down under the cursor.
+    pips.forEach(function (p, i) { p.classList.toggle("pip-prev", n > 0 && i >= pips.length - n); p.classList.toggle("on", !(n > 0 && i >= pips.length - n)); });
   }
-  function clearPreview() { root.querySelectorAll(".topbar .pip.preview").forEach(function (p) { p.classList.remove("preview"); p.classList.add("on"); }); }
+  function clearPreview() { root.querySelectorAll(".topbar .pip.pip-prev").forEach(function (p) { p.classList.remove("pip-prev"); p.classList.add("on"); }); }
 
   // Press feedback: a button darkens the moment a finger or mouse goes down,
   // before the click redraws the screen (the author's phone notes).

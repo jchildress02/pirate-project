@@ -94,7 +94,7 @@ button.link { background: none; border: 0; padding: 0; color: var(--oxblood); te
 .pips { display: inline-flex; gap: 5px; align-items: center; }
 .pip { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--oxblood); display: inline-block; }
 .pip.on { background: radial-gradient(circle at 35% 35%, #a8442f, #6a1d10); }
-.pip.preview { background: radial-gradient(circle at 35% 35%, rgba(168,68,47,.35), rgba(106,29,16,.35)); }
+.pip.pip-prev { background: radial-gradient(circle at 35% 35%, rgba(168,68,47,.35), rgba(106,29,16,.35)); }
 .pips .count { font-size: 16.5px; color: var(--faded); margin-left: 5px; }
 .topbar .grow { flex: 1; }
 .topbar .line2 { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -550,6 +550,10 @@ button.big { font-size: 22px; padding: 12px 30px; }
 .rbox > .prose:last-child, .rbox > .effects:last-child { margin-bottom: 0; }
 .rbox.slim { padding: 5px 12px; }
 .rbox.mglatest { font-size: 19px; }
+/* N4: every battle roll since the player's move, one line each. */
+.rolllist { list-style: none; margin: 8px 0 0; padding: 6px 0 0; border-top: 1px dotted var(--rule); font-size: 16.5px; }
+.rolllist li { margin: 2px 0; }
+.rolllist .tier { margin-right: 4px; }
 .say.rbox { margin: 6px 0 18px; padding: 12px 16px 12px 18px; }
 /* One spacing for every paragraph in a speaker's block (G6). */
 .say p.sl { margin: 0 0 8px; }
@@ -5365,7 +5369,27 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // box beside the lines it wrote (§41.1, G4 of the M5 playtest).
     game.rollSeq = (game.rollSeq || 0) + 1;
     game.lastRoll = { type: p.check.type, outcome: p.outcome, roll: p.roll, rerolledWith: p.rerolledWith || null, logAt: game.log.length, seq: game.rollSeq, chips: [], op: p.op };
+    var eng = engine(game);
+    noteRoll(game, { seq: game.rollSeq, label: p.check.type, outcome: p.outcome, op: p.op, mine: true,
+      effect: eng.rollEffect ? eng.rollEffect(state, game, p.op, p.outcome) : null });
     return engine(game).settle(state, game, p);
+  }
+
+  // Every roll a game makes, in order (N4, §37.12): the screen shows each
+  // one's outcome word and what it did, not only the last roll's box.
+  // entry: { label, outcome, effect, op, seq, mine }. effect can be filled in
+  // later (setRollEffect) once the roll's consequences are known.
+  function noteRoll(game, entry) {
+    var list = (game.rollList = game.rollList || []);
+    entry.logAt = game.log.length;
+    if (entry.seq == null) { game.rollSeq = (game.rollSeq || 0) + 1; entry.seq = game.rollSeq; }
+    list.push(entry);
+    if (list.length > 40) list.splice(0, list.length - 40);
+    return entry;
+  }
+  function setRollEffect(game, effect) {
+    var list = game.rollList || [];
+    if (list.length && !list[list.length - 1].effect) list[list.length - 1].effect = effect;
   }
 
   function reroll(state) {
@@ -5413,6 +5437,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     v.over = !!game.over;
     v.log = game.log.slice();
     v.lastRoll = game.lastRoll || null;
+    v.rollList = (game.rollList || []).slice();
     return v;
   }
 
@@ -5429,6 +5454,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     weighted: weighted,
     between: between,
     roll: roll,
+    noteRoll: noteRoll,
+    setRollEffect: setRollEffect,
     settle: settle,
     reroll: reroll,
     leave: leave,
@@ -6940,7 +6967,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function markRoll(game, type, r) {
     game.rollSeq = (game.rollSeq || 0) + 1;
     game.lastRoll = { type: type, outcome: r.outcome, roll: { dice: r.dice, edge: r.edge, total: r.total }, logAt: game.log.length, seq: game.rollSeq, chips: [], op: type === "The Exchange" ? "exchange" : "clash" };
+    M().noteRoll(game, { seq: game.rollSeq, label: type, outcome: r.outcome, op: game.lastRoll.op, mine: true });
   }
+  // A roll the player doesn't make (a strike roll, a fleet ship's fight):
+  // listed with its outcome and what it did (N4).
+  function noteRaw(game, label, r, effect) { M().noteRoll(game, { label: label, outcome: r.outcome, effect: effect }); }
   function chance(state, game, what, p) { return M().rand(state, game, what)() < p; }
   // Probabilistic rounding (§21.11): 4% of 12 men is 0 or 1, averaging right.
   function prnd(state, game, x) { var f = Math.floor(x); return f + (chance(state, game, "prnd", x - f) ? 1 : 0); }
@@ -7169,6 +7200,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function strikeRoll(state, game, b, e, edge, why) {
     var r = rawRoll(state, game, "strike", dreadBonus(state) + edge - effResolve(e));
     b.lastStrike = { ship: e.id, outcome: r.outcome, why: why, dice: r.dice, edge: r.edge };
+    noteRaw(game, (why === "consort" ? "Strike roll, " : "Strike roll, ") + (e.name || e.cls), r,
+      { clean: "she strikes her colors", partial: "she wavers but fights on (Shaken)", setback: "she fights on" }[r.outcome]);
     if (r.outcome === "clean") { knockOut(state, game, b, e, "struck"); return true; }
     if (r.outcome === "partial") { shake(e, 1); say(state, game, L().wavers); }
     return false;
@@ -7328,6 +7361,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var resolve = Math.max.apply(null, fightingEnemies(b).map(effResolve));
     var r = rawRoll(state, game, "strikePre", dreadBonus(state) + fleetCA(state, b) + bonus - resolve);
     b.preStrike = { outcome: r.outcome, dice: r.dice, edge: r.edge };
+    noteRaw(game, "Call on her to strike", r, { clean: "she strikes without a fight", partial: "she won't strike, but she's shaken", setback: "she won't strike" }[r.outcome]);
     if (r.outcome === "clean") {
       say(state, game, L().struckPre);
       fightingEnemies(b).forEach(function (x) { x.out = "struck"; x.noFight = true; });
@@ -7467,6 +7501,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     b.firstExchange = false;
     b.lastExchange = { outcome: r.outcome, dice: r.dice, edge: r.edge, mine: shot, theirs: theirs };
     markRoll(game, "The Exchange", r);
+    M().setRollEffect(game, { clean: "your heavy hit lands", partial: "light hits both ways", setback: "her heavy hit lands" }[r.outcome]);
     say(state, game, L().exchange[r.outcome] + " (" + L().theirShot[theirs] + ")");
     var before = { me: sideSnap(state, b, "flagship"), her: sideSnap(state, b, en.id) };
     if (r.outcome === "clean") hit(state, game, b, "flagship", en.id, true, shot);
@@ -7508,6 +7543,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var sc = H().SUPPORT.supportCaptain[(off && off.level) || 1] || 0;
       var r = rawRoll(state, game, "background", pairCA(state, b, myId, enId) + sc);
       var map = { ship: f.name || f.cls, enemy: e.name || e.cls };
+      noteRaw(game, map.ship + " against the " + map.enemy, r, { clean: "a heavy hit on her", partial: "light hits both ways", setback: "a heavy hit on your ship" }[r.outcome]);
       if (r.outcome === "clean") { hit(state, game, b, myId, enId, true, "round"); say(state, game, fill(L().backgroundYou, map)); }
       else if (r.outcome === "partial") { hit(state, game, b, myId, enId, false, "round"); hit(state, game, b, enId, myId, false, "round"); say(state, game, fill(L().backgroundBoth, map)); }
       else { hit(state, game, b, enId, myId, true, "round"); say(state, game, fill(L().backgroundThem, map)); }
@@ -7834,6 +7870,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var r = rawRoll(state, game, "clash", edge);
     b.lastClash = { outcome: r.outcome, dice: r.dice, edge: r.edge, parts: parts };
     markRoll(game, "The clash", r);
+    M().setRollEffect(game, { clean: "your boarders cut hers down", partial: "men fall on both sides", setback: "her crew drive yours back" }[r.outcome]);
     say(state, game, L().clash[r.outcome]);
     var me = ship(state, b, "flagship"), them = ship(state, b, e.id);
     var lossFor = function (winnerAdv, loserCrew) {
@@ -7950,6 +7987,26 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var res = Math.max.apply(null, fightingEnemies(b).map(effResolve));
     return M().roll(state, game, { type: "Intimidate", dr: clamp(res, 0, 8) }, "show", {}, []);
   }
+  // What a checked battle roll did, for the roll list (N4). The words
+  // follow each option's own note on the screen.
+  var ROLL_EFFECT = {
+    position: { clean: "you have the position", partial: "+1 on this round's Exchange", setback: "−1 on this round's Exchange" },
+    chase: { clean: "you catch her, +1 on your first Position", partial: "you catch her", setback: "she gets away" },
+    flee: { clean: "you get away", partial: "you get away, with a parting hit", setback: "she catches you, +1 to her Position" },
+    grapple: { clean: "you're aboard", partial: "you're aboard, but she sweeps your deck with grape", setback: "they cut your grapples" },
+    repel: { clean: "you cut her grapples and rake her", partial: "they're aboard, but pay for it", setback: "they're aboard" },
+    strikeFirst: { clean: "you get the jump: +1 on the first clash", partial: "neither side gets the jump", setback: "they get the jump: −1 on the first clash" },
+    shot: { clean: "the shot finds its mark", partial: "a glancing hit", setback: "the shot goes wide" },
+    endure: { clean: "you hold on", partial: "you hold on, barely", setback: "the sea takes you" },
+    show: { clean: "+1 on the strike roll", partial: "no harm done", setback: "no harm done" },
+  };
+  function rollEffect(state, game, op, outcome) {
+    var b = game.battle || {};
+    var key = op === "chase" && b.chaseMode === "flee" ? "flee" : op;
+    if (/^act_/.test(op)) return null; // a boarding action's own lines say what it did
+    return (ROLL_EFFECT[key] || {})[outcome] || null;
+  }
+
   function settleShow(state, game, p) { game.battle.step = "strikePre"; return strikePre(state, game, p.outcome === "clean" ? 1 : 0); }
 
   function engage(state, game) {
@@ -8000,6 +8057,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   PC.combat = {
+    rollEffect: rollEffect,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,
     begin: begin, engage: engage, setTarget: setTarget, assignFleetShip: assignFleetShip, showOfForce: showOfForce,
@@ -8699,7 +8757,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     };
   }
 
-  M().register("hunt", { settle: settle, view: view, exit: exit });
+  // The roll list's "what it did" for a checked roll (N4).
+  function rollEffect(state, game, op, outcome) {
+    if (op === "repair") return { clean: "a quarter of the damage patched", partial: "a tenth of the damage patched", setback: "nothing to show for it" }[outcome];
+    return C().rollEffect(state, game, op, outcome);
+  }
+
+  M().register("hunt", { settle: settle, view: view, exit: exit, rollEffect: rollEffect });
 
   // ---- Developer tools (§37.2) ------------------------------------------------------
 
@@ -13065,7 +13129,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         // The author's lines (approved November 18). [Trident Waters] is her
         // hunting ground, seeded per world. The birthmark is the brother's mark.
         drinking: { node: null, journal: {
-          A: "A pirate you drank under the table swears the *Trident* hunts [Trident Waters], with a carpenter with a birthmark chained at her pumps.",
+          A: "A pirate you drank under the table swears the *Trident* hunts [Trident Waters], with a shipwright with a birthmark chained at her pumps.",
           B: "A pirate you drank under the table bragged about a chest of fine jewels aboard the *Trident*. They sound like yours.",
           C: "A pirate you drank under the table says Gregoire's *Trident* hunts [Trident Waters].",
           any: "A lead won over drinks.",
@@ -13768,9 +13832,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     CREW_HIT: { heavy: 0.04, light: 0.02 },
     // Balance-check knobs (Milestone 6; P12b, P13). The defaults keep the
     // rules as built; tools/hunt_sim.js tries the proposals before a ruling.
-    BR_HULL_DIV: 5,           // Battle Rating counts hull ÷ this (P12b proposes 10)
+    BR_HULL_DIV: 10,          // Battle Rating counts hull ÷ this (N1, §21.3; built at 5)
     GRAPE_MULT: 2,            // grapeshot multiplies crew losses (P13a proposes 4)
-    GRAPE_BY_GUNS: null,      // P13b: e.g. { heavy: 1/3, light: 1/6 } men per manned gun
+    GRAPE_BY_GUNS: { heavy: 1 / 3, light: 1 / 6 }, // N2 (§21.11): grapeshot kills 1 man per 3 manned guns on a heavy hit, 1 per 6 on a light one
     PORCELAIN_BREAK: 0.10,
     CREW_LINE: 0.25,
     FATE: [[1, "sunk"], [0.75, 0.5], [0.5, 0.25]],
@@ -15543,8 +15607,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var lr = v && v.lastRoll && v.lastRoll.logAt >= mgMark && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
     if (!fresh.length && !lr) return "";
     var key = "mg:" + (v ? v.kind : "") + ":" + lines.length + ":" + (lr ? lr.seq : 0);
-    var inner = (lr ? rollBadge(lr.outcome, OP_NAME[lr.op] || lr.type) : "") + fresh.map(function (l) { return prose(l); }).join("") + (lr && lr.chips && lr.chips.length ? chips(lr.chips) : "");
+    var inner = (lr ? rollBadge(lr.outcome, OP_NAME[lr.op] || lr.type) : "") + fresh.map(function (l) { return prose(l); }).join("") + (lr && lr.chips && lr.chips.length ? chips(lr.chips) : "") +
+      rollList(v, lines);
     return rbox(lr ? lr.outcome : null, inner, key, "mglatest");
+  }
+  // N4 (§37.12): in a battle, every roll since the player's last move, one
+  // line each: the roll, the outcome word, and what it did.
+  var OUT_WORD = { clean: "Clean", partial: "Partial", setback: "Setback" };
+  function rollList(v, lines) {
+    if (!v || v.kind !== "hunt") return "";
+    var rs = (v.rollList || []).filter(function (r) { return r.logAt >= mgMark && r.logAt <= lines.length; });
+    if (!rs.length) return "";
+    return '<ul class="rolllist">' + rs.map(function (r) {
+      var o = OUTCOME[r.outcome];
+      return '<li><span class="tier ' + (o ? o[1] : "t-mid") + '">' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + "</span> " +
+        "<b>" + esc(OP_NAME[r.op] || r.label) + "</b>" + (r.effect ? ": " + esc(r.effect) : "") + "</li>";
+    }).join("") + "</ul>";
   }
   function mgLog(lines) {
     var old = lines.slice(0, Math.min(mgMark, lines.length)).slice(-6);
@@ -17513,9 +17591,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // The pips dim to preview an option's cost on hover or focus (§41.1).
   function previewAP(n) {
     var pips = root.querySelectorAll(".topbar .pip.on");
-    pips.forEach(function (p, i) { p.classList.toggle("preview", n > 0 && i >= pips.length - n); p.classList.toggle("on", !(n > 0 && i >= pips.length - n)); });
+    // B1 (Bug Log): the dimmed pip's class is "pip-prev". It used to be
+    // "preview", which the creator's preview card also styles (a 290px
+    // panel), so hovering any option that costs an action swelled a pip and
+    // pushed the page down under the cursor.
+    pips.forEach(function (p, i) { p.classList.toggle("pip-prev", n > 0 && i >= pips.length - n); p.classList.toggle("on", !(n > 0 && i >= pips.length - n)); });
   }
-  function clearPreview() { root.querySelectorAll(".topbar .pip.preview").forEach(function (p) { p.classList.remove("preview"); p.classList.add("on"); }); }
+  function clearPreview() { root.querySelectorAll(".topbar .pip.pip-prev").forEach(function (p) { p.classList.remove("pip-prev"); p.classList.add("on"); }); }
 
   // Press feedback: a button darkens the moment a finger or mouse goes down,
   // before the click redraws the screen (the author's phone notes).
