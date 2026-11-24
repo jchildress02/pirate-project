@@ -1178,7 +1178,7 @@
           // Lay her up at anchor (§22.7): 10% up front, 3% a season.
           (function () {
             var lu = N().canLayUp(state, f.id), pr = lu.price || N().layUpPrice(state, f);
-            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
+            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, plus " + gold(pr.season) + " a season when you take her back</button>"
               : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
           })() + "</div>" +
           (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + (p.cut ? ", less " + gold(p.cut) + " to your letter's issuer" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
@@ -1193,7 +1193,7 @@
         N().laidUpHere(state).length + " of " + N().layUpSlots(N().here(state)) + " berths used.</p>" +
         lu.map(function (l) {
           var r = N().canRecover(state, l.ship.id);
-          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · " + l.owed + " gold owed" : "")) + "</span></span> " +
+          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · anchorage so far " + l.owed + " gold, paid when you take her back" : "")) + "</span></span> " +
             (r.ok ? '<button class="secondary" data-act="recover" data-ship="' + esc(l.ship.id) + '">Take her back</button>' : '<span class="note">' + esc(r.why) + "</span>") + "</div>";
         }).join("") + "</div>";
     }
@@ -2719,12 +2719,12 @@
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
         hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
       var r = N().layUp(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Then " + gold(r.season) + " gold a season"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
+      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Plus " + gold(r.season) + " gold a season, paid when you take her back"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
         r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
     },
     "recover": function (el) {
       var id = who("shipwright"), r = N().recover(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? goldChip(-r.owed) : null] });
+      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? textChip("gold", "−" + gold(r.owed) + " gold for her anchorage", "mid") : null] });
     },
     "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
     "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },

@@ -783,7 +783,7 @@ function opened(seed) {
   return s;
 }
 
-test("Ocracoke's prices: provisions 24, treasure 70, fence 38.5 then 41.25 at Friendly, kill-devil 12", function () {
+test("Ocracoke's prices (whole gold): provisions 24, treasure 70, fence 39 then 42 at Friendly, kill-devil 12", function () {
   var s = opened();
   PC.npcs.get(s, "ocr_provisioner"); // Neutral
   eq(PC.node.provisionsPrice(s), 24);
@@ -792,7 +792,7 @@ test("Ocracoke's prices: provisions 24, treasure 70, fence 38.5 then 41.25 at Fr
   // Bobby is Friendly after Welcome to the Underworld: 55% + 5% of 70.
   eq(PC.node.unitPrice(s, "fence", "treasure"), 42);
   s.npcs.bobby.rung = 0;
-  eq(PC.node.unitPrice(s, "fence", "treasure"), 38.5);
+  eq(PC.node.unitPrice(s, "fence", "treasure"), 39);
 });
 
 test("Spring 1754's stock is fixed: kill-devil 15, rice 6, tobacco 4, sugar 3", function () {
@@ -839,13 +839,13 @@ test("buying provisions and goods fills the hold; a full hold refuses", function
   ok(threw, "over the hold");
 });
 
-test("the first repair: 6 HP for 38 gold and 1 action, and the frayed rigging is fixed", function () {
+test("the first repair: 6 HP for 36 gold (6 a point, whole gold) and 1 action, and the frayed rigging is fixed", function () {
   var s = opened();
-  eq(PC.node.repairCost(s, 6), 38);
+  eq(PC.node.repairCost(s, 6), 36);
   ok(PC.node.repairTakesAP(s, 6) && !PC.node.repairTakesAP(s, 4), "25% line");
   var ap = s.ap.left, gold = s.money.crew;
   PC.node.repair(s, 6);
-  eq(s.ship.hull, 20); eq(s.ap.left, ap - 1); eq(gold - s.money.crew, 38);
+  eq(s.ship.hull, 20); eq(s.ap.left, ap - 1); eq(gold - s.money.crew, 36);
   eq(s.ship.speed, 3); eq(s.ship.rigging, "sound");
 });
 
@@ -923,7 +923,7 @@ test("Wary Standing with the pirates doubles the due and adds 10% to purchases",
   var s = opened();
   s.meters.standing.pirates = -20;
   eq(PC.node.portFee(s), 50);
-  eq(PC.node.provisionsPrice(s), 26.4);
+  eq(PC.node.provisionsPrice(s), 26);
 });
 
 test("the arrival popup: the wounded recover or are paid off, then the due", function () {
@@ -944,7 +944,7 @@ test("the arrival popup (P16): each paid line says which pot paid, with no repea
 test("a Rival shipwright won't serve; Service Level cuts his prices", function () {
   var s = opened();
   s.npcs.ocr_shipwright.rung = 3;
-  eq(PC.node.repairPerHp(s), 5.44);
+  eq(PC.node.repairPerHp(s), 5);
   s.npcs.ocr_shipwright.rung = -2;
   ok(PC.node.shipwrightGreeting(s).refuse);
   eq(PC.node.repair(s, 1).line, PC.data.nodes.ocracoke.lines.shipwright.refuse);
@@ -3350,8 +3350,11 @@ test("laying a ship up: 10% of hull value, then 3% a season; her crew come home;
   ok(s.officers.every(function (o) { return o.aboard !== f.id; }), "her officer comes home");
   var before = s.money.crew + s.money.purse;
   PC.world.endSeason(s);
-  eq(before - (s.money.crew + s.money.purse) >= Math.round(val * 0.03), true);
+  eq(s.money.crew + s.money.purse - before <= 0, true);
+  eq(PC.node.laidUpHere(s, "norfolk")[0].owed, Math.round(val * 0.03), "a season's anchorage runs up, unpaid until pickup");
+  var g1 = s.money.crew + s.money.purse;
   var back = PC.node.recover(s, f.id);
+  eq(g1 - (s.money.crew + s.money.purse), Math.round(val * 0.03), "paid on taking her back");
   eq(s.fleet.length, 1);
   eq(PC.node.layUpSlots("norfolk"), 2); eq(PC.node.layUpSlots("ocracoke"), 1);
   ok(back.kind === "fleet" || back.kind === "prize");
@@ -3446,19 +3449,21 @@ test("Norfolk's level 4: refused to a captain Key distrusts, 15% off for one he 
   eq(PC.node.upgradeInfo(s, "hull").cost, Math.round(full.cost * 0.85));
 });
 
-test("an unpaid anchorage season is owed; the shipwright drops a rung until it's paid", function () {
+test("anchorage runs up while she's laid up; she can't be taken back until it's paid (the shipwright doesn't mind)", function () {
   var s = atNorfolk("lt9");
   PC.hunt.devFleetShip(s, "Sloop");
   var f = s.fleet[0];
   PC.node.layUp(s, f.id);
   var r0 = PC.npcs.rung(s, "christoph");
+  PC.node.layUpSeason(s); PC.node.layUpSeason(s);
+  var owed = PC.node.laidUpHere(s, "norfolk")[0].owed;
+  eq(owed, 2 * Math.round(PC.data.hunt.HULL_VALUE.Sloop * 0.03));
+  eq(PC.npcs.rung(s, "christoph"), r0);
   s.money.crew = 0; s.money.purse = 0;
-  PC.node.layUpSeason(s);
-  eq(PC.npcs.rung(s, "christoph"), r0 - 1); ok(PC.node.laidUpHere(s, "norfolk")[0].owed > 0);
-  ok(!PC.node.canRecover(s, f.id).ok, "can't take her back while you owe");
+  ok(!PC.node.canRecover(s, f.id).ok, "can't take her back without the gold");
   s.money.crew = 5000;
   PC.node.recover(s, f.id);
-  eq(PC.npcs.rung(s, "christoph"), r0);
+  eq(s.money.crew, 5000 - owed);
 });
 
 test("bribes at Norfolk's first inspection come from the purse first", function () {
