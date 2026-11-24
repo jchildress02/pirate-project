@@ -99,5 +99,9 @@
     return PC.prison.captureAtSea(state, { battle: { enemies: [{ id: "dev", flag: flag || "Avalon" }], target: "dev" } });
   }
 
-  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace, jail: jail, captured: captured };
+  // The cell (PR 7): fill the escape points; skip to the trial.
+  function fillClock(state) { return PC.escape.devFillClock(state); }
+  function toTrial(state) { return PC.escape.devToTrial(state); }
+
+  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace, jail: jail, captured: captured, fillClock: fillClock, toTrial: toTrial };
 })();
