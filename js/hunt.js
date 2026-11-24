@@ -71,6 +71,7 @@
   // -25% with its Ration Stores check, and hunger's Go Without check.
   function burn(state, game) {
     var b = PC.world.burn(state, 1, {});
+    game.provEaten = (game.provEaten || 0) + b.used; // the summary's provisions line (P10)
     b.lines.forEach(function (l) { M().say(state, game, l); });
     return b;
   }
@@ -563,7 +564,7 @@
       out.push({ what: g, n: n, dirty: dirty, left: loot.goods[g] - n, icon: "treasure", text: n + " " + (dirty ? "dirty " : "") + g + (n < loot.goods[g] ? " (" + (loot.goods[g] - n) + " left behind)" : "") });
     });
     var p = Math.min(loot.provisions || 0, Math.max(0, Math.floor(pick.provisions || 0)), PC.crew.slotsFree(state));
-    if (p > 0) { state.provisions += p; out.push({ what: "provisions", prov: p, n: p, icon: "prov", text: "+" + p + " provisions" }); }
+    if (p > 0) { state.provisions += p; if (state.minigame) state.minigame.provTaken = (state.minigame.provTaken || 0) + p; out.push({ what: "provisions", prov: p, n: p, icon: "prov", text: "+" + p + " provisions" }); }
     return out;
   }
 
@@ -650,7 +651,14 @@
     var hn = PC.node.nodeData(game.home);
     M().say(state, game, game.home === "ocracoke" ? L().home : hn.kind === "ocean" ? "PLACEHOLDER: You call off the hunt and heave to on the open sea." : (hn.lines.arrival || {}).back || L().home);
     game.phase = "home"; game.over = true;
+    M().say(state, game, provisionsLine(state, game.provEaten || 0, game.provTaken || 0));
     PC.state.addLog(state, "Back at " + PC.node.nodeData(game.home).name + " from the hunt: " + plural(game.prizesTaken, "prize") + " taken.");
+  }
+
+  // "Provisions: X eaten, Y taken, Z left (about N actions at sea)." (P10)
+  function provisionsLine(state, eaten, taken) {
+    var left = PC.crew.food(state), ap = PC.world.apOfFood(state);
+    return "Provisions: " + eaten + " eaten" + (taken != null ? ", " + taken + " taken" : "") + ", " + left + " left (about " + (ap === 1 ? "1 action" : ap + " actions") + " at sea)." + (state.hardtack ? " " + state.hardtack + " of them hardtack." : "");
   }
 
   // The hunt ends: home to the port it left from (an arrival: the popup and
@@ -921,6 +929,6 @@
     canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
-    afterLeg: afterLeg, startEncounter: startEncounter, promoteFleetShip: promoteFleetShip,
+    afterLeg: afterLeg, provisionsLine: provisionsLine, startEncounter: startEncounter, promoteFleetShip: promoteFleetShip,
   };
 })();

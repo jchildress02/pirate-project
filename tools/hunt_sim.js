@@ -157,7 +157,8 @@ for (var i = 0; i < N; i++) {
   if (g.gameOver) { var lb = g.battle; var le = lb && lb.enemies[0]; LOSTTO[(le ? (le.hunter ? "hunter " : "") + le.flag + " " + le.role + " " + le.cls : "?") + " · " + (lb && lb.lostHow)] = (LOSTTO[(le ? (le.hunter ? "hunter " : "") + le.flag + " " + le.role + " " + le.cls : "?") + " · " + (lb && lb.lostHow)] || 0) + 1; res.lost++; if (g.gameOver.how === "died") res.died++; res.ap += g.apUsed; perAp.push(0); continue; }
   PC.minigames.leave(s);
   var gross = haulValue(s) + (s.money.crew - crew0) + (s.money.purse - purse0);
-  var cost = Math.max(0, prov0 - s.provisions) * 24 + Math.max(0, hull0 - s.ship.hull) * 8 + Math.max(0, hands0 - s.crew.count) * 15;
+  // Food at the port's price; a prize's food counts as a gain (P2, P12).
+  var cost = (prov0 - PC.crew.food(s)) * PC.node.provisionsPrice(s) + Math.max(0, hull0 - s.ship.hull) * 8 + Math.max(0, hands0 - s.crew.count) * 15;
   var net = gross - cost;
   res.gold += net; res.ap += g.apUsed; res.prizes += g.prizesTaken;
   perAp.push(net / g.apUsed);

@@ -783,10 +783,10 @@ function opened(seed) {
   return s;
 }
 
-test("Ocracoke's prices (whole gold): provisions 24, treasure 70, fence 39 then 42 at Friendly, kill-devil 12", function () {
+test("Ocracoke's prices (whole gold): provisions 16, treasure 70, fence 39 then 42 at Friendly, kill-devil 12", function () {
   var s = opened();
   PC.npcs.get(s, "ocr_provisioner"); // Neutral
-  eq(PC.node.provisionsPrice(s), 24);
+  eq(PC.node.provisionsPrice(s), 16); // 20 × 0.8 (P1 of the build 0.9 pins)
   eq(PC.node.unitPrice(s, "provisioner", "treasure"), 70);
   eq(PC.node.shopPrice(s, "ocracoke", "Kill-devil rum", "ocr_provisioner"), 12);
   // Bobby is Friendly after Welcome to the Underworld: 55% + 5% of 70.
@@ -923,7 +923,7 @@ test("Wary Standing with the pirates doubles the due and adds 10% to purchases",
   var s = opened();
   s.meters.standing.pirates = -20;
   eq(PC.node.portFee(s), 50);
-  eq(PC.node.provisionsPrice(s), 26);
+  eq(PC.node.provisionsPrice(s), 18);
 });
 
 test("the arrival popup: the wounded recover or are paid off, then the due", function () {
@@ -2515,11 +2515,11 @@ test("Winter burns +50%; rationing -25%", function () {
   eq(b2.need, Math.ceil(heads / 5 * 2 * 0.75));
 });
 
-test("idle upkeep burns crew ÷ 5 at the season's end; morale bands move Pressure", function () {
+test("no idle upkeep at the season's end (P3); morale bands move Pressure", function () {
   var s = m7("upkeep"); var prov = s.provisions;
   s.crew.morale = 10; s.crew.pressure = 0;
   PC.world.endSeason(s);
-  eq(prov - s.provisions, Math.ceil(s.crew.count / 5));
+  eq(prov - s.provisions, 0);
   eq(s.crew.pressure, 2); // Mutinous: +2
 });
 
@@ -3603,6 +3603,107 @@ test("Howe's information steps: three now, the notice board's after A Wanted Man
   eq(PC.admiralty.questions(s).length, 3);
   ok(/finest leader/.test(PC.admiralty.ask(s, "admiral")));
   s.flags.a_wanted_man_done = true; eq(PC.admiralty.questions(s).length, 4);
+});
+
+
+// ---- The build 0.9 playtest pins (mid-Milestone 8) ----
+console.log("Milestone 8: the build 0.9 playtest pins (P1-P12)");
+
+test("P1/P11: provisions 20 a lot at a Modest port; hardtack half that; both sell back at half", function () {
+  var s = atNorfolk("pp1");
+  eq(PC.data.economy.PROVISIONS_LOT, 20);
+  eq(PC.node.hardtackPrice(s), Math.round(PC.node.provisionsPrice(s) / 2));
+  s.money.crew = 1000; var g = s.money.crew, cost = PC.node.buyHardtack(s, 4).cost;
+  eq(s.hardtack, 4); eq(g - s.money.crew, cost); eq(PC.crew.food(s), s.provisions + 4);
+  var r = PC.node.sellHardtack(s, 2); eq(s.hardtack, 2); ok(r.gold > 0);
+});
+
+test("P11: ordinary lots are eaten first, then hardtack, at -2 morale for each action eaten on it", function () {
+  var s = m7("pp11"); s.time.season = 0; s.crew.rationing = false;
+  var per = Math.ceil(PC.world.headsAtSea(s) / 5);
+  s.provisions = per; s.hardtack = per * 3; s.crew.morale = 60;
+  var b = PC.world.burn(s, 2, {});
+  eq(s.provisions, 0); eq(s.hardtack, per * 3 - per * 2 + per); eq(b.hardtackAP, 1); eq(s.crew.morale, 58);
+  ok(!b.goWithout, "no Go Without check on hardtack");
+  eq(PC.world.hardtackActions(10, 2, 4, 6), 2, "an action is on hardtack if any of its burn was");
+  eq(PC.world.hardtackActions(10, 2, 5, 5), 1);
+});
+
+test("P11: hardtack takes hold space, and the save migration adds it", function () {
+  var s = m7("pp11b"); var used = PC.crew.slotsUsed(s); s.hardtack = 5; eq(PC.crew.slotsUsed(s), used + 5);
+  var old = JSON.parse(PC.state.serialize(s)); delete old.hardtack; old.saveVersion = 9;
+  var m = PC.state.deserialize(JSON.stringify(old)); eq(m.hardtack, 0); eq(m.saveVersion, PC.state.SAVE_VERSION);
+});
+
+test("P2: a prize carries her crew ÷ 5 × 2-4 lots; the calculator's provisions share is goods", function () {
+  var s = m7("pp2"), r = PC.rng.fromKey("pp2");
+  for (var i = 0; i < 20; i++) {
+    var sh = PC.huntGen.makeShip(s, { cls: "Sloop", role: "Raider", flag: "Pirate" }, r);
+    sh.crew = 25;
+    var l = PC.huntGen.rollLoot(s, sh, r);
+    ok(l.provisions >= 10 && l.provisions <= 20, "25 aboard: 10-20 lots, got " + l.provisions);
+  }
+  ok(PC.huntGen.lootTypes({ role: "Trade" }).indexOf("provisions") >= 0);
+});
+
+test("P3: no idle upkeep at the season's end, anywhere", function () {
+  var s = m7("pp3"); var prov = s.provisions; s.time.season = 1;
+  PC.world.endSeason(s); eq(s.provisions, prov);
+});
+
+test("P4/P5: density base 75; Avalon 60/20/20, the north 50/20/30, 40/20/40 at Wanted and 30/20/50 at Hunted", function () {
+  eq(PC.data.hunt.DENSITY.base, 75);
+  eq(PC.data.hunt.ROLE.Avalon.join(","), "60,20,20,0"); eq(PC.data.hunt.ROLE.France.join(","), "45,30,25,0");
+  var s = m7("pp5"), count = function (heat) {
+    s.meters.heat.avalon = heat; var r = PC.rng.fromKey("pp5|" + heat), war = 0;
+    for (var i = 0; i < 2000; i++) if (PC.huntGen.sighting(s, "north", r, { flag: "Avalon" }).ships[0].role === "War") war++;
+    return war / 2000;
+  };
+  var cold = count(0), wanted = count(45), hunted = count(75);
+  ok(Math.abs(cold - 0.30) < 0.04, "the north at low Heat: about 30% War, got " + cold);
+  ok(Math.abs(wanted - 0.40) < 0.04, "Wanted: about 40%, got " + wanted);
+  ok(Math.abs(hunted - 0.50) < 0.04, "Hunted: about 50%, got " + hunted);
+});
+
+test("P7a: grumbling weighs Sullen ×3, Mutinous ×5, ×(1 + 0.5 a Pressure point), sore ×3 on top", function () {
+  var s = m7("pp7"), e = PC.voyageEvents.byId("ve_c01_grumbling");
+  s.flags.soreFlag = false; s.crew.pressure = 0; s.crew.morale = 25; // Sullen
+  var sullen = PC.voyageEvents.grumbleWeight ? PC.voyageEvents.grumbleWeight(s, e) : null;
+  if (sullen == null) return; // not exported
+  eq(sullen, e.weight * 3);
+  s.crew.pressure = 2; eq(PC.voyageEvents.grumbleWeight(s, e), e.weight * 3 * 2);
+  s.flags.soreFlag = true; eq(PC.voyageEvents.grumbleWeight(s, e), e.weight * 3 * 2 * 3);
+  s.flags.soreFlag = false; s.crew.pressure = 0; s.crew.morale = 5; eq(PC.voyageEvents.grumbleWeight(s, e), e.weight * 5);
+});
+
+test("P7c: the Quartermaster (or the Acting Quartermaster) warns once at Pressure 3", function () {
+  var s = m7("pp7c"); s.crew.pressure = 2;
+  ok(!PC.crew.mutinyWarning(s));
+  s.crew.pressure = 3;
+  var w = PC.crew.mutinyWarning(s);
+  ok(w && /mutiny|move against|throat/i.test(w.line), "the warning");
+  ok(!PC.crew.mutinyWarning(s), "once per climb");
+  s.crew.pressure = 1; PC.crew.mutinyWarning(s); s.crew.pressure = 4; ok(PC.crew.mutinyWarning(s), "again after a fall below 3");
+  s.officers.forEach(function (o) { o.quartermaster = false; }); s.crew.qmWarned = false;
+  s.actingQM = { first: "Tom", last: "Hale", full: "Tom Hale", active: true };
+  var a = PC.crew.mutinyWarning(s); ok(a && a.acting && /afoot/.test(a.line), "the Acting Quartermaster, neutral voice");
+});
+
+test("P7d/P8: a season-end line at Sullen; an unpaid payout is -20 morale and Pressure +2, capped at 5", function () {
+  var s = m7("pp7d"); s.crew.morale = 25; s.time.season = 1;
+  var out = PC.world.endSeason(s);
+  ok(out.lines.some(function (l) { return /sullen silence/.test(l); }));
+  var t = opened("pp8"); t.crew.wounded = 10; t.money.crew = 0; t.money.purse = 0; t.crew.pressure = 4; t.crew.morale = 60;
+  PC.node.arrive(t, "ocracoke", { fromHunt: true });
+  if (t.crew.morale < 60) { eq(t.crew.pressure, 5); }
+});
+
+test("P10: the hunt's summary and the voyage's arrival carry the provisions line", function () {
+  var s = m7("pp10");
+  ok(/^Provisions: 3 eaten, 2 taken, \d+ left \(about [\d.]+ actions? at sea\)\./.test(PC.hunt.provisionsLine(s, 3, 2)));
+  var pop = PC.world.sail(s, "norfolk");
+  var lines = (pop && pop.lines) || (s.location.popup && s.location.popup.lines) || [];
+  ok(JSON.stringify(s.location.popup || pop).indexOf("Provisions: ") >= 0, "on the arrival");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

@@ -30,6 +30,29 @@
     return c.morale;
   }
 
+  // ---- The Quartermaster's mutiny warning (§24.13, §24.14; P7c) ----------
+  // At Pressure 3 or more the Quartermaster warns the captain, only at
+  // Neutral or better, and never a ringleader. The Acting Quartermaster
+  // warns too, in the neutral voice. Once per climb: Pressure has to fall
+  // below 3 before he warns again. Returns { who, line } or null.
+  function mutinyWarning(state) {
+    var c = state.crew, p = c.pressure || 0;
+    if (p < 3) { c.qmWarned = false; return null; }
+    if (c.qmWarned) return null;
+    var qm = PC.officers && PC.officers.quartermaster ? PC.officers.quartermaster(state) : null;
+    if (!qm) return null;
+    var acting = !qm.id || qm === state.actingQM;
+    if (!acting && ((qm.rung != null && qm.rung < 0) || qm.ringleader)) return null;
+    var w = "neutral";
+    if (!acting) {
+      w = qm.warmth || ((PC.data.creator.OFFICER_TRAITS || []).filter(function (t) { return t.id === qm.voice; })[0] || {}).warmth || "neutral";
+    }
+    var L = PC.data.world.lines.mutinyWarning;
+    c.qmWarned = true;
+    var who = (qm.full || ((qm.first || "") + " " + (qm.last || ""))).trim();
+    return { who: who, acting: acting, line: who + (acting ? ", the Acting Quartermaster" : ", your Quartermaster") + ", takes you aside: " + (L[w] || L.neutral) };
+  }
+
   // ---- Skill, Discipline, Crew Rating (§24.3-§24.5) -----------------------
 
   function headcount(state) { return state.crew.count; }
@@ -111,8 +134,18 @@
     return n;
   }
 
+  // Every lot of food aboard: provisions and hardtack (P11).
+  function food(state) { return (state.provisions || 0) + (state.hardtack || 0); }
+
+  // Take n lots of food: ordinary lots first, then hardtack. Returns what went.
+  function takeFood(state, n) {
+    var p = Math.min(state.provisions || 0, n), h = Math.min(state.hardtack || 0, n - p);
+    state.provisions -= p; state.hardtack = (state.hardtack || 0) - h;
+    return { provisions: p, hardtack: h, total: p + h };
+  }
+
   function slotsUsed(state) {
-    return state.provisions + goodsUnits(state) + Math.ceil(treasureUnits(state) / E().TREASURE_PER_SLOT);
+    return food(state) + goodsUnits(state) + Math.ceil(treasureUnits(state) / E().TREASURE_PER_SLOT);
   }
 
   // The hold is pooled across the flagship, fleet ships and prize ships (§22.7).
@@ -126,7 +159,7 @@
 
   // How many treasure units still fit.
   function treasureRoom(state) {
-    var used = state.provisions + goodsUnits(state);
+    var used = food(state) + goodsUnits(state);
     return Math.max(0, (holdCapacity(state) - used) * E().TREASURE_PER_SLOT - treasureUnits(state));
   }
 
@@ -147,6 +180,7 @@
     n = Math.max(0, Math.floor(n));
     if (!n) return;
     if (what === "provisions") state.provisions = Math.max(0, state.provisions - n);
+    else if (what === "hardtack") state.hardtack = Math.max(0, (state.hardtack || 0) - n);
     else if (what === "treasure") {
       var k = dirty ? "dirty" : "clean";
       state.cargo.treasure[k] = Math.max(0, state.cargo.treasure[k] - n);
@@ -175,6 +209,7 @@
     });
     goods.sort(function (a, b) { return a.base - b.base || (a.dirty ? -1 : 1); });
     goods.forEach(function (g) { if (slots <= 0) return; var k = Math.min(g.n, slots); plan.push({ what: g.what, n: k, dirty: g.dirty }); slots -= k; });
+    if (slots > 0 && state.hardtack) { var hk = Math.min(state.hardtack, slots); plan.push({ what: "hardtack", n: hk, dirty: false }); slots -= hk; }
     if (slots > 0 && state.provisions) { var p = Math.min(state.provisions, slots); plan.push({ what: "provisions", n: p, dirty: false }); slots -= p; }
     if (slots > 0) {
       var per = E().TREASURE_PER_SLOT, t = state.cargo.treasure;
@@ -434,6 +469,9 @@
     jettisonOverflow: jettisonOverflow,
     payFrom: payFrom,
     canPay: canPay,
+    food: food,
+    mutinyWarning: mutinyWarning,
+    takeFood: takeFood,
     shipCrew: shipCrew,
     canMoveHands: canMoveHands,
     moveHands: moveHands,

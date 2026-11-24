@@ -67,7 +67,7 @@
     },
 
     // ---- Step 2: density ----
-    DENSITY: { base: 70, min: 45, max: 90, season: { Spring: 10, Summer: 5, Hurricane: -15, Winter: -10 } },
+    DENSITY: { base: 75, min: 45, max: 90, season: { Spring: 10, Summer: 5, Hurricane: -15, Winter: -10 } },
 
     // ---- Step 3: shape (Trade only; pirates never) ----
     SHAPE: { 1: { convoy: 0.03, escort: 0.03 }, 2: { convoy: 0.04, escort: 0.05 }, 3: { convoy: 0.05, escort: 0.07 }, springBonus: 0.03 },
@@ -89,9 +89,31 @@
     FRISIA_POSTURE: { Distracted: 0.75, Opportunist: 1, Hunter: 1.25 },
 
     // ---- Step 5: role by flag [Trade, Hybrid, War, Raider] ----
+    // Avalon and France changed by the build 0.9 playtest pins (P5).
+    // Each Admiralty-held port in the waters moves Avalon points Trade →
+    // War; Avalon Heat moves 10 more at Wanted (40+) and 10 more at Hunted (70+).
+    // DEFAULT, flagged in the PR: P5 says "5 a port" but reads the north as
+    // 50/20/30 (and about 23% War), which takes 10 for Norfolk, the one
+    // Admiralty port; this keeps 10 so the north reads as P5 lays it out.
+    ADMIRALTY_ROLE_SHIFT: 10,
+    // Flags on enemy ships (P6 of the build 0.9 playtest pins): a swatch
+    // color and the word for the nation, always shown together (§41.1).
+    // PROPOSED colors, for the author's approval.
+    FLAG_LOOK: {
+      Avalon: { color: "#8a6414", adj: "Avalon" }, Frisia: { color: "#a14c17", adj: "Frisian" },
+      France: { color: "#24407a", adj: "French" }, Spain: { color: "#9c1f24", adj: "Spanish" },
+      Ireland: { color: "#2f6b3a", adj: "Irish" }, Sicily: { color: "#5e2f6e", adj: "Sicilian" },
+      Burgundy: { color: "#6e1f33", adj: "Burgundian" }, Sweden: { color: "#4f86b0", adj: "Swedish" },
+      Pirate: { color: "#1c1a18", adj: "Pirate" },
+    },
+    // The role in plain words, after the nation: "Avalon navy", "Frisian merchant".
+    ROLE_WORD: { War: "navy", Trade: "merchant", Hybrid: "armed trader", Raider: "raider" },
+    // A prize's food (P2): her crew aboard ÷ per × lo-hi lots, rolled.
+    PRIZE_FOOD: { per: 5, lo: 2, hi: 4 },
+    AVALON_HEAT_ROLE: [[40, 10], [70, 10]],
     ROLE: {
-      Avalon: [50, 20, 30, 0], Frisia: [60, 20, 20, 0], Ireland: [40, 30, 30, 0], Spain: [60, 25, 15, 0],
-      Sweden: [50, 30, 20, 0], Burgundy: [85, 10, 5, 0], Sicily: [100, 0, 0, 0], France: [40, 30, 30, 0], Pirate: [0, 30, 0, 70],
+      Avalon: [60, 20, 20, 0], Frisia: [60, 20, 20, 0], Ireland: [40, 30, 30, 0], Spain: [60, 25, 15, 0],
+      Sweden: [50, 30, 20, 0], Burgundy: [85, 10, 5, 0], Sicily: [100, 0, 0, 0], France: [45, 30, 25, 0], Pirate: [0, 30, 0, 70],
     },
 
     // ---- Step 6: type by role ----
@@ -197,6 +219,8 @@
 
   // ---- Placeholder lines (PLACEHOLDER: Claude's, for the author) ----------
   PC.data.huntLines = {
+    // The battle with a pirate opens on her black flag (P6; PH32 for the author).
+    blackFlag: "PLACEHOLDER: She runs up the black flag.",
     setOut: "PLACEHOLDER: You weigh anchor and stand out past the bar into the Hatteras Banks, every eye on the horizon.",
     empty: [
       "PLACEHOLDER: Nothing but grey water and a gull or two.",

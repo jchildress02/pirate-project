@@ -3,7 +3,7 @@
  *
  * Voyages: 1-3 AP by §4's table; provisions burn crew ÷ 5 × AP; running
  * short never blocks (a morale hit and a Go Without check, §20.6).
- * The season turn: the hurricane strike (weather, PR 3), idle upkeep, the
+ * The season turn: the hurricane strike (weather, PR 3), the
  * mutiny Pressure drift, the trade ship, then the new season; at the start
  * of Winter, the split popup; after Winter 1754, the end-of-year screen.
  * The trade ship (§27.7): the Trade Master enrolls one kept prize.
@@ -90,11 +90,20 @@
     mult = Math.max(0.5, mult);
     var need = Math.ceil(heads / 5 * ap * mult);
     out.need = need;
-    var used = Math.min(state.provisions, need);
-    state.provisions -= used;
+    // Ordinary lots first, then hardtack (P11 of the build 0.9 playtest pins).
+    var took = PC.crew.takeFood(state, need), used = took.total;
     out.used = used;
+    out.hardtack = took.hardtack;
     out.short = need - used;
-    if (used) out.chips.push({ icon: "prov", text: "−" + plural(used, "provisions lot") + (mult > 1 && seasonName(state) === "Winter" ? " (Winter: +50%)" : ""), ink: "mid" });
+    var winterNote = mult > 1 && seasonName(state) === "Winter" ? " (Winter: +50%)" : "";
+    if (took.provisions) out.chips.push({ icon: "prov", text: "−" + plural(took.provisions, "provisions lot") + winterNote, ink: "mid" });
+    if (took.hardtack) {
+      // Each action eaten (even partly) on hardtack costs morale; no Go Without check.
+      var hap = hardtackActions(need, ap, took.provisions, took.hardtack), hm = hap * (E().HARDTACK_MORALE || 2);
+      out.hardtackAP = hap;
+      if (hm) PC.crew.addMorale(state, -hm);
+      out.chips.push({ icon: "prov", text: "−" + plural(took.hardtack, "hardtack lot") + (took.provisions ? "" : winterNote) + (hm ? " · morale −" + hm : ""), ink: "bad" });
+    }
     if (out.short > 0) {
       // Hunger (§20.6): -10 morale and a Go Without check, DR by the shortfall.
       PC.crew.addMorale(state, -10);
@@ -120,6 +129,23 @@
       state.flags.soreFlag = true; // provisions ran short: the sore flag (§44.9)
     }
     return out;
+  }
+
+  // How many of `ap` actions ate any hardtack: action i eats the stretch
+  // [i·per, (i+1)·per) of the burn; ordinary lots cover [0, prov), hardtack
+  // the next ht lots.
+  function hardtackActions(need, ap, prov, ht) {
+    if (!ht || !ap) return 0;
+    var per = need / ap, n = 0;
+    for (var i = 0; i < ap; i++) if (Math.max(i * per, prov) < Math.min((i + 1) * per, prov + ht) - 1e-9) n++;
+    return n;
+  }
+
+  // About how many actions at sea the food aboard feeds (P9, P10).
+  function apOfFood(state, heads) {
+    heads = heads == null ? headsAtSea(state) : heads;
+    var per = Math.max(1, heads) / 5 * (seasonName(state) === "Winter" ? 1.5 : 1);
+    return Math.floor(PC.crew.food(state) / per * 10) / 10;
   }
 
   // Move hands to the wounded ledger, lowest tiers first.
@@ -171,7 +197,7 @@
     var b = burn(state, Math.max(1, cost), {});
     lines = lines.concat(b.lines);
     chips = chips.concat(b.chips);
-    var voyage = { from: from, to: to, ap: cost, lines: lines, chips: chips, events: [] };
+    var voyage = { from: from, to: to, ap: cost, lines: lines, chips: chips, events: [], eaten: b.used };
     // Voyage events: one slot per AP (§44; PR 4 hooks in here).
     if (PC.voyageEvents) PC.voyageEvents.voyage(state, voyage);
     PC.state.addLog(state, "Sailed from " + placeName(from) + " to " + placeName(to) + " (" + plural(cost, "action") + ").");
@@ -185,6 +211,8 @@
     var to = voyage.to;
     state.voyage = null;
     if (state.gameOver) return null;
+    // The provisions line on the arrival (P10 of the build 0.9 playtest pins).
+    if (voyage.eaten != null && PC.hunt && PC.hunt.provisionsLine) voyage.lines = voyage.lines.concat([PC.hunt.provisionsLine(state, voyage.eaten, null)]);
     state.location = { node: to, place: null, queue: [] };
     state.current = { screen: "node" };
     PC.node.initNode(state, to);
@@ -220,18 +248,17 @@
   function endSeason(state) {
     var out = { lines: [], chips: [], from: seasonName(state) + " " + state.time.year };
     hooks.beforeUpkeep.forEach(function (fn) { fn(state, out); });
-    // Idle upkeep (§20.6): crew ÷ 5, once, wherever the ship is; Winter
-    // +50%; nothing in a split Winter.
-    if (!splitWinter(state)) {
-      var b = burn(state, 1, { upkeep: true });
-      if (b.used) out.lines.push(fill(W().lines.upkeep, { lots: b.used }));
-      out.lines = out.lines.concat(b.lines);
-      out.chips = out.chips.concat(b.chips);
-    }
+    // No idle upkeep at the season's end (P3 of the build 0.9 playtest
+    // pins): provisions burn only at sea. Winter's +50% stays on voyages.
     // Mutiny Pressure drifts by the morale band at season end (§24.13).
     var band = PC.crew.band(state.crew.morale);
     var dp = band === "Mutinous" ? 2 : band === "Sullen" ? 1 : band === "Eager" || band === "Devoted" ? -1 : 0;
     state.crew.pressure = clamp((state.crew.pressure || 0) + dp, 0, 5);
+    // A crew line at Sullen and Mutinous (P7d), and the Quartermaster's
+    // warning at Pressure 3 or more (P7c).
+    if (band === "Sullen" || band === "Mutinous") out.lines.push(W().lines.seasonCrew[band]);
+    var warn = PC.crew.mutinyWarning(state);
+    if (warn) { out.lines.push(warn.line); out.chips.push({ icon: "pressure", text: "Mutiny is in the air", ink: "bad" }); }
     // The trade ship's season (§27.7).
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
@@ -652,7 +679,7 @@
   PC.world = {
     TRADE: TRADE,
     isLive: isLive, isOcean: isOcean, place: place, placeName: placeName, zoneOf: zoneOf, apCost: apCost,
-    headsAtSea: headsAtSea, burn: burn,
+    headsAtSea: headsAtSea, burn: burn, hardtackActions: hardtackActions, apOfFood: apOfFood,
     canSail: canSail, sail: sail, arriveFrom: arriveFrom, destinations: destinations,
     hook: hook, endSeason: endSeason, splitWinter: splitWinter,
     impliedShare: impliedShare, holdPressure: holdPressure, qmReading: qmReading, startWinter: startWinter, holdSplit: holdSplit,

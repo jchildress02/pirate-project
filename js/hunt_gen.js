@@ -147,7 +147,11 @@
     var flag = force.flag || weighted(r, flagWeights(state, waters));
     var R0 = H().ROLE[flag], adm = H().WATERS[waters].ports.filter(function (p) { return p.admiralty; }).length;
     var rw = { Trade: R0[0], Hybrid: R0[1], War: R0[2], Raider: R0[3] };
-    if (flag === "Avalon") { rw.Trade -= 10 * adm; rw.War += 10 * adm; }
+    if (flag === "Avalon") {
+      var shift = (H().ADMIRALTY_ROLE_SHIFT || 10) * adm, ah = (state.meters && state.meters.heat.avalon) || 0;
+      (H().AVALON_HEAT_ROLE || []).forEach(function (x) { if (ah >= x[0]) shift += x[1]; });
+      rw.Trade -= shift; rw.War += shift;
+    }
     if (flag === "Frisia" && state.world.posture === "Hunter") { rw.Trade -= 15; rw.War += 15; }
     if (flag === "Frisia" && state.world.posture === "Distracted") { rw.War -= 10; rw.Trade += 10; }
     var role = force.kind === "warship" ? "War" : force.kind === "convoy" || force.kind === "escort" ? "Trade" : weighted(r, rw);
@@ -214,7 +218,9 @@
     if (!Array.isArray(comp)) comp = comp[yr];
     var p = comp[0], b = comp[1], f = comp[2] * (H().FINE_MULT[s.flag] || 1), t = comp[3];
     var tot = p + b + f + t;
-    var prov = units * p / tot, bulk = units * b / tot, fine = units * f / tot, treas = units * t / tot, prec = 0;
+    // The calculator's provisions share becomes ordinary goods (P2 of the
+    // build 0.9 playtest pins); her food is rolled from her crew, below.
+    var bulk = units * (p + b) / tot, fine = units * f / tot, treas = units * t / tot, prec = 0;
     var G = H().GOODS[s.flag] || H().GOODS.Pirate;
     if ((lvl === 4 || (yr >= 2 && lvl === 3)) && G.precious.length) { prec = treas * 0.25; treas *= 0.75; }
     var goods = {};
@@ -224,7 +230,7 @@
     if (prec) add(pick(r, G.precious), prec);
     var chestLvl = clamp(lvl + (s.role === "War" || s.role === "Raider" ? 1 : 0), 0, 4);
     var loot = {
-      level: lvl, provisions: Math.round(prov), goods: goods,
+      level: lvl, provisions: 0, goods: goods,
       treasure: Math.round(treas * PC.data.economy.TREASURE_PER_SLOT), // slots × 5 units a slot
       chest: Math.round(H().CHEST_BASE * s.size * H().CHEST_MULT[chestLvl]),
       captives: r() < (H().CAPTIVES[s.role] || 0) ? 1 + Math.floor(r() * 6) : 0,
@@ -232,7 +238,15 @@
     };
     var ip = H().HIDDEN_ITEM[lvl] + (s.flag === "Sicily" ? H().HIDDEN_ITEM_SICILY : 0);
     if (r() < ip) loot.item = hiddenItem(s, r);
+    loot.provisions = prizeFood(s, r);
     return loot;
+  }
+
+  // A prize carries food for her own crew (P2): her crew aboard ÷ 5 ×
+  // (2-4) lots, rolled, outside the loot calculator.
+  function prizeFood(s, r) {
+    var F = H().PRIZE_FOOD || { per: 5, lo: 2, hi: 4 };
+    return Math.round((s.crew || 0) / F.per * between(r, F.lo, F.hi));
   }
 
   // The hidden item (§32.16): this build draws from the items the prototype
@@ -259,8 +273,7 @@
   function lootTypes(s) {
     var comp = H().COMP[s.role];
     if (!Array.isArray(comp)) comp = comp[1];
-    var out = [];
-    if (comp[0]) out.push("provisions");
+    var out = ["provisions"]; // every ship carries food for her crew (P2)
     if (comp[1] || comp[2]) out.push("goods");
     if (comp[3]) out.push("treasure");
     return out;
@@ -277,6 +290,7 @@
     makeShip: makeShip,
     hunterShip: hunterShip,
     rollLoot: rollLoot,
+    prizeFood: prizeFood,
     lootLevel: lootLevel,
     range: range,
     hullWord: hullWord,
