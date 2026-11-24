@@ -202,7 +202,7 @@
   function destinations(state) {
     return W().places.map(function (p) {
       var c = canSail(state, p.id);
-      return { id: p.id, label: p.label, x: p.x, y: p.y, zone: p.zone, ocean: !!p.ocean, live: isLive(p.id), here: p.id === here(state),
+      return { id: p.id, label: p.label, x: p.x, y: p.y, labelDx: p.labelDx || 0, labelDy: p.labelDy || 0, zone: p.zone, ocean: !!p.ocean, live: isLive(p.id), here: p.id === here(state),
         cost: apCost(here(state), p.id), ok: c.ok, why: c.ok ? null : c.why, closed: !!c.closed };
     });
   }

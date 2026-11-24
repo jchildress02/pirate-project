@@ -871,7 +871,7 @@
     dests.forEach(function (d) {
       var cls = "mapnode" + (d.ocean ? " ocean" : "") + (d.live ? " live" : " uncharted") + (d.here ? " here" : "") + (mapSel === d.id ? " sel" : "");
       html += '<button class="' + cls + '" style="left:' + (d.x * 100) + "%;top:" + (d.y * 100) + '%" data-act="mapsel" data-node="' + esc(d.id) + '" title="' + esc(d.live ? d.label : d.label + ": " + PC.data.world.lines.uncharted) + '">' +
-        '<span class="dot"></span><span class="lab">' + esc(d.label) + (d.here ? " (here)" : "") + "</span></button>";
+        '<span class="dot"></span><span class="lab"' + (d.labelDx || d.labelDy ? ' style="transform:translate(' + d.labelDx + "px," + d.labelDy + 'px)"' : "") + ">" + esc(d.label) + (d.here ? " (here)" : "") + "</span></button>";
     });
     html += "</div></div>";
     var sel = mapSel && dests.filter(function (d) { return d.id === mapSel; })[0];

@@ -607,6 +607,11 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .mapnode .lab { font-family: var(--sc); font-size: 17px; letter-spacing: .04em; color: var(--ink); background: rgba(239,227,198,.85); padding: 0 6px; border-radius: 2px; white-space: nowrap; }
 .mapnode.ocean .dot { width: 14px; height: 14px; background: var(--sea); border-radius: 3px; transform: rotate(45deg); }
 .mapnode.uncharted { opacity: .45; }
+/* Live places bold; Uncharted names smaller and lighter, and on a phone only
+   when tapped (Playtest Pins 0.8, #2). */
+.mapnode.live .lab { font-weight: bold; font-size: 18px; }
+.mapnode.uncharted .lab { font-size: 13.5px; color: var(--faded); background: rgba(239,227,198,.6); }
+@media (hover: none), (pointer: coarse) { .mapnode.uncharted:not(.sel) .lab { display: none; } }
 .mapnode.uncharted .dot { background: #8c7a5a; }
 .mapnode.here .dot { box-shadow: 0 0 0 1.5px #4a3418, 0 0 0 6px rgba(201,159,69,.55); }
 .mapnode.live:hover .lab, .mapnode.sel .lab, .mapnode:focus-visible .lab { background: #f6ecd4; outline: 2px solid var(--gilt); }

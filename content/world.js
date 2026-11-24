@@ -42,16 +42,18 @@
     live: ["ocracoke", "norfolk", "hatteras", "bahama"],
 
     // The places on the chart (layout guide, November 23). kind: port,
-    // ocean or secret. zone: the weather zone (§42.2).
+    // ocean or secret. zone: the weather zone (§42.2). labelDx / labelDy:
+    // the name's nudge in pixels from its spot under the dot, kept in the
+    // data so it carries over to the author's map art (Playtest Pins 0.8, #2).
     places: [
       { id: "norfolk", label: "Norfolk", x: 0.065, y: 0.450, zone: "north" },
       { id: "edenton", label: "Edenton", x: 0.175, y: 0.575, zone: "north" },
       { id: "ocracoke", label: "Ocracoke", x: 0.280, y: 0.360, zone: "north" },
       { id: "wilmington", label: "Wilmington", x: 0.455, y: 0.600, zone: "north" },
       { id: "talanee", label: "Talanee", x: 0.555, y: 0.700, zone: "north", note: "upriver" },
-      { id: "charleston", label: "Charleston", x: 0.670, y: 0.655, zone: "south" },
-      { id: "beaufort", label: "Beaufort", x: 0.742, y: 0.710, zone: "south" },
-      { id: "savannah", label: "Savannah", x: 0.786, y: 0.735, zone: "south" },
+      { id: "charleston", label: "Charleston", x: 0.670, y: 0.655, zone: "south", labelDx: -72, labelDy: -21 },
+      { id: "beaufort", label: "Beaufort", x: 0.742, y: 0.710, zone: "south", labelDx: 6, labelDy: -42 },
+      { id: "savannah", label: "Savannah", x: 0.786, y: 0.735, zone: "south", labelDx: 22 },
       { id: "staugustine", label: "St. Augustine", x: 0.885, y: 0.700, zone: "south" },
       { id: "nassau", label: "Nassau", x: 0.895, y: 0.285, zone: "south" },
       { id: "hatteras", label: "The Hatteras Banks", x: 0.250, y: 0.170, zone: "north", ocean: true },
