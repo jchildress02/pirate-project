@@ -1174,11 +1174,28 @@
         return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(f.name || f.cls, f.dirty) + '</b> <span class="note">' + esc(f.cls + " · " + (f.kind === "fleet" ? "fleet ship" : "prize ship") +
           " · hull " + Math.round(f.hull) + "/" + f.hullMax + " · " + f.guns + " guns · " + f.crew + " aboard") + "</span></span> " +
           (p.ok ? '<button class="secondary" data-act="sellhull" data-ship="' + esc(f.id) + '">Sell her · ' + gold(p.total) + " gold</button>" : '<span class="note">' + esc(p.why) + "</span>") +
-          (f.guns && room > 0 ? '<button class="secondary" data-act="stripguns" data-ship="' + esc(f.id) + '">Move ' + Math.min(f.guns, room) + " guns to your flagship</button>" : "") + "</div>" +
+          (f.guns && room > 0 ? '<button class="secondary" data-act="stripguns" data-ship="' + esc(f.id) + '">Move ' + Math.min(f.guns, room) + " guns to your flagship</button>" : "") +
+          // Lay her up at anchor (§22.7): 10% up front, 3% a season.
+          (function () {
+            var lu = N().canLayUp(state, f.id), pr = lu.price || N().layUpPrice(state, f);
+            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
+              : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
+          })() + "</div>" +
           (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
             // Her effect on the hold (A9).
             " The hold goes from " + hh.capBefore + " to " + hh.capAfter + " (" + hh.used + " used)" + (hh.over ? '; <b style="color:#8f2a1c">' + hh.over + " slots won't fit and go over the side</b>" : "") + ".</p>" : "");
       }).join("") + "</div>";
+    }
+    // At anchor here (§22.7): take a laid-up ship back, 0 AP.
+    var lu = N().laidUpHere(state);
+    if (lu.length || fl.length) {
+      html += '<div class="svc"><h4>At anchor here</h4><p class="small">Laid-up ships burn nothing, are safe from hurricanes and stay here until you take them back. ' +
+        N().laidUpHere(state).length + " of " + N().layUpSlots(N().here(state)) + " berths used.</p>" +
+        lu.map(function (l) {
+          var r = N().canRecover(state, l.ship.id);
+          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · " + l.owed + " gold owed" : "")) + "</span></span> " +
+            (r.ok ? '<button class="secondary" data-act="recover" data-ship="' + esc(l.ship.id) + '">Take her back</button>' : '<span class="note">' + esc(r.why) + "</span>") + "</div>";
+        }).join("") + "</div>";
     }
     html += "</div>" + DIVIDER;
     // Hands on the Docks (§24.7, §41.8)
@@ -2399,6 +2416,22 @@
   }
 
   // The full captain sheet (§41.12).
+  // How the meters move, in plain words (§28; the author asked that the
+  // offense and betrayal rules be clear to the player).
+  function meterHelp() {
+    var R = PC.data.meterRules, b = [];
+    ["avalon", "frisia"].forEach(function (f) {
+      if (PC.meters.betrayalActive(state, f)) b.push((f === "avalon" ? "Avalon" : "Frisia") + " is still angry about your betrayal: Heat gains with them are doubled.");
+    });
+    return '<details class="card2" style="margin-top:10px"><summary><b>How these move</b>' + CARET + '</summary><div class="inner small">' +
+      "<p><b>Heat</b> cools every season: −" + R.BLEED.mid.clean + " (−" + R.BLEED.high.clean + " if they think well of you, −" + R.BLEED.low.clean + " if they hate you). " +
+      "In a season when you gain Heat with a faction (an <b>offense</b>, like taking one of their ships), it cools less: −" + R.BLEED.mid.offense + ". Executing a crew leaves no witnesses, so it gains no Heat and is no offense.</p>" +
+      "<p><b>Betrayal:</b> an offense against a faction you stand at 40 or more with costs +" + R.BETRAYAL_HEAT + " Heat on top, and doubles your Heat gains with them for a year. The scouting card warns you first.</p>" +
+      "<p><b>Standing</b> below Neutral mends by " + R.DRIFT + " a season with no offense against that faction, up to Neutral's edge (−9).</p>" +
+      "<p><b>Dread</b> fades by " + R.DREAD_DECAY + " a season unless you do something fearsome (a ship striking without a fight, winning a duel, an execution, Make an Example), and never below your Dread floor.</p>" +
+      b.map(function (x) { return '<p class="notice warn">' + esc(x) + "</p>"; }).join("") + "</div></details>";
+  }
+
   function menuCaptain() {
     var c = state.captain, pic = PC.creator.captainPortrait(c);
     var loss = (PC.data.creator.LOSSES || []).filter(function (l) { return l.id === c.loss; })[0];
@@ -2422,7 +2455,7 @@
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", state.provisions + " lots · " + esc(seaTime(state.provisions))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
-      meters(true) + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+      meters(true) + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -2663,6 +2696,19 @@
       say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths" + (r.paidFromPurse ? " (" + gold(r.paidFromPurse) + " from your purse)" : "")) : null]
           .concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) } : null);
       if (r.gold) toast("Sold her · +" + gold(r.gold) + " crew gold");
+    },
+    // Laying a ship up (§22.7): her hold leaves with her, so warn as a sale does.
+    "layup": function (el) {
+      var id = who("shipwright"), hh = N().hullSaleHold(state, el.dataset.ship);
+      if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
+      var r = N().layUp(state, el.dataset.ship);
+      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Then " + gold(r.season) + " gold a season"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
+        r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
+    },
+    "recover": function (el) {
+      var id = who("shipwright"), r = N().recover(state, el.dataset.ship);
+      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? goldChip(-r.owed) : null] });
     },
     "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
     "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },

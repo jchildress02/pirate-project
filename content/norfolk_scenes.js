@@ -180,7 +180,7 @@
         R("He steps back. \"Oh, you must be the timber merchant from New Scotland that he mentioned! I apologize for the trouble. Enjoy your time in Norfolk.\" He and the soldiers depart without another word."),
         R("He steps back and sizes you up. \"Hmm, I'm not sure that I buy that story, but the inspection is at my discretion. I might reconsider if you made it worth my while.\"", [], "nor_fv1_deal", { carry: true }),
         R("\"A likely story. Unfortunately, the inspection is required of all ships.\"", [], "nor_fv1_hold")),
-      // Bribe: base DR 1, +1 at an Admiralty port (records §5). DEFAULT: Heat's step (§6) isn't added yet.
+      // Bribe: base DR 1, +1 at an Admiralty port (records §5). Heat's DR step joins by itself (§28.4, ruled D6).
       K("I'm just now realizing I gave you the wrong amount for the port fee earlier. Here's the rest. ({bribe_before})", ["Caution"], { type: "Bribe", dr: 2 },
         R(DEAL_ONE, [{ hook: "nor_pay", what: "bribe_before", mult: 1 }]),
         R("He shifts uncomfortably. He lowers his voice and whispers, \"Double.\"", [], "nor_fv1_double_before", { carry: true }),

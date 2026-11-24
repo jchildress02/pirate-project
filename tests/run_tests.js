@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -3262,6 +3262,107 @@ test("fear deeds in battle and the season turn: Make an Example's clean is a fea
   s.meters.heat.avalon = 30;
   var out = PC.world.endSeason(s);
   ok(out.chips.some(function (c) { return /Avalon Heat −5/.test(c.text); }), "bleed in the popup");
+});
+
+// ---- Milestone 8, PR 3: inspections and laying up (§28.5, §22.7) ----
+console.log("Milestone 8, PR 3: inspections and laying up (§28.5, §22.7)");
+
+function inspectAt(seed, heat) {
+  var s = atNorfolk(seed);
+  s.meters.heat.avalon = heat;
+  s.money.purse = 3000;
+  return s;
+}
+
+test("inspection chances by Heat at an Admiralty port: none Cold, 10% Noticed, 25% Wanted, 50% Hunted, 75% Most Wanted; none at Ocracoke", function () {
+  var s = atNorfolk("ip1");
+  [[10, 0], [25, 0.10], [45, 0.25], [75, 0.5], [95, 0.75]].forEach(function (x) { s.meters.heat.avalon = x[0]; eq(PC.inspections.chance(s, "norfolk"), x[1]); });
+  s.meters.heat.avalon = 95; eq(PC.inspections.chance(s, "ocracoke"), 0);
+  eq(PC.inspections.kind("norfolk"), "admiralty");
+});
+
+test("an inspection with a clean hold is one line; a dirty hold plays the scene", function () {
+  var s = inspectAt("ip2", 95), saw = { line: 0, scene: 0 };
+  for (var i = 0; i < 40; i++) { var o = PC.inspections.onArrival(s, "norfolk"); if (o && o.line) saw.line++; }
+  ok(saw.line > 20, "about 75% of arrivals: " + saw.line);
+  s.cargo.treasure.dirty = 10;
+  for (i = 0; i < 40; i++) { o = PC.inspections.onArrival(s, "norfolk"); if (o && o.scene === "insp_search") saw.scene++; }
+  ok(saw.scene > 20);
+});
+
+test("the bribes: 4 × the port fee before the search, half the fence value after (at least 20); Heat's DR joins the Bribe roll", function () {
+  var s = inspectAt("ip3", 45);
+  s.cargo.treasure.dirty = 10;
+  eq(PC.inspections.bribeBefore(s), 4 * PC.node.portFee(s, "norfolk"));
+  eq(PC.inspections.bribeFound(s), Math.max(20, Math.round(0.5 * PC.inspections.foundValue(s))));
+  var a = PC.checks.assess(s, { type: "Bribe", dr: 2 }, { conditions: ["Harbor", "Official"] });
+  ok(a.parts.some(function (p) { return /Avalon Heat \(Wanted\)/.test(p.label) && p.value === -1; }));
+});
+
+test("Take it, then: confiscation and Heat +5, never jail; locked above 1,500 of goods", function () {
+  var s = inspectAt("ip4", 45);
+  s.cargo.treasure.dirty = 5;
+  PC.scenes.enterScene(s, "insp_found");
+  var h = s.meters.heat.avalon;
+  pick(s, /^Take it, then/);
+  eq(s.cargo.treasure.dirty, 0); eq(s.meters.heat.avalon, h + 5); ok(!s.gameOver);
+  var t = inspectAt("ip4b", 45);
+  t.cargo.treasure.dirty = 400;
+  ok(PC.inspections.overThreshold(t));
+  PC.scenes.enterScene(t, "insp_found");
+  var v = PC.scenes.viewScene(t).choices.filter(function (c) { return /^Take it, then/.test(c.label); })[0];
+  eq(v.status, "locked", "locked above the threshold"); eq(v.reason, "Too much to walk away from");
+});
+
+test("a setback: confiscation, Heat +5 and the port fee again; above the threshold, jail (the end screen until §43)", function () {
+  var s = inspectAt("ip5", 45);
+  s.cargo.treasure.dirty = 5;
+  var crew = s.money.crew + s.money.purse, fee = PC.node.portFee(s, "norfolk");
+  PC.scenes.enterScene(s, "insp_found");
+  pick(s, /paperwork/, [1, 1]);
+  eq(s.current.sceneId, "insp_setback");
+  pick(s, /^Continue/);
+  eq(s.cargo.treasure.dirty, 0); eq(s.money.crew + s.money.purse, crew - fee); ok(!s.gameOver);
+  var t = inspectAt("ip5b", 45);
+  t.cargo.treasure.dirty = 400; t.money.purse = 20000;
+  PC.scenes.enterScene(t, "insp_found");
+  pick(t, /paperwork/, [1, 1]); pick(t, /^Continue/);
+  ok(t.gameOver && t.gameOver.line === "jailed"); eq(t.current.screen, "end");
+});
+
+test("a clean bribe before the search: they leave, the goods stay", function () {
+  var s = inspectAt("ip6", 45);
+  s.cargo.treasure.dirty = 5;
+  var purse = s.money.purse, b = PC.inspections.bribeBefore(s);
+  PC.scenes.enterScene(s, "insp_search");
+  pick(s, /owe a little more/, [6, 6]);
+  eq(s.cargo.treasure.dirty, 5); eq(s.money.purse, purse - b, "from the purse");
+});
+
+test("laying a ship up: 10% of hull value, then 3% a season; her crew come home; two berths at Norfolk; recovered for 0 AP", function () {
+  var s = atNorfolk("lu1");
+  PC.hunt.devFleetShip(s, "Sloop");
+  var f = s.fleet[0], val = PC.data.hunt.HULL_VALUE.Sloop;
+  var gold0 = s.money.crew + s.money.purse, crew0 = s.crew.count;
+  var r = PC.node.layUp(s, f.id);
+  eq(r.up, Math.round(val * 0.10)); ok(s.money.crew + s.money.purse <= gold0 - r.up, "paid up front (and any hands without a berth paid off)");
+  eq(s.fleet.length, 0); eq(PC.node.laidUpHere(s).length, 1); ok(s.crew.count >= crew0);
+  ok(s.officers.every(function (o) { return o.aboard !== f.id; }), "her officer comes home");
+  var before = s.money.crew + s.money.purse;
+  PC.world.endSeason(s);
+  eq(before - (s.money.crew + s.money.purse) >= Math.round(val * 0.03), true);
+  var back = PC.node.recover(s, f.id);
+  eq(s.fleet.length, 1);
+  eq(PC.node.layUpSlots("norfolk"), 2); eq(PC.node.layUpSlots("ocracoke"), 1);
+  ok(back.kind === "fleet" || back.kind === "prize");
+});
+
+test("laying up needs Wary or better: +20% at Wary, refused at Hostile", function () {
+  var s = atNorfolk("lu2");
+  PC.hunt.devFleetShip(s, "Sloop");
+  var f = s.fleet[0], val = PC.data.hunt.HULL_VALUE.Sloop;
+  s.meters.standing.avalon = -15; eq(PC.node.layUpPrice(s, f).up, Math.round(val * 0.10 * 1.2));
+  s.meters.standing.avalon = -45; ok(!PC.node.canLayUp(s, f.id).ok);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

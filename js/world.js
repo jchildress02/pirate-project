@@ -236,6 +236,8 @@
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
+    // Laid-up ships' anchorage (§20.4).
+    out.lines = out.lines.concat(PC.node.layUpSeason(state));
     // The meters (§28): Heat bleed, Standing's drift, Dread's decay.
     var mt = PC.meters.seasonEnd(state);
     out.lines = out.lines.concat(mt.lines);
