@@ -665,7 +665,11 @@
   // the port fee), back on the open sea at an ocean node, or sailing on to
   // another place from the hunting grounds (§4, §22.1).
   function exit(state, game) {
-    if (game.phase === "gameover") { state.gameOver = game.gameOver; if (game.encounter) state.voyage = null; return "node"; }
+    if (game.phase === "gameover") {
+      // Taken at sea: the cells or a marooning (§43.3, Milestone 8 PR 6).
+      if (game.gameOver && game.gameOver.how === "captured" && PC.prison) { PC.prison.captureAtSea(state, game); return null; }
+      state.gameOver = game.gameOver; if (game.encounter) state.voyage = null; return "node";
+    }
     if (game.encounter) { // back to the voyage it interrupted (§44.4)
       state.minigame = null;
       PC.voyageEvents.resume(state);

@@ -107,7 +107,7 @@
   // ---- The scene's tests and effects ---------------------------------------------
   var F = PC.sceneFns;
   F.addCond("inspDirty", function (state) { return dirtyStacks(state).length > 0; });
-  F.addCond("inspJailed", function (state) { return !!(state.gameOver && state.gameOver.line === "jailed"); });
+  F.addCond("inspJailed", function (state) { return !!state.jailPending; });
   F.addCond("inspUnder", function (state) { return !overThreshold(state); });
   F.addCond("inspAfford", function (state, what, mult) {
     var base = what === "found" ? bribeFound(state) : bribeBefore(state);
@@ -128,7 +128,7 @@
     chip: function (state) { return { icon: "treasure", text: "Confiscated: everything dirty aboard · " + factionName(state) + " Heat +" + R().HEAT_CONFISCATED, ink: "bad" }; },
   });
   // A setback (§28.5): confiscation, Heat +5 and the port fee again; jail
-  // above the threshold. Jail ends the run until §43 is built (PR 6).
+  // above the threshold: the cells, charged by Heat (§43, PR 6).
   F.addHook("insp_setback", {
     apply: function (state) {
       var id = here(state), jail = overThreshold(state);
@@ -138,8 +138,8 @@
       var line = (g.length ? "Confiscated: " + g.join(", ") + ". " : "") + "Fined " + (paid.crew + paid.purse) + " gold.";
       if (jail) {
         state.flags.jailed_at = id;
-        state.gameOver = { how: "captured", line: "jailed" };
-        line += " Jailed.";
+        state.jailPending = { node: id, faction: nd(id).faction }; // the cells (§43, PR 6)
+        line += " Jailed (" + PC.prison.chargeFor(state, nd(id).faction) + ").";
       }
       return line;
     },

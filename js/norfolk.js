@@ -246,9 +246,10 @@
       return r.length ? { icon: "treasure", text: "Confiscated: " + r.map(function (s) { return s.n + " " + (s.what === "treasure" ? "dirty treasure" : s.what); }).join(", "), ink: "bad" } : null;
     },
   });
-  // Jail (§43) isn't built: the story ends here (§37.1), until Milestone 8.
+  // Jail (§43, Milestone 8 PR 6): charged by Avalon Heat; the scene's
+  // "end" exit takes him to the cells (a Cold captain is Held).
   F.addHook("nor_jail", {
-    apply: function (state) { state.flags.nor_jailed = true; state.gameOver = { how: "captured", line: "jailed" }; return "Jailed at Norfolk."; },
+    apply: function (state) { state.flags.nor_jailed = true; state.jailPending = { node: "norfolk", faction: "avalon" }; return "Jailed at Norfolk (" + PC.prison.chargeFor(state, "avalon") + ")."; },
     chip: function () { return { icon: "person", text: "Hauled off to prison", ink: "bad" }; },
   });
   F.addHook("godfrey_join", {

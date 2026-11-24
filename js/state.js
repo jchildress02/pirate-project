@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 10;
+  var SAVE_VERSION = 11;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -33,6 +33,7 @@
       money: c.money,           // { crew, purse } — §27
       provisions: c.provisions, // lots — §20.6
       hardtack: 0, // hardtack lots (P11 of the build 0.9 playtest pins)
+      jail: null, shipless: false, secretsExposed: {}, fenceShut: {}, // §43, §30.12 (M8 PR 6)
       ship: c.ship,
       crew: c.crew,
       meters: c.meters,         // Dread, Standing, Heat — §28
@@ -251,6 +252,12 @@
       // The build 0.9 playtest pins: hardtack (P11) and the morale band notice (P7).
       data.hardtack = data.hardtack || 0;
       data.saveVersion = 10;
+    }
+    if (data.saveVersion === 10) {
+      // Milestone 8, PR 6: imprisonment (§43) and the Secrets tab (§30.12).
+      data.jail = data.jail || null; data.shipless = !!data.shipless;
+      data.secretsExposed = data.secretsExposed || {}; data.fenceShut = data.fenceShut || {};
+      data.saveVersion = 11;
     }
     return data;
   }
