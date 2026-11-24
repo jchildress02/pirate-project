@@ -99,11 +99,10 @@
       offered: "You spot a few ripe pickings.",
       frigate: "One of them is larger than the rest.",
       quick: "You gather what you can find and return to the beach.",
-      goodHaul: "You spot something valuable.",
       poorHaul: "Slim pickings this time.",
       already: "The wrecks are picked clean. Come back later.",
       mermaidMissed: "You surface without finding the mermaid. You'll need to try again if you want to get paid.",
-      mermaid: "PLACEHOLDER (dive beat): your fingers close around something small and smooth in the sand. The ivory mermaid.",
+      mermaid: "Your fingers close around something small and smooth in the sand. The ivory mermaid.",
     },
     flavor: {
       sloop: ["A small, sleek hull lies on her side in the shallows, her mast snapped clean off.", "The bow of a half-buried sloop rises out of the sand."],

@@ -37,4 +37,15 @@
       heat: { frisia: 0, avalon: 0 },
     },
   };
+  // The test mentor (Playtest Pins 0.8, #3): Jesse Dew, on the old Flinty
+  // Beard portrait, never the test captain's own set (§12.8, §12.10).
+  PC.data.testMentor = {
+    id: "mentor", first: "Jesse", last: "Dew", gender: "m",
+    portrait: { set: "flinty", band: "old" },
+    type: "Navigator", level: 1,
+    voice: "Old Salt", secondary: "Yarn-Spinner", unique: "Mentor",
+    drive: "Freedom", fear: "Captivity",
+    rung: 2, approval: 0, mentor: true, quartermaster: true, aboard: "flagship",
+    wounded: false, sacrificeUsed: false, joined: { year: 1754, season: 0 },
+  };
 })();

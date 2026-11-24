@@ -1384,11 +1384,15 @@ test("crew actions: Rally (1 action, once a season), Drill, Give, the stores", f
   var m = s.crew.morale;
   eq(PC.crew.give(s, 300), 5); // 300 / 12 hands / 5 = 5
   eq(s.crew.morale, m + 5); eq(s.money.purse, 0);
+  // One unit per 5 hands, rounded up: 12 hands need 3 (Playtest Pins 0.8, #24).
+  eq(PC.crew.storesNeeded(s), 3);
+  PC.node.buyGood(s, "Kill-devil rum", 2);
+  eq(PC.crew.storeChoices(s).length, 0, "two units won't open the stores for 12 hands");
   PC.node.buyGood(s, "Kill-devil rum", 1);
   eq(PC.crew.storeChoices(s).length, 1);
   m = s.crew.morale;
   PC.crew.openStores(s, "Kill-devil rum");
-  eq(s.crew.morale, m + 5);
+  eq(s.crew.morale, m + 3, "kill-devil gives 3");
 });
 
 test("Make an Example is only for a Sullen or Mutinous crew", function () {
@@ -3095,24 +3099,32 @@ test("Drunken Sailors: 30 units, ×1.5 for clean during the errand; done: Horace
   eq(s.money.crew - crew, Math.round(5 * price * 1.25));
 });
 
-test("The Apprentices: cover for them (clean) earns a free repair; a setback costs the action and the season", function () {
+test("The Apprentices: cover for them (clean, no action) earns a free repair; a fixing setback costs the action and the season", function () {
   var s = m7("nf11"); PC.world.sail(s, "norfolk"); s.location.popup = null;
   PC.node.enter(s, "docks"); ok(s.npcs.christoph.met);
   PC.scenes.enterScene(s, "nor_appr");
   var ap = s.ap.left, r0 = PC.npcs.rung(s, "christoph");
   pick(s, /^Go easy on them/, [6, 6]);
-  eq(s.ap.left, ap - 1); eq(PC.npcs.rung(s, "christoph"), r0 + 1); ok(s.flags.nor_free_repair && s.flags.nor_appr_done);
+  eq(s.ap.left, ap, "talking them round costs no action (Playtest Pins 0.8, #18)"); eq(PC.npcs.rung(s, "christoph"), r0 + 1); ok(s.flags.nor_free_repair && s.flags.nor_appr_done);
   s.ship.hull = s.ship.hullMax - 2; var crew = s.money.crew;
   var rep = PC.node.repair(s, 2);
   ok(rep.free); eq(s.money.crew, crew); ok(!s.flags.nor_free_repair);
   var t = m7("nf12"); PC.world.sail(t, "norfolk"); t.location.popup = null; PC.node.enter(t, "docks");
   PC.scenes.enterScene(t, "nor_appr"); pick(t, /^Let me take a look/, [1, 1]);
   eq(t.flags.nor_appr_failed, PC.scenes.seasonStamp(t)); ok(!t.flags.nor_appr_done);
+  var u = m7("nf12b"); PC.world.sail(u, "norfolk"); u.location.popup = null; PC.node.enter(u, "docks");
+  PC.scenes.enterScene(u, "nor_appr"); var apu = u.ap.left; pick(u, /^Go easy on them/, [1, 1]);
+  eq(u.ap.left, apu, "a talking setback costs no action either"); eq(u.flags.nor_appr_failed, PC.scenes.seasonStamp(u));
 });
 
-test("barkeep favors: one a season at each Tavern, by seed; clean moves the keeper up a rung for an action", function () {
+test("barkeep favors: on offer half the seasons by seed, once a season, no action; clean moves the keeper up a rung", function () {
   var s = m7("nf13"); PC.world.sail(s, "norfolk"); s.location.popup = null; s.flags.horace_met = true;
   PC.node.enter(s, "tavern");
+  // About half the seasons offer one (Playtest Pins 0.8, #22).
+  var offered = 0;
+  for (var i = 0; i < 200; i++) { var t = m7("nfo" + i); t.location = { node: "norfolk", place: "tavern", queue: [] }; t.flags.horace_met = true; if (PC.norfolk.favorOffer(t)) offered++; }
+  ok(offered > 70 && offered < 130, "about half: " + offered);
+  var keep = PC.data.norfolkRules.FAVOR_CHANCE; PC.data.norfolkRules.FAVOR_CHANCE = 1;
   var f = PC.norfolk.favorOffer(s);
   ok(f.ok); ok(/^fav_norfolk_[ab]_(fight|tab|bar)$/.test(f.scene)); eq(PC.norfolk.favorScene(s), f.scene);
   PC.scenes.enterScene(s, f.scene);
@@ -3120,10 +3132,11 @@ test("barkeep favors: one a season at each Tavern, by seed; clean moves the keep
   var v = PC.scenes.viewScene(s);
   ok(/Hey, you\. Yes, you\./.test(v.setup));
   withDice([6, 6], function () { PC.scenes.choose(s, v.choices[0].index); PC.scenes.commit(s); });
-  eq(PC.npcs.rung(s, "horace"), r0 + 1); eq(s.ap.left, ap - 1);
-  ok(!PC.norfolk.favorOffer(s).ok, "once a season");
+  eq(PC.npcs.rung(s, "horace"), r0 + 1); eq(s.ap.left, ap, "no action");
+  ok(!PC.norfolk.favorOffer(s), "once a season, then gone");
   var o = huntReady("nf14"); o.location.place = "tavern";
   ok(/^fav_ocracoke_o_/.test(PC.norfolk.favorScene(o)));
+  PC.data.norfolkRules.FAVOR_CHANCE = keep;
 });
 
 test("Variant C: Horace's wanted bill is lead 3, once", function () {
@@ -3132,6 +3145,20 @@ test("Variant C: Horace's wanted bill is lead 3, once", function () {
   ok(PC.quests.addLead(s, "what_was_lost", "gregoire_bill"));
   ok(PC.quests.journal(s).some(function (q) { return q.entries.some(function (e) { return /Gregoire LeGardier/.test(e); }); }));
   ok(/Gregoire LeGardier/.test(PC.text.render(PC.data.nodes.norfolk.lines.horaceAsk.billReply, s)) && !/\{waters\}/.test(PC.text.render(PC.data.nodes.norfolk.lines.horaceAsk.billReply, s)));
+});
+
+test("the split screen's mood word by gold a hand (Playtest Pins 0.8, #25)", function () {
+  eq(PC.world.handMood(0), "grumbling"); eq(PC.world.handMood(49), "grumbling"); eq(PC.world.handMood(50), "content");
+  eq(PC.world.handMood(149), "content"); eq(PC.world.handMood(150), "pleased"); eq(PC.world.handMood(300), "delighted");
+});
+
+test("the developer jump list includes Norfolk's scenes, and Arrive at Norfolk replays the first visit (Playtest Pins 0.8, #1)", function () {
+  ok(PC.devtools.jumpable().some(function (id) { return /^nor_fv1$/.test(id); }));
+  ok(PC.devtools.jumpable().some(function (id) { return /^ocr_/.test(id); }));
+  var s = m7("dvn"); PC.world.sail(s, "norfolk"); s.location.popup = null;
+  ok(s.seen.nor_fv1 || s.current.sceneId === "nor_fv1");
+  PC.devtools.arriveNorfolkFirst(s);
+  eq(s.location.node, "norfolk"); eq(s.current.sceneId, "nor_fv1");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

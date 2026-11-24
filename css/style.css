@@ -59,6 +59,8 @@ button:disabled { cursor: not-allowed; }
 .secondary, .btn { color: var(--ink); background: rgba(255,251,238,.6); border: 1px solid var(--rule); }
 .secondary:hover:not(:disabled), .btn:hover:not(:disabled) { background: rgba(201,159,69,.2); }
 .primary:disabled, .secondary:disabled, .btn:disabled { opacity: .5; }
+.secondary.outline { background: transparent; border: 2px solid var(--oxblood); color: var(--oxblood); } /* Sell (Playtest Pins 0.8, #8) */
+.svc h5 { margin: 12px 0 0; } .svc h5 + p.small { margin-top: 2px; } /* Buy and Sell sub-headings (Playtest Pins 0.8, #8) */
 .menubtn { display: inline-flex; align-items: center; gap: 6px; font-size: 18px; background: rgba(255,250,235,.45); border: 1px solid var(--rule); padding: 5px 11px; min-height: 40px; }
 .menubtn:hover { background: rgba(201,159,69,.2); }
 .menubtn svg { width: 18px; height: 18px; }
@@ -351,6 +353,15 @@ textarea.note-box { width: 100%; font: inherit; font-size: 18px; padding: 8px 10
 .card .small { color: var(--faded); }
 .card.on { border: 2px solid var(--oxblood); background: rgba(201,159,69,.2); padding: 8px 11px; }
 .card.on b::before { content: "✓ "; color: var(--oxblood); }
+/* The mentor's two trait groups, each its own color (Playtest Pins 0.8, #4). */
+.traitgroup { border-left: 4px solid var(--sea); padding-left: 10px; margin: 10px 0; }
+.traitgroup.voice h3 { color: var(--sea); }
+.traitgroup.secondary { border-left-color: var(--good); }
+.traitgroup.secondary h3 { color: var(--good); }
+.traitgroup.voice .card.on { border-color: var(--sea); background: rgba(35,80,102,.14); }
+.traitgroup.voice .card.on b::before { color: var(--sea); }
+.traitgroup.secondary .card.on { border-color: var(--good); background: rgba(47,90,34,.14); }
+.traitgroup.secondary .card.on b::before { color: var(--good); }
 .card.blocked, .card:disabled { opacity: .5; }
 .card .lock { color: var(--bad); }
 .cycler { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 16px 0; }
@@ -597,6 +608,11 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .mapnode .lab { font-family: var(--sc); font-size: 17px; letter-spacing: .04em; color: var(--ink); background: rgba(239,227,198,.85); padding: 0 6px; border-radius: 2px; white-space: nowrap; }
 .mapnode.ocean .dot { width: 14px; height: 14px; background: var(--sea); border-radius: 3px; transform: rotate(45deg); }
 .mapnode.uncharted { opacity: .45; }
+/* Live places bold; Uncharted names smaller and lighter, and on a phone only
+   when tapped (Playtest Pins 0.8, #2). */
+.mapnode.live .lab { font-weight: bold; font-size: 18px; }
+.mapnode.uncharted .lab { font-size: 13.5px; color: var(--faded); background: rgba(239,227,198,.6); }
+@media (hover: none), (pointer: coarse) { .mapnode.uncharted:not(.sel) .lab { display: none; } }
 .mapnode.uncharted .dot { background: #8c7a5a; }
 .mapnode.here .dot { box-shadow: 0 0 0 1.5px #4a3418, 0 0 0 6px rgba(201,159,69,.55); }
 .mapnode.live:hover .lab, .mapnode.sel .lab, .mapnode:focus-visible .lab { background: #f6ecd4; outline: 2px solid var(--gilt); }

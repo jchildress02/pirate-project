@@ -86,6 +86,8 @@
       s.choices.forEach(function (ch, i) {
         var cw = w + " choice " + (ch.id || i);
         checkText(cw + " label", ch.label);
+        // Italic action labels start with a capital (§33.3.4; Playtest Pins 0.8, #12).
+        if (typeof ch.label === "string" && /^\*[a-z]/.test(ch.label)) warn(cw, "italic action label should start with a capital (§33.3.4)");
         checkCond(cw + " lockedUnless", ch.lockedUnless);
         checkCond(cw + " hiddenUnless", ch.hiddenUnless);
         // An empty list means "Approval: none" in the record; only a missing list is a slip.

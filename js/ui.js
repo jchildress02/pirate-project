@@ -408,7 +408,7 @@
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
       (state.location && PC.weather ? wxBadge(PC.weather.outlook(state, PC.weather.zoneHere(state)), "This season's weather here (" + PC.weather.zoneHere(state) + ")") : "") +
       // On a phone the strip scrolls away, so the gold rides in the sticky bar (the author's phone notes).
-      '<span class="pgold">Purse ' + gold(state.money.purse) + " · Crew " + gold(state.money.crew) + "</span>" +
+      '<span class="pgold">Purse · ' + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) + "</span>" +
       '<span class="grow"></span>' + seal() +
       '<div class="line2">' + b("menu", "Menu", "menu") + b("journal", "Journal", "journal") + b("rumor", "Rumors", "rumors") + b("captain", "Captain", "captain") + b("ship", "Ship", "ship") + "</div></header>";
   }
@@ -460,7 +460,7 @@
   function phoneStrip() {
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
-      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse " + gold(state.money.purse) + " · Crew " + gold(state.money.crew) +
+      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
       "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + state.provisions + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
@@ -584,7 +584,13 @@
       var rx = PC.officers.reactions(o, tags);
       var up = rx.reduce(function (a, r) { return a + r.dir; }, 0);
       if (!up) return null;
-      var why = rx.filter(function (r) { return r.dir === (up > 0 ? 1 : -1); }).map(function (r) {
+      var shown = rx.filter(function (r) { return r.dir === (up > 0 ? 1 : -1); });
+      // A hidden drive or fear that reacts to the same tag as a known trait
+      // adds nothing on screen (Playtest Pins 0.8, #13/#20: Davey's Jovial
+      // and his hidden drive both like revelry).
+      var known = shown.filter(function (r) { return !r.hidden; }).map(function (r) { return r.tag + "|" + r.dir; });
+      shown = shown.filter(function (r) { return !r.hidden || known.indexOf(r.tag + "|" + r.dir) < 0; });
+      var why = shown.map(function (r) {
         var src = r.source || (r.hidden === "fear" ? "A fear " + (o.gender === "f" ? "she" : "he") + " hasn't told you" : r.hidden === "drive" ? "A drive " + (o.gender === "f" ? "she" : "he") + " hasn't told you" : "Their nature");
         return src + ": " + (r.dir > 0 ? "likes " : "dislikes ") + r.tag;
       }).join("; ");
@@ -865,7 +871,7 @@
     dests.forEach(function (d) {
       var cls = "mapnode" + (d.ocean ? " ocean" : "") + (d.live ? " live" : " uncharted") + (d.here ? " here" : "") + (mapSel === d.id ? " sel" : "");
       html += '<button class="' + cls + '" style="left:' + (d.x * 100) + "%;top:" + (d.y * 100) + '%" data-act="mapsel" data-node="' + esc(d.id) + '" title="' + esc(d.live ? d.label : d.label + ": " + PC.data.world.lines.uncharted) + '">' +
-        '<span class="dot"></span><span class="lab">' + esc(d.label) + (d.here ? " (here)" : "") + "</span></button>";
+        '<span class="dot"></span><span class="lab"' + (d.labelDx || d.labelDy ? ' style="transform:translate(' + d.labelDx + "px," + d.labelDy + 'px)"' : "") + ">" + esc(d.label) + (d.here ? " (here)" : "") + "</span></button>";
     });
     html += "</div></div>";
     var sel = mapSel && dests.filter(function (d) { return d.id === mapSel; })[0];
@@ -922,12 +928,15 @@
         "<tr><td>The chest</td><td>" + gold(p.pool) + "</td></tr><tr><td>Held back for next time (10%)</td><td>" + gold(p.carry) + "</td></tr>" +
         "<tr><td>One share</td><td>" + gold(p.one) + "</td></tr><tr><td>Your share, into your purse</td><td>+" + gold(p.captain) + "</td></tr>" +
         "<tr><td>Your officers</td><td>" + gold(p.officers) + "</td></tr><tr><td>" + plural(p.handsN, "hand") + "</td><td>" + gold(p.hands) + "</td></tr></table>";
+      html += '<p>' + esc(S.perHand.replace("{gold}", gold(p.one)).replace("{mood}", PC.world.handMood(p.one))) + "</p>";
       html += chips([{ icon: "morale", text: "Crew morale reset to " + state.crew.morale }, { icon: "pressure", text: "The crew's grievances are settled" }, { icon: "ap", text: "The Winter's 7 actions are spent" }]);
       return html + '<div class="actions"><button class="primary" data-act="splitdepart" data-top="1">Continue</button></div>';
     }
     if (sp.step === "resign") {
       var dd = sp.departed || {};
-      html += '<div class="prose">' + prose(S.departures) + "</div>" + chips([{ icon: "officer", text: plural(dd.left || 0, "hand") + " went ashore for good", ink: "bad" }, { icon: "officer", text: plural(dd.back || 0, "hand") + " signed on again", ink: "good" }, { icon: "officer", text: plural(state.crew.count, "hand") + " aboard your flagship" }]);
+      html += '<div class="prose">' + prose(S.departures) + "</div>" +
+        '<p>' + esc(S.crewLine.replace("{skeleton}", dd.skeleton || 0).replace("{left}", dd.left || 0).replace("{back}", dd.back || 0).replace("{aboard}", state.crew.count)) + "</p>" +
+        chips([{ icon: "officer", text: plural(dd.left || 0, "hand") + " went ashore for good", ink: "bad" }, { icon: "officer", text: plural(dd.back || 0, "hand") + " signed on again", ink: "good" }, { icon: "officer", text: plural(state.crew.count, "hand") + " aboard your flagship" }]);
       html += '<div class="prose">' + prose(S.resign) + "</div>";
       if (!state.articles) return html + '<div class="actions"><button class="primary" data-act="splitarticles">Draw up the Articles</button></div>';
       return html + '<p class="note">The Articles are signed.</p><div class="actions"><button class="primary" data-act="splitvote" data-top="1">Continue</button></div>';
@@ -1007,6 +1016,8 @@
       html += '<p class="note" style="max-width:680px">This is your first visit to the Tavern. Ask ' + esc(PC.npcs.get(state, keeper).first) + " for rumors" +
         (N().oneArmedHere(state) ? ", talk to the one-armed pirate" : "") + ", or leave; the rest opens once your first visit is done.</p>";
     }
+    // "At the bar" sits above the patrons and officers (Playtest Pins 0.8, #21).
+    html += nodeExtras("tavern");
     html += DIVIDER + '<div class="block"><div class="h4">Around the Tavern</div>' + sayFor("around");
     var list2 = [];
     if (N().oneArmedHere(state)) list2.push(opt({ act: "oneArmed", label: "Talk to the one-armed pirate", meta: "He sits with his mates, drinking." }));
@@ -1024,7 +1035,7 @@
         return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
       }).join("") + "</div></div>";
     }
-    return html + "</div>" + nodeExtras("tavern") + DIVIDER + officersBlock();
+    return html + "</div>" + DIVIDER + officersBlock();
   }
 
   // Norfolk's own entries and the barkeep favor (Milestone 7, PR 5; records
@@ -1034,7 +1045,7 @@
     if (place === "tavern") {
       var fav = PC.norfolk.favorOffer(state);
       if (fav) list.push(opt({ act: "enter", attrs: 'data-scene="' + esc(fav.scene) + '"', label: "A favor for " + esc(PC.npcs.get(state, who("keeper")).first),
-        meta: "Once a season · no action to hear him out, 1 to do it. Clean: he thinks better of you. Partial: the same, at a cost.", lock: fav.ok ? null : fav.why }));
+        meta: PC.text.render("Once a season · no action. Clean: {keeper.he} thinks better of you. Partial: the same, at a cost.", state), lock: fav.ok ? null : fav.why }));
       if (id === "norfolk" && f.horace_met) {
         var NL = N().nodeData(id).lines;
         if (!f.nor_drunken_sailors) list.push(opt({ act: "dsask", label: f.asked_horace_help ? NL.drunkenSailors.askAgain : NL.drunkenSailors.ask, meta: "No action" }));
@@ -1050,13 +1061,18 @@
         }
       }
     }
-    if (place === "docks" && id === "norfolk" && (state.npcs.christoph || {}).met && !f.nor_appr_done) {
-      var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
-      list.push(opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
-        meta: "The Apprentices · 1 action to help", lock: failed ? "Christoph wants you away from his ship until next season" : state.ap.left < 1 ? "No actions left this season" : null }));
-    }
     if (!list.length) return "";
     return DIVIDER + '<div class="block"><div class="h4">' + (place === "tavern" ? "At the bar" : "Around the yard") + "</div>" + opts(list) + "</div>";
+  }
+
+  // The Apprentices' opening question sits right under Christoph's line
+  // (Playtest Pins 0.8, #17). Talking them round costs no action (#18).
+  function apprenticesOpt() {
+    var id = N().here(state), f = state.flags;
+    if (id !== "norfolk" || !(state.npcs.christoph || {}).met || f.nor_appr_done) return "";
+    var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
+    return opts([opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
+      meta: "The Apprentices · talking him round costs no action; fixing it yourself, 1", lock: failed ? "Christoph wants you away from his ship until next season" : null })]);
   }
 
   // Officer recruitment (§25.7): two seats a season.
@@ -1113,6 +1129,7 @@
     var g = N().shipwrightGreeting(state);
     var html = '<div class="block">' + nameCard(wright, "Shipwright");
     html += state.location.say && state.location.say.to === wright ? sayFor(wright) : '<div class="say">' + inline(g.line) + "</div>";
+    html += apprenticesOpt();
     if (!g.refuse) {
       html += shipLine();
       var missing = sh.hullMax - sh.hull;
@@ -1315,17 +1332,23 @@
       html += haggleBlock(prov);
       var pp = N().provisionsPrice(state);
       var provMax = Math.min(free, afford(pp));
-      html += '<div class="svc"><h4>Provisions</h4><p class="small">' + gold(pp) + " gold a lot. One lot feeds 5 hands for an action at sea.</p>" +
-        (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="secondary" data-act="buyprov" data-for="q-prov">Buy provisions</button></div>' +
-          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return gold(n * pp) + " gold · aboard after: " + (state.provisions + n) + " lots, " + timeAtSea(state.provisions + n); }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
-        '<p class="small">Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+      // Buy and Sell look different (Playtest Pins 0.8, #8): own sub-headings,
+      // Buy filled and Sell outlined, "You pay" / "They pay", and what you'd
+      // have after the trade.
+      var onHand = function () { return state.money.crew + state.money.purse; };
+      html += '<div class="svc"><h4>Provisions</h4><p class="small">One lot feeds 5 hands for an action at sea. Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+        '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(pp) + " gold each.</p>" +
+        (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="primary" data-act="buyprov" data-for="q-prov">' +
+          totalSlot(function () { return "Buy · " + gold(val("q-prov") * pp); }, "") + "</button></div>" +
+          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (state.provisions + n) + " lots aboard (" + timeAtSea(state.provisions + n) + ") · " + gold(onHand() - n * pp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
         // R7: provisions sell back at half his price, out of his coffers.
         (state.provisions > 0 ? (function () {
           var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
           var smax = Math.max(1, Math.min(state.provisions, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
-          return '<p class="small" style="margin-top:8px">He buys provisions back at ' + gold(sp) + " gold a lot.</p>" +
-            '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
-            totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>";
+          return '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
+            '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary outline" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
+            totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>" +
+            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, state.provisions - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
         })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
@@ -2262,11 +2285,21 @@
 
   function menuHtml() {
     if (!menu) return dialogHtml();
-    var body = menu === "menu" ? menuMain() : menu === "settings" ? menuSettings() : !state ? "" :
-      menu === "journal" ? menuJournal() : menu === "rumors" ? menuRumors() : menu === "captain" ? menuCaptain() : menu === "notes" ? menuNotes() : menu === "ship" ? menuShip() :
-      menu === "dev" ? menuDev() : menu.indexOf("officer:") === 0 ? menuOfficer(menu.slice(8)) : "";
+    var body;
+    try { body = menuBody(); } catch (err) {
+      // A menu that fails to draw closes instead of jamming every redraw (Bug Log B2).
+      if (globalThis.console) console.error(err);
+      menu = null;
+      return dialogHtml();
+    }
     return '<div class="modal" data-act="closemenu"><div class="panel' + (menu === "captain" || menu === "dev" || menu === "ship" ? " wide" : "") + '" data-stop="1">' +
       '<button class="secondary close" data-act="closemenu" aria-label="Close">' + ic("x") + "</button>" + body + "</div></div>" + dialogHtml();
+  }
+
+  function menuBody() {
+    return menu === "menu" ? menuMain() : menu === "settings" ? menuSettings() : !state ? "" :
+      menu === "journal" ? menuJournal() : menu === "rumors" ? menuRumors() : menu === "captain" ? menuCaptain() : menu === "notes" ? menuNotes() : menu === "ship" ? menuShip() :
+      menu === "dev" ? menuDev() : menu.indexOf("officer:") === 0 ? menuOfficer(menu.slice(8)) : "";
   }
 
   function menuMain() {
@@ -2446,9 +2479,10 @@
       (state.location ? grp("Story", (PC.devtools && PC.devtools.skipQuests ? '<div class="actions">' + b("devskip", "Skip the mandatory quests") + "</div>" : "") +
         '<p class="small">Loss variant: ' + ["A", "B", "C"].map(function (x) { return '<button class="' + (state.captain.loss === x ? "primary" : "secondary") + '" data-act="devloss" data-loss="' + x + '">' + x + "</button>"; }).join(" ") +
         " · Frisian posture: " + PC.state.POSTURES.map(function (p) { return '<button class="' + (state.world.posture === p ? "primary" : "secondary") + '" data-act="devposture" data-posture="' + p + '">' + p + "</button>"; }).join(" ") + "</p>" +
-        '<p class="small">Jump to a scene: <select class="devscene">' + Object.keys(PC.data.scenes).filter(function (id) { return id.indexOf("ocr_") === 0; }).map(function (id) {
+        '<p class="small">Jump to a scene: <select class="devscene">' + PC.devtools.jumpable().map(function (id) {
           return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
-        }).join("") + "</select> " + b("devjump", "Go") + "</p>") : "") +
+        }).join("") + "</select> " + b("devjump", "Go") + "</p>" +
+        '<div class="actions">' + b("devnorfolk", "Arrive at Norfolk (first visit)") + "</div>") : "") +
       (state.location ? grp("The hunt", '<p class="small">Next sighting: ' + b("devforce", "Avalon hunter", ' data-kind="hunter" data-flag="Avalon"') + b("devforce", "Frisian hunter", ' data-kind="hunter" data-flag="Frisia"') +
         b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
         b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
@@ -2457,7 +2491,12 @@
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
       grp("Info", '<p class="small">World seed ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
-        (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) { var g = state.generated[sl.id]; return esc(sl.label + ": " + g.full + " (" + (g.gender === "f" ? "woman" : "man") + ", " + g.age + "; " + g.traits.join(", ") + ")"); }).join(" · ") + "</p>" : "") +
+        (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) {
+          // Fixed Named NPCs (Horace, Christoph) live in PC.data.npcs, not state.generated (Bug Log B2).
+          var g = state.generated[sl.id] || (PC.data.npcs || {})[sl.id];
+          if (!g) return esc(sl.label + ": (none)");
+          var full = g.full || [g.first, g.last].filter(Boolean).join(" ");
+          return esc(sl.label + ": " + full + " (" + (g.gender === "f" ? "woman" : "man") + (g.age ? ", " + g.age : "") + "; " + (g.traits || []).join(", ") + ")" + (sl.fixed ? " · Named" : "")); }).join(" · ") + "</p>" : "") +
         "<p><b>Content check: errors</b></p>" + list(v.errors) + "<p><b>Warnings</b></p>" + list(v.warnings));
   }
 
@@ -3114,7 +3153,7 @@
     opts = opts || {};
     var on = act === "pick" ? getField(field) === value : (getField(field) || []).indexOf(value) >= 0;
     var blocked = !on && (opts.blocked || opts.full);
-    return '<button class="card' + (on ? " on" : "") + (blocked ? " blocked" : "") + '" data-act="' + act + '" data-field="' + field + '" data-value="' + esc(value) + '"' +
+    return '<button class="card' + (on ? " on" : "") + (blocked ? " blocked" : "") + '" data-act="' + act + '"' + (opts.unpick ? ' data-unpick="1"' : "") + ' data-field="' + field + '" data-value="' + esc(value) + '"' +
       (opts.max ? ' data-max="' + opts.max + '"' : "") + (blocked ? " disabled" : "") + ' aria-pressed="' + on + '">' +
       "<b>" + esc(title) + "</b>" + (body ? '<span class="small">' + esc(body) + "</span>" : "") + (opts.extra || "") +
       (!on && opts.blocked ? '<span class="small lock">' + esc(opts.blocked) + "</span>" : "") + "</button>";
@@ -3294,16 +3333,22 @@
       "<h3>Type</h3>" + '<div class="cards">' + Dc.OFFICER_TYPES.map(function (t) {
         return card("pick", "mentor.type", t.id, t.id, t.perk + ". Teaches: " + t.lessons + ".");
       }).join("") + "</div>";
+    // Two labeled groups, each its own color (Playtest Pins 0.8, #4). Once
+    // one is picked the rest of that group grey out; tap the pick again to
+    // clear it.
     function traitCards(field, blockFn) {
+      var picked = getField(field);
       return ["warm", "neutral", "cold"].map(function (w) {
         return "<h4>" + { warm: "Warm", neutral: "Steady", cold: "Dark" }[w] + '</h4><div class="cards small-cards">' +
           Dc.OFFICER_TRAITS.filter(function (t) { return t.warmth === w; }).map(function (t) {
-            return card("pick", field, t.id, t.id, t.hook + ". Likes " + t.likes + ", dislikes " + t.dislikes + ".", { blocked: blockFn ? blockFn(t.id) : null });
+            return card("pick", field, t.id, t.id, t.hook + ". Likes " + t.likes + ", dislikes " + t.dislikes + ".",
+              { blocked: blockFn ? blockFn(t.id) : null, full: !!picked && picked !== t.id, unpick: true });
           }).join("") + "</div>";
       }).join("");
     }
-    html += '<h3>Voice trait</h3><p class="note">How your mentor talks and what they care about.</p>' + traitCards("mentor.voice") +
-      "<h3>Secondary trait</h3>" + (draft.mentor.voice ? traitCards("mentor.secondary", function (id) { return C.secondaryBlocked(draft, id); }) : '<p class="note">Pick a voice trait first.</p>') +
+    var picks = function (v) { return v ? ' <span class="note">· picked: ' + esc(v) + " (tap it again to change)</span>" : ""; };
+    html += '<div class="traitgroup voice"><h3>Voice trait (pick 1)' + picks(draft.mentor.voice) + '</h3><p class="note">How your mentor talks and what they care about.</p>' + traitCards("mentor.voice") + "</div>" +
+      '<div class="traitgroup secondary"><h3>Secondary trait (pick 1)' + picks(draft.mentor.secondary) + "</h3>" + (draft.mentor.voice ? traitCards("mentor.secondary", function (id) { return C.secondaryBlocked(draft, id); }) : '<p class="note">Pick a voice trait first.</p>') + "</div>" +
       '<p class="note">Your mentor\'s drive and fear are rolled when the game begins, and stay hidden until you learn them.</p>';
     return html;
   }
@@ -3379,7 +3424,9 @@
     },
     "pick": function (el) {
       var f = el.dataset.field, v = el.dataset.value;
+      if (el.dataset.unpick && getField(f) === v) v = null; // tap a pick again to clear it
       setField(f, v);
+      if (f === "mentor.voice" && !v) draft.mentor.secondary = null;
       if (f === "profession") PC.creator.fitToProfession(draft);
       if (f === "mentor.voice" && draft.mentor.secondary && PC.creator.secondaryBlocked(draft, draft.mentor.secondary)) draft.mentor.secondary = null;
     },
@@ -3509,7 +3556,8 @@
     },
     "quickstart": function () {
       dialog = null; menu = null;
-      state = PC.state.newGame(PC.data.testCaptain);
+      // Quick start brings the test mentor, Jesse Dew (Playtest Pins 0.8, #3).
+      state = PC.state.newGame(Object.assign({}, PC.data.testCaptain, { officers: [PC.data.testMentor] }));
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; creating = false; menu = null; },
@@ -3597,11 +3645,10 @@
     "devheat": function (el) { state.meters.heat[el.dataset.f] = Number(el.dataset.v); },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {
-      var id = document.querySelector(".devscene").value;
-      if (state.location) state.location.place = /_(uw|oap)/.test(id) ? "tavern" : /_rr_/.test(id) ? "docks" : null;
-      PC.scenes.enterScene(state, id);
+      PC.devtools.jumpTo(state, document.querySelector(".devscene").value);
       menu = null;
     },
+    "devnorfolk": function () { menu = null; PC.devtools.arriveNorfolkFirst(state); },
     "devnewseason": function () {
       menu = null;
       if (!state.location) { PC.scenes.endSeason(state); return; }

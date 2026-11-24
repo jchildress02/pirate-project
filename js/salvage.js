@@ -329,7 +329,9 @@
     game.kept = kept;
     kept.filter(function (i) { return i.tier === "junk"; }).forEach(function (i) { M().say(state, game, D().lines.junkPrefix + i.line + "."); });
     var valuable = kept.filter(function (i) { return i.tier === "treasure" || i.tier === "item" || i.tier === "goods"; }).length;
-    if (!game.miranda) M().say(state, game, valuable ? D().lines.goodHaul : D().lines.poorHaul);
+    // No "you spot something valuable" after surfacing: the haul is already
+    // found (Playtest Pins 0.8, #9). Only a poor haul gets a line.
+    if (!game.miranda && !valuable) M().say(state, game, D().lines.poorHaul);
     if (game.miranda && !game.questFound) M().say(state, game, D().lines.mermaidMissed);
     game.gold = kept.reduce(function (s, i) { return s + (i.gold || 0); }, 0);
     if (!game.gold) bank(state, game, null);

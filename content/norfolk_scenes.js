@@ -44,6 +44,7 @@
     TIMBER_BILL: 100,       // The Apprentices, fix it, partial (ruled placeholder)
     FAVOR_COST: 25,         // DEFAULT: a barkeep favor's partial "at a cost" (§16.6 names none)
     FAVOR_TYPES: ["fight", "tab", "bar"],
+    FAVOR_CHANCE: 0.5,              // on offer in half the seasons, by seed (Playtest Pins 0.8, #22; placeholder)
     FAVORS: { norfolk: ["a", "b"], ocracoke: ["o"] },
   };
 
@@ -151,7 +152,7 @@
       { when: { fn: "qmWarmth:neutral" }, text: "\"I don't know about you, but I certainly wouldn't want to tangle with her,\" [Quartermaster] says of the flagship.\n\n" },
       { when: { fn: "qmWarmth:cold" }, text: "\"Don't let her size fool you; she's only as good as her captain,\" cautions [Quartermaster]. \"And the Scottish navy has a rather spotty track record in that department.\"\n\n" },
       "As you pull slowly into the harbor, giving the fleet a wide berth, you take notice of the infrastructure required to support a fleet like that. Spacious warehouses and sturdy wharves line the waterfront, and a small army of porters, sailors, and craftsmen work at a brisk pace up and down the length of the docks.\n\n",
-      "As your crew ties {ship} up at one of the many docks and you disembark, you're met by a bookish man in an official-looking gold uniform, with his spectacles pushed to the end of his nose, carrying a thick ledger underneath his arm. He's flanked by two uniformed soldiers carrying polished muskets.\n\n",
+      "As your crew ties the {ship} up at one of the many docks and you disembark, you're met by a bookish man in an official-looking gold uniform, with his spectacles pushed to the end of his nose, carrying a thick ledger underneath his arm. He's flanked by two uniformed soldiers carrying polished muskets.\n\n",
       { when: { tag: "Brute" }, text: "The soldiers' hands tense around their muskets as they watch you step onto the docks.\n\n" },
       "\"Welcome to Norfolk,\" he says in a nasally voice. \"The fee to dock here is {port_fee}. May I inquire as to the purpose of your visit?\" Judging by the soldiers, the question doesn't stem from innocent curiosity.",
     ],
@@ -367,6 +368,9 @@
   // ---- The Apprentices (Part 4 §10; partials ruled) -------------------------------------
 
   var APP_SET = { setback: R("You only make things worse. Christoph shoos you away from his ship. \"Out, before you sink her at the dock!\"", [{ ap: -1 }, { seasonFlag: "nor_appr_failed" }]) };
+  // Talking them round costs no action, even on a setback (Playtest Pins 0.8, #18; was PH24's 1 AP).
+  var NEED_AP = { lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" };
+  APP_SET.talkSetback = R(APP_SET.setback.text, [{ seasonFlag: "nor_appr_failed" }]);
   var DONE = { flag: "nor_appr_done" };
   S("nor_appr", {
     kind: "check", title: "The Apprentices", where: "Norfolk, the Dockyard", repeat: "always", manyChoices: true,
@@ -375,24 +379,25 @@
       K("Let me take a look.", [], { type: "Repair & Refit", dr: 2 },
         R("By sundown the planks sit flush. Christoph runs his hand along the seams. \"Not bad. Not bad at all.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
         R("The planks sit flush at last, but only after you've split half a stack of good timber. Christoph sighs and hands you the bill.", [{ ladder: { npc: "christoph", delta: 1 } }, { hook: "pay_gold", amount: 100 }, DONE, { ap: -1 }]),
-        APP_SET.setback),
+        APP_SET.setback, NEED_AP),
       C("Would a more experienced assistant help? I've got a hand who knows his way around a hull.", ["Generosity"],
         R("Within the hour, the boys are following your man's lead. \"Now this is more like it,\" Christoph says. \"I owe you, Captain.\"", [{ hook: "lose_hand" }, { ladder: { npc: "christoph", delta: 2 } }, DONE]),
         { hiddenUnless: { fn: "seasonedHand" } }),
       K("Go easy on them. They're boys, and they're still learning. Remember what you were like at that age?", ["Generosity"], { type: "Persuade", dr: 2 },
-        R("Christoph glares at the timber, then at the boys. \"At least I had a hair more respect back then. But I take your point. I'll give them one more chance.\" The chastened boys look at you like you hung the moon.", [{ ladder: { npc: "christoph", delta: 1 } }, { flag: "nor_free_repair" }, DONE, { ap: -1 }]),
-        R("Christoph grumbles, but agrees to give the boys another chance. \"Don't expect any favors for it, though.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
-        APP_SET.setback),
+        R("Christoph glares at the timber, then at the boys. \"At least I had a hair more respect back then. But I take your point. I'll give them one more chance.\" The chastened boys look at you like you hung the moon.", [{ ladder: { npc: "christoph", delta: 1 } }, { flag: "nor_free_repair" }, DONE]),
+        R("Christoph grumbles, but agrees to give the boys another chance. \"Don't expect any favors for it, though.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE]),
+        APP_SET.talkSetback),
       C("Hand me that saw. I'll show them how it's done.", [],
         R("By sundown the planks sit flush. Christoph runs his hand along the seams. \"Not bad. Not bad at all.\"", [{ ladder: { npc: "christoph", delta: 1 } }, DONE, { ap: -1 }]),
-        { hiddenUnless: { profession: "Artisan" } }),
+        Object.assign({ hiddenUnless: { profession: "Artisan" } }, NEED_AP)),
       C("Sounds like your problem, not mine.", [], R("")),
     ],
   });
 
   // ---- Barkeep favors (§16.6; Part 4 §10) --------------------------------------------------
-  // fav_<node>_<set>_<type>: once a season; 0 AP to accept, 1 to do. Clean:
-  // the keeper +1 rung; partial: +1 at a cost; setback: nothing.
+  // fav_<node>_<set>_<type>: on offer in a season on a seeded 50% roll, once
+  // a season, and it costs no action (Playtest Pins 0.8, #22; was PH22's
+  // 1 AP). Clean: the keeper +1 rung; partial: +1 at a cost; setback: nothing.
 
   var HORACE_DONE = "\n\n\"Well, that could have gone worse.\"";
   function favor(node, set, type, setup, approaches, outs) {
@@ -403,50 +408,50 @@
       kind: "check", repeat: "season", setup: offer + setup, manyChoices: true,
       choices: approaches.map(function (a) {
         return K(a.label, a.approval, a.check,
-          R(outs[0] + done, [{ hook: "keeper_rung", delta: 1 }, { ap: -1 }]),
-          R(outs[1], [{ hook: "keeper_rung", delta: 1 }, { hook: "pay_gold", amount: 25 }, { ap: -1 }]),
-          R(outs[2], [{ ap: -1 }]),
-          a.more || { lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" });
+          R(outs[0] + done, [{ hook: "keeper_rung", delta: 1 }]),
+          R(outs[1], [{ hook: "keeper_rung", delta: 1 }, { hook: "pay_gold", amount: 25 }]),
+          R(outs[2], []),
+          a.more || {});
       }).concat([C("Not tonight.", [], R(""))]),
     }, place));
   }
   var FIGHT = function (l1, l2) { return [{ label: l1, approval: ["Risk"], check: { type: "Brawling", dr: 2 } }, { label: l2, approval: ["Order"], check: { type: "Intimidate", dr: 2 } }]; };
   var TAB = function (l1, l2, merchant) {
     var a = [{ label: l1, approval: ["Honor"], check: { type: "Persuade", dr: 2 } }, { label: l2, approval: ["Order"], check: { type: "Intimidate", dr: 2 } }];
-    if (merchant) a.push({ label: merchant, approval: ["Honor"], check: { type: "Persuade", dr: 1 }, more: { hiddenUnless: { profession: "Merchant" }, lockedUnless: { fn: "hasAp" }, lockedReason: "No actions left this season" } });
+    if (merchant) a.push({ label: merchant, approval: ["Honor"], check: { type: "Persuade", dr: 1 }, more: { hiddenUnless: { profession: "Merchant" } } });
     return a;
   };
   var BAR = function (l) { return [{ label: l, approval: ["Revelry"], check: { type: "Tavern Talk", dr: 2 } }]; };
 
   // Horace, set A
   favor("norfolk", "a", "fight", "A scuffle between two marines has turned into an all-out brawl. Horace points their way. \"Would you mind doing something about them?\"",
-    FIGHT("*walk up and start swinging*", "Break it up, or you won't have teeth by the end of the night."),
+    FIGHT("*Walk up and start swinging*", "Break it up, or you won't have teeth by the end of the night."),
     ["The marines slink back to their seats, rubbing their new bruises.", "You break it up, but not before a stool goes through the bay window.", "Someone's fist finds your jaw, and the whole room joins in."]);
   favor("norfolk", "a", "tab", "\"See the fancy lieutenant in the corner? He owes me forty in gold and a bottle of brandy. Go remind him.\"",
-    TAB("Let's settle up before your captain hears about this.", "*loom over him and crack your knuckles*", "Let's work out a payment plan."),
+    TAB("Let's settle up before your captain hears about this.", "*Loom over him and crack your knuckles*", "Let's work out a payment plan."),
     ["He pays up with a sheepish grin.", "He pays half, and spits on your boots for good measure.", "He laughs in your face and orders another round on Horace's tab."]);
   favor("norfolk", "a", "bar", "\"I need a smoke and some quiet. You're on the bar. Don't let Martha kill anyone.\"",
-    BAR("*pour with a flourish and start up a shanty*"),
+    BAR("*Pour with a flourish and start up a shanty*"),
     ["When Horace returns, the whole room is singing and the till is full.", "The till is full, but the floor is covered in broken glass.", "You lose count of the free drinks you've poured. Horace comes back to an empty till."]);
   // Horace, set B
   favor("norfolk", "b", "fight", "Two sailors are rolling across the floor, fighting over the last bottle of rum. Horace looks at you forlornly.",
-    FIGHT("*pull them apart by their belts*", "Next man to swing goes into the river."),
+    FIGHT("*Pull them apart by their belts*", "Next man to swing goes into the river."),
     ["They let go of each other, and the bottle.", "They stop, but the bottle smashes on the floor.", "They both turn on you."]);
   favor("norfolk", "b", "tab", "\"That fellow by the door has been drinking on credit for weeks. Think you could have a word?\"",
     TAB("Time to pay the man, friend.", "Pay up or I'll toss you in the river.", "Let's work out a payment plan."),
     ["He empties his pockets onto the bar.", "He hands over a few coins and a rusty knife.", "He bolts out the door and disappears down the alley."]);
   favor("norfolk", "b", "bar", "\"Watch the bar a minute, would you? And don't drink it all.\"",
-    BAR("*pour generous servings and tell your best story*"),
+    BAR("*Pour generous servings and tell your best story*"),
     ["Horace returns to a bar filled with raucous laughter.", "Everyone's happy, but the rum barrel is nearly empty.", "A brawl breaks out over your story's ending."]);
   // Ocracoke's keeper (role lines, †, approved)
   favor("ocracoke", "o", "fight", "Two pirates are rolling across the floor, fighting over the last bottle of kill-devil. The keeper looks at you hopefully.",
-    FIGHT("*pull them apart by their belts*", "Next man to swing goes in the sound."),
+    FIGHT("*Pull them apart by their belts*", "Next man to swing goes in the sound."),
     ["They let go of each other, and the bottle.", "They stop, but the bottle smashes on the floor.", "They both turn on you."]);
   favor("ocracoke", "o", "tab", "\"That fellow by the door has been drinking on credit since spring. Think you could have a word?\"",
-    TAB("Time to pay the man, friend.", "*rest your hand on your cutlass*", null),
+    TAB("Time to pay the man, friend.", "*Rest your hand on your cutlass*", null),
     ["He empties his pockets onto the bar.", "He hands over a few coins and a rusty knife.", "He bolts out the door and into the dunes."]);
   favor("ocracoke", "o", "bar", "\"Watch the bar a minute, would you? And don't drink it all.\"",
-    BAR("*pour generous measures and tell your best story*"),
+    BAR("*Pour generous measures and tell your best story*"),
     ["The sad sacks are laughing for the first time in weeks.", "Everyone's happy, but the rum barrel is nearly empty.", "A brawl breaks out over your story's ending."]);
 
   Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });

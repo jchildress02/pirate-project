@@ -135,7 +135,7 @@
         refuse: "\"Not even Bobby Rats will associate with you.\"",
         sold: "\"This deal is good for Bobby.\"",
         bigHaul: "\"Hold on, hold on! Give Bobby a second to count.\"",
-        capReached: "\"Bobby's got a serious case of empty pockets. Why don't you pay a visit to Bobby's old friend Declan in Edenton, or the pretty miss Maelis in Nassau?\"",
+        capReached: "\"Bobby's got a serious case of empty pockets. Why don't you pay a visit to Bobby's old friend Declan in Edenton, or the pretty Miss Maelis in Nassau?\"",
         nothing: "\"Nothing for Bobby? Too bad.\"",
         offeredClean: "\"What is Bobby supposed to do with this? Go take it to a normal merchant.\"",
         rungUp: "\"Bobby's made another friend! Some say he's got too many.\"",
