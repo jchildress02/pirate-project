@@ -770,7 +770,7 @@
     if (shipwrightGreeting(state).refuse) return { ok: false, why: "The yard won't deal with you" };
     var p = layUpPrice(state, f);
     if (!p.gate.ok) return { ok: false, why: p.gate.why, price: p };
-    if (laidUpHere(state).length >= layUpSlots(here(state))) return { ok: false, why: "The anchorage here is full (" + layUpSlots(here(state)) + (layUpSlots(here(state)) === 1 ? " ship" : " ships") + ")", price: p };
+    if (laidUpHere(state).length >= layUpSlots(here(state))) return { ok: false, why: "The anchorage here is full (" + layUpSlots(here(state)) + (layUpSlots(here(state)) === 1 ? " ship" : " ships") + ")", line: (nodeData(here(state)).lines.shipwright || {}).slotsFull, price: p };
     if (!PC.crew.canPay(state, p.up)) return { ok: false, why: "Needs " + p.up + " gold", price: p };
     return { ok: true, price: p };
   }
@@ -794,7 +794,7 @@
     (state.laidUp = state.laidUp || []).push({ ship: f, node: here(state), wasFleet: wasFleet, officer: officer, owed: 0, since: PC.state.stamp(state) });
     var thrown = PC.crew.jettisonOverflow(state);
     PC.state.addLog(state, "Laid up the " + (f.name || f.cls) + " at " + nodeData(here(state)).name + " for " + c.price.up + " gold.");
-    return { up: c.price.up, season: c.price.season, paid: paid, home: home, paidOff: paidOff, jettisoned: thrown, line: E().LAYUP.lines.laidUp };
+    return { up: c.price.up, season: c.price.season, paid: paid, home: home, paidOff: paidOff, jettisoned: thrown, line: (nodeData(here(state)).lines.shipwright || {}).laidUp || E().LAYUP.lines.laidUp };
   }
   function canRecover(state, fid) {
     var l = laidUpHere(state).filter(function (x) { return x.ship.id === fid; })[0];
@@ -826,7 +826,7 @@
     } else { f.kind = "prize"; f.officer = null; }
     state.fleet = (state.fleet || []).concat([f]);
     PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying " + l.owed + " gold for her anchorage" : "") + ".");
-    return { ship: f, kind: f.kind, officer: o ? o.first : null, owed: l.owed, line: E().LAYUP.lines.recovered };
+    return { ship: f, kind: f.kind, officer: o ? o.first : null, owed: l.owed, line: (nodeData(l.node).lines.shipwright || {}).recovered || E().LAYUP.lines.recovered };
   }
   // The season's charge (§20.4): 3% of hull value, run up at each season's
   // end and paid when she's taken back (the author's ruling, November 24).

@@ -100,7 +100,7 @@
     var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), id, "inspection", state.rolls.inspection = (state.rolls.inspection || 0) + 1].join("|"));
     if (r() >= p) return null;
     state.flags.insp_last = PC.state.stamp(state);
-    if (!dirtyStacks(state).length) return { line: R().lines.clean };
+    if (!dirtyStacks(state).length) return { line: ((nd(id).lines || {}).inspection || {}).clean || R().lines.clean };
     return { scene: "insp_search" };
   }
 
@@ -156,6 +156,7 @@
   PC.text.vars.insp_found_2 = function (state) { return bribeFound(state) * 2 + " gold"; };
   PC.text.vars.insp_crate = function (state) { return crate(state); };
   PC.text.vars.insp_port = function (state) { return nd(here(state)).name; };
+  PC.text.vars.insp_take_line = function (state) { return ((nd(here(state)).lines || {}).inspection || {}).takeIt || "PLACEHOLDER: His men carry the goods off as he writes your name in his ledger."; };
 
   PC.inspections = {
     kind: kind, chance: chance, onArrival: onArrival, dirtyStacks: dirtyStacks, foundValue: foundValue,

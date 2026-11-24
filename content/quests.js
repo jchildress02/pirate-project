@@ -59,6 +59,11 @@
   // Ocracoke's startup quests (§41.14). They live in scenes and flags, not in
   // state.quests; js/quests.js reads these to write their journal entries.
   PC.data.startupQuests = {
+    a_wanted_man: {
+      name: "A Wanted Man",
+      steps: { assigned: "Bring in Freddy Fearless, dead or alive. He was last seen near Ocracoke. [PLACEHOLDER: Freddy isn't at sea yet. He arrives in a later update.]" },
+      doneLine: "Return to the Admiralty House in Norfolk for your reward.",
+    },
     dying_wish: {
       name: "A Dying Pirate's Wish",
       scenes: "ocr_dpw_",

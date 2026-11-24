@@ -152,10 +152,13 @@
     if (!f || !d) return 0;
     var before = state.meters.heat[f] || 0, gain = d;
     if (d > 0) {
+      // A new offense against the faction that pardoned you breaks the pardon:
+      // a betrayal whatever your Standing (§28.7), plus Key's -3 and his hunt.
+      var brokePardon = !!(state.pardon && state.pardon.faction === f && PC.admiralty && PC.admiralty.breakPardon(state));
       var s = state.meters.standing[f] || 0, wasBetrayed = betrayalActive(state, f);
       if (s >= 40) gain = Math.round(gain * R().TRUSTED_HEAT_MULT);
       if (wasBetrayed) gain *= 2; // gains doubled for the year after a betrayal
-      if (s >= 40 && !opts.noBetrayal) {
+      if ((s >= 40 || brokePardon) && !opts.noBetrayal) {
         gain += R().BETRAYAL_HEAT;
         var ms = (state.meterState = state.meterState || {});
         (ms.betrayal = ms.betrayal || {})[f] = state.time.year * 4 + state.time.season + 4;

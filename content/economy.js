@@ -147,6 +147,9 @@
     ERA: 1,                    // the era multiplier: ×1 in the Slice
   };
 
+  // Key's pardon (§28.7, §17.4.10).
+  PC.data.admiraltyRules = { PARDON_PER_HEAT: 60, PARDON_STANDING: 10, PARDON_BLACK: 10, PARDON_BREAK_REGARD: 3 };
+
   // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
   // the Tuning Table lists them. Rules in js/meters.js.
   PC.data.meterRules = {

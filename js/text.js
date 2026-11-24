@@ -25,6 +25,7 @@
     "he'll": ["he'll", "she'll"],
     "he'd": ["he'd", "she'd"],
     man: ["man", "woman"],
+    gentleman: ["gentleman", "lady"], // Key's introduction (§39.8)
     sir: ["sir", "madam"],
     lad: ["lad", "lass"],
     mr: ["Mr.", "Missus"], // Davey's "Mr. Shipwright" / "Missus Shipwright" (ruled)

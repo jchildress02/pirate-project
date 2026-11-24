@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -3510,6 +3510,99 @@ test("forged goods are clean: they pass an inspection", function () {
   withDice([6, 6], function () { PC.forgery.roll(s); });
   PC.forgery.apply(s, { treasure: 10 });
   eq(PC.inspections.dirtyStacks(s).length, 0);
+});
+
+// ---- Milestone 8, PR 5: the Admiralty House (§17.4.3, §39.8, §28.7) ----
+console.log("Milestone 8, PR 5: the lounge, Key's introduction, Howe's menu and the pardon");
+
+function toKey(seed, opts) {
+  opts = opts || {};
+  var s = atNorfolk(seed);
+  var fire = PC.node.enter(s, "admiralty");
+  eq(fire, "nor_lounge");
+  PC.scenes.enterScene(s, fire);
+  pick(s, /^Are you Admiral Key/);
+  if (opts.ledger) { pick(s, /^Find out what the man/, [6, 6]); pick(s, /^Step back/, opts.ledger); }
+  else if (opts.stay) pick(s, /^Sit in one/);
+  else pick(s, /^Sit in one/);
+  pick(s, /^Follow him/);
+  eq(s.current.sceneId, "sp1_key");
+  return s;
+}
+
+test("the lounge leads to Key's introduction; accepting the letter makes it binding; the close assigns A Wanted Man and shows the board", function () {
+  var s = toKey("ad1");
+  pick(s, /^Address him directly/);
+  eq(PC.letters.band(s, "key"), "Neutral");
+  pick(s, /^As a matter of fact/);
+  pick(s, /^Stare back/);
+  eq(s.regard.key.v, 1);
+  pick(s, /^Read the letter/); eq(s.current.sceneId, "sp1_key_4");
+  pick(s, /^Accept the letter/);
+  ok(PC.letters.letter(s) && PC.letters.letter(s).issuer === "key");
+  pick(s, /^Read the notice/);
+  eq(s.current.sceneId, "nor_board_freddy");
+  ok(s.flags.key_met && s.flags.a_wanted_man_assigned && s.flags.admiralty_board_open);
+  ok(PC.quests.journal(s).some(function (q) { return q.name === "A Wanted Man" && q.status === "open"; }));
+});
+
+test("caught reading Howe's ledger: Key's regard -1 at the introduction; the cold line from Howe", function () {
+  var s = toKey("ad2", { ledger: [1, 1] });
+  ok(s.flags.howe_caught_ledger);
+  pick(s, /^Address him cautiously/); pick(s, /^It's not to my taste/);
+  var v = PC.scenes.viewScene(s).choices.filter(function (c) { return /^Drink the coffee/.test(c.label); });
+  ok(v.every(function (c) { return c.status === "locked"; }), "no coffee, no drinking it");
+  pick(s, /^Tell him to get/); pick(s, /^Refuse the letter/); pick(s, /^Read the notice/);
+  eq(s.regard.key.v, -1); ok(!PC.letters.letter(s));
+});
+
+test("leaving the lounge: the next visit opens on 'The Admiral will see you now'", function () {
+  var s = atNorfolk("ad3");
+  PC.scenes.enterScene(s, PC.node.enter(s, "admiralty"));
+  pick(s, /^I'm looking to earn/); pick(s, /^Leave the Admiralty/);
+  ok(s.flags.lounge_seen && !s.flags.key_met);
+  s.location.place = null;
+  eq(PC.node.enter(s, "admiralty"), "nor_key_again");
+});
+
+test("Howe's letter offer after the introduction; refused at Distrusted; the audience is 'occupied' below Respected", function () {
+  var s = atNorfolk("ad4");
+  s.flags.key_met = true; PC.letters.meet(s, "key");
+  ok(PC.admiralty.letterOffer(s).ok);
+  PC.admiralty.takeLetter(s); ok(PC.letters.letter(s)); eq(PC.admiralty.letterOffer(s), null);
+  var t = atNorfolk("ad4b"); t.flags.key_met = true; PC.letters.meet(t, "key"); t.regard.key.v = -2;
+  ok(!PC.admiralty.letterOffer(t).ok);
+  ok(!PC.admiralty.audience(t).walkIn); t.regard.key.v = 2; ok(PC.admiralty.audience(t).walkIn);
+  t.regard.key.v = -5; ok(PC.admiralty.refused(t));
+});
+
+test("Key's pardon: 60 a point of Avalon Heat, ×Standing and ×regard; Heat to 0, Avalon +10, pirates -10, Pardoned", function () {
+  var s = atNorfolk("ad5");
+  s.meters.heat.avalon = 25; s.money.purse = 5000;
+  eq(PC.admiralty.pardonPrice(s), 1500);
+  s.meters.standing.avalon = -15; eq(PC.admiralty.pardonPrice(s), 2250);
+  PC.letters.meet(s, "key"); s.regard.key.v = 4; eq(PC.admiralty.pardonPrice(s), 1125);
+  var bp = s.meters.standing.pirates, ba = s.meters.standing.avalon;
+  PC.admiralty.pardon(s);
+  eq(s.meters.heat.avalon, 0); eq(s.money.purse, 5000 - 1125); eq(s.meters.standing.avalon, ba + 10); eq(s.meters.standing.pirates, bp - 10);
+  ok(s.captain.tags.indexOf("Pardoned") >= 0);
+});
+
+test("breaking Key's pardon: a betrayal, Key's regard -3 and a year of Key's hunt; the tag goes", function () {
+  var s = atNorfolk("ad6");
+  s.meters.heat.avalon = 25; s.money.purse = 5000; PC.letters.meet(s, "key");
+  PC.admiralty.pardon(s);
+  PC.meters.addHeat(s, "avalon", 6);
+  eq(s.meters.heat.avalon, 16, "6 + the betrayal's 10");
+  ok(PC.meters.betrayalActive(s, "avalon")); eq(s.regard.key.v, -3); ok(!s.pardon); ok(s.captain.tags.indexOf("Pardoned") < 0);
+  eq(PC.letters.huntHeat(s, "avalon"), 36, "Key's hunt reads +20");
+});
+
+test("Howe's information steps: three now, the notice board's after A Wanted Man", function () {
+  var s = atNorfolk("ad7");
+  eq(PC.admiralty.questions(s).length, 3);
+  ok(/finest leader/.test(PC.admiralty.ask(s, "admiral")));
+  s.flags.a_wanted_man_done = true; eq(PC.admiralty.questions(s).length, 4);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

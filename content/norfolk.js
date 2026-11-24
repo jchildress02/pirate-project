@@ -99,6 +99,48 @@
 
     // ---- Service lines (Norfolk Scene Records Part 4, §9) ----------------
     lines: {
+      // The Admiralty House (Part 4 §9-§10; js/admiralty.js).
+      admiralty: {
+        greet: { wary: "\"Captain {captain.last}. State your business.\"", neutral: "\"Good day, Captain.\"",
+          friend: "\"Welcome back, Captain. Always a pleasure to see you.\"", confidant: "\"Captain {captain.last}! We're delighted to see you again.\"" },
+        refuse: "\"You have a lot of nerve coming here, Captain. You'd best leave before I call the guard.\"",
+        nap: "The lieutenant is asleep in an armchair, a half-read report on his chest. He jolts awake when you clear your throat.",
+        askAudience: "I'd like to see the Admiral.",
+        occupied1: "\"I'm afraid he's occupied at the moment. Come back another time.\"",
+        occupied2: "\"The Admiral is feeling under the weather today, unfortunately.\"",
+        key: {
+          greetRespected: "\"Captain {captain.last}. Welcome. What can I do for you?\"",
+          greetTrusted: "\"Ah, Captain {captain.last}. Come in. Coffee?\"",
+          nothing: "\"I've got nothing for you at the moment. Come back another time.\"",
+          busy: "Admiral Key stands at the wall, peering closely at a tattered old map and stroking his chin.",
+        },
+        letterOffer: "\"The Admiral's offer still stands, Captain. Would you like your letter?\"",
+        letterAccepted: "\"Splendid! Sign here, here, and initial here. Welcome to His Majesty's service.\"",
+        letterDeclined: "\"Of course. It's still here if you change your mind.\"",
+        letterRefused: "\"I'm sorry, Captain. The Admiral won't be issuing you a letter at present.\"",
+        nothingToReport: "\"The board is over there, if you're looking for work.\"",
+        pardonAsk: "I'd like to speak to the Admiral about a pardon.",
+        pardonIn: "\"Of course. This way, Captain.\" He shows you into a sparse office overlooking the harbor.",
+        pardonTerms: "Key folds his hands. \"I don't give these out lightly. [cost] in gold, and your word that you're finished preying on the Crown. Break it, and I'll see you hanged.\"",
+        pardonAccepted: "The Admiral signs the paper and presses his seal into the wax. \"A clean slate. Don't waste it.\"",
+        pardonDeclined: "\"Then we've nothing more to discuss. The offer stands, for now.\"",
+        pardonBroke: "\"You haven't the gold, Captain. Come back when you do.\"",
+        pardonRefused: "The Lieutenant looks furious. \"How dare you show your face here. Guards!\" You take off before they get there.",
+        boardBlurb: "A cork board by the door, containing bounty notices with the Admiralty's seal.",
+        boardMore: "More notices to follow.",
+        // Howe's information steps (Part 4 §10). The fourth opens after A Wanted Man (M9).
+        ask: [
+          { id: "admiral", label: "Tell me about the Admiral.", answer: "\"Admiral James Key is the finest leader of men that Scotland's seen in generations. The King sent him here to put Avalon back together, and he intends to do just that.\"" },
+          { id: "fleet", label: "That's quite the fleet out there.", answer: "\"Isn't it? They say the *Griffon* is the most powerful ship afloat. Nobody would dare come near her with ill intent.\"" },
+          { id: "letters", label: "What's the difference between a letter and a pardon?", answer: "\"A letter makes you a privateer: you hunt the King's enemies, and the Admiral takes a tenth of the loot you sell. A pardon wipes your slate clean, for a price.\"" },
+          { id: "board", label: "How does the notice board work?", when: { flag: "a_wanted_man_done" }, answer: "\"Take a notice, find the bastard and bring him in, and I'll pay you on the spot. Remember, alive always pays better.\"" },
+        ],
+      },
+      // Inspections at Norfolk (Part 4 §9).
+      inspection: {
+        clean: "The soldiers search your hold but find nothing questionable.",
+        takeIt: "The soldiers haul the goods away as the official writes your name in his ledger.",
+      },
       keeper: {
         greet: { "-1": "\"Oh. It's you.\"", "0": "\"Another day in paradise. What'll it be?\"", "1": "\"Ah, it's you. Come in and drown your sorrows. Pull up a stool.\"", "2": "\"Ah, it's you. Come in and drown your sorrows. Pull up a stool.\"", "3": "\"Finally a face I don't despise. Welcome, welcome!\"" },
         refuse: "\"Get out. I've got enough vermin in here already.\"",
@@ -116,6 +158,10 @@
         questions: [],
       },
       shipwright: {
+        // Laying a ship up (Part 4 §9).
+        laidUp: "\"She'll be safe here. I'll look after her myself.\"",
+        recovered: "\"Here she is, just as you left her. Better, actually. I couldn't help myself.\"",
+        slotsFull: "\"Don't have an extra berth, sorry to say.\"",
         first: "A tall man in a leather apron is shouting at two boys swordfighting with wooden planks. He sees you and sighs. \"Christoph Buchanan, Master Shipwright at your service. Forgive the circus.\"",
         greet: { "-1": "\"Make it quick. I have real work waiting.\"", "0": "\"Good day, Captain. What can I do for you?\"", "1": "\"Ah, Captain! All is well, I hope?\"", "2": "\"Ah, Captain! All is well, I hope?\"", "3": "\"My favorite customer! Don't tell the Admiral I said that.\"" },
         refuse: "\"I'd rather go hungry than work for you. Find someone else.\"",

@@ -762,7 +762,7 @@
     html += '<div class="prose dropcap">' + prose(isWinter() && loc.winter ? loc.winter : loc.blurb) + '</div><div style="clear:both"></div>';
     var back = function (top) { return '<div class="actions"' + (top ? ' style="margin:0 0 6px"' : "") + '><button class="secondary" data-act="leaveplace">‹ Back to ' + esc(nd.name) + "</button></div>"; };
     html = back(true) + html;
-    html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu })[place]();
+    html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu, admiralty: admiraltyMenu })[place]();
     return html + DIVIDER + back(false);
   }
 
@@ -1074,6 +1074,42 @@
     var failed = f.nor_appr_failed === PC.scenes.seasonStamp(state);
     return opts([opt({ act: "enter", attrs: 'data-scene="nor_appr"', label: "“" + N().nodeData(id).lines.apprentices.opening + "”",
       meta: "The Apprentices · talking him round costs no action; fixing it yourself, 1", lock: failed ? "Christoph wants you away from his ship until next season" : null })]);
+  }
+
+  // The Admiralty House (§17.4.3; js/admiralty.js): Lieutenant Howe's menu.
+  function admiraltyMenu() {
+    var A = PC.admiralty, LA = N().nodeData("norfolk").lines.admiralty, f = state.flags;
+    var html = '<div class="block">' + nameCard("howe", "Flag Lieutenant");
+    html += state.location.say && state.location.say.to === "howe" ? sayFor("howe") : '<div class="say">' + inline(PC.text.render(A.greeting(state), state)) + "</div>";
+    if (A.refused(state)) return html + '<p class="note">Lieutenant Howe won\'t deal with you.</p></div>';
+    var list = [];
+    // An audience with the Admiral.
+    list.push(opt({ act: "keyaudience", label: "“" + LA.askAudience + "”", meta: PC.letters.band(state, "key") === "Respected" || PC.letters.band(state, "key") === "Trusted" ? "No action. He'll see you." : "No action. Through the Lieutenant." }));
+    // Key's letter: Howe's standing offer.
+    var lo = A.letterOffer(state);
+    if (lo) list.push(opt({ act: "keyletter", label: "“Yes, I'd like my letter.”", meta: "Admiral Key's letter of marque (see the captain sheet for what it does). " + (lo.ok ? "Binding once taken." : ""), lock: lo.ok ? null : lo.why }));
+    // Key's pardon.
+    var pc = A.canPardon(state), price = A.pardonPrice(state);
+    if (state.meters.heat.avalon > 0) list.push(opt({ act: "pardonask", label: "“" + LA.pardonAsk + "”",
+      meta: "Clears your Avalon Heat (" + state.meters.heat.avalon + ")" + (price != null ? " for " + gold(price) + " gold from your purse" : "") + ". Avalon Standing +10, pirate Standing −10. Break it with a new offense against Avalon, and it's a betrayal.",
+      lock: pc.ok ? null : pc.why }));
+    if (state.pardon) list.push(opt({ act: "nop", label: "You hold the Admiral's pardon.", meta: "Any new offense against Avalon breaks it: a betrayal, and Key will hunt you for a year.", done: true }));
+    // Report a bounty: Milestone 9.
+    list.push(opt({ act: "nop", label: "Report a bounty", meta: "Nothing to report yet.", lock: "Bounties come in a later update" }));
+    html += opts(list);
+    // Ask Lieutenant Howe...
+    html += '<p class="note" style="margin:14px 0 6px">Ask Lieutenant Howe…</p>' + opts(A.questions(state).map(function (q) {
+      return opt({ act: "howeask", attrs: 'data-q="' + esc(q.id) + '"', label: "“" + q.label + "”", meta: "No action", done: q.asked });
+    })) + "</div>";
+    // The notice board (from the end of Key's introduction).
+    if (f.admiralty_board_open) {
+      html += DIVIDER + '<div class="block"><div class="h4">The Notice Board</div><p class="small">' + esc(LA.boardBlurb) + "</p>" +
+        '<div class="svc notice"><p class="sc">Wanted · by Order of the Admiralty of Avalon</p><p><b>Frederick Kane, called “Freddy Fearless”</b></p>' +
+        '<p class="small">For piracy against the shipping of Avalon. A known associate of Amber Jack. Last seen near Ocracoke. Sails the <i>Deadly Delight</i>, a well-armed sloop.</p>' +
+        '<p class="small"><b>1,500 gold alive · 750 gold dead</b></p><p class="small">Key\'s wax seal · Assigned to Captain ' + esc(state.captain.last) + ' · <span class="sc">Taken</span></p></div>' +
+        '<p class="note">' + esc(LA.boardMore) + "</p></div>";
+    }
+    return html;
   }
 
   // Officer recruitment (§25.7): two seats a season.
@@ -2787,6 +2823,30 @@
           state.settings.showDice ? { icon: "ap", text: "Dice " + r.talk.dice.join(" + ") + ", edge " + r.talk.edge } : null] });
     },
     // The keeper's other questions (§41.5): information only, no action.
+    // The Admiralty House (js/admiralty.js).
+    "keyaudience": function () {
+      var r = PC.admiralty.audience(state), LA = N().nodeData("norfolk").lines.admiralty;
+      say("howe", r.walkIn ? "Admiral Key" : "Lieutenant Howe", r.lines.join("\n\n"), null, null, { ask: LA.askAudience });
+    },
+    "keyletter": function (el) {
+      var LA = N().nodeData("norfolk").lines.admiralty;
+      // The popup's Go back is "I'll have to think about it" (Howe's declined line is for the scene).
+      if (confirmFirst(el, "Take Admiral Key's letter?", "A letter is binding. Frisian Standing drops 10 and stays at −10 or below while you hold it, and the Admiral takes 10% of every clean sale. Ships of France, Sicily, Spain, Frisia and Ireland become lawful prizes, with clean cargo.", "Take the letter")) return;
+      var r = PC.admiralty.takeLetter(state);
+      say("howe", "Lieutenant Howe", r.line, null, null, { chips: [textChip("tag", "Admiral Key's letter of marque")] });
+    },
+    "pardonask": function (el) {
+      var LA = N().nodeData("norfolk").lines.admiralty, A = PC.admiralty, c = A.canPardon(state);
+      if (!c.ok) { say("howe", "Lieutenant Howe", c.line || ("\"" + c.why + ".\"")); return; }
+      var terms = LA.pardonIn + "\n\n" + LA.pardonTerms.replace("[cost]", gold(c.price));
+      if (confirmFirst(el, "Admiral Key's pardon", PC.text.render(terms, state).replace(/\*/g, "") + "\n\n" + gold(c.price) + " gold from your purse.", "Accept his terms")) return;
+      var r = A.pardon(state);
+      say("howe", "Admiral Key", terms + "\n\n" + r.line, null, null, { ask: LA.pardonAsk, chips: [goldChip(-r.price, "purse"), textChip("heat", "Avalon Heat cleared (" + r.heat + ")", "good"), textChip("standing", "Avalon Standing +10", "avalon"), textChip("standing", "Pirate Standing −10", "pirates"), textChip("tag", "New tag: Pardoned")] });
+    },
+    "howeask": function (el) {
+      var q = PC.admiralty.questions(state).filter(function (x) { return x.id === el.dataset.q; })[0];
+      say("howe", "Lieutenant Howe", PC.admiralty.ask(state, el.dataset.q), null, null, { ask: q.label });
+    },
     "keeperq": function (el) {
       var id = who("keeper");
       var r = N().askKeeperQuestion(state, el.dataset.q);

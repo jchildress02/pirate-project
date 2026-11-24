@@ -50,7 +50,7 @@
   var LEAVE = "PLACEHOLDER: The officer tucks his ledger under his arm and leads his men back down the gangplank.";
   var PAID = "PLACEHOLDER: The pouch disappears into his coat. \"Everything appears to be in order, Captain.\"";
   var afford = function (what, mult) { return { lockedUnless: { fn: "inspAfford:" + what + ":" + mult }, lockedReason: "Not enough gold" }; };
-  var take = C("Take it, then.", ["Retreat"], R("PLACEHOLDER: His men carry the goods off as he writes your name in his ledger.", [{ hook: "insp_take" }]),
+  var take = C("Take it, then.", ["Retreat"], R("{insp_take_line}", [{ hook: "insp_take" }]),
     { lockedUnless: { fn: "inspUnder" }, lockedReason: "Too much to walk away from" });
   var bribeFound = K("PLACEHOLDER: Surely there's a fee for the paperwork. ({insp_found})", ["Caution"], { type: "Bribe", dr: 3 },
     R(PAID, [{ hook: "insp_pay", what: "found", mult: 1 }]),
