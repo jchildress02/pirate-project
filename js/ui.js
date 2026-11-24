@@ -1178,7 +1178,7 @@
           // Lay her up at anchor (§22.7): 10% up front, 3% a season.
           (function () {
             var lu = N().canLayUp(state, f.id), pr = lu.price || N().layUpPrice(state, f);
-            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
+            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, plus " + gold(pr.season) + " a season when you take her back</button>"
               : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
           })() + "</div>" +
           (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + (p.cut ? ", less " + gold(p.cut) + " to your letter's issuer" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
@@ -1193,7 +1193,7 @@
         N().laidUpHere(state).length + " of " + N().layUpSlots(N().here(state)) + " berths used.</p>" +
         lu.map(function (l) {
           var r = N().canRecover(state, l.ship.id);
-          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · " + l.owed + " gold owed" : "")) + "</span></span> " +
+          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · anchorage so far " + l.owed + " gold, paid when you take her back" : "")) + "</span></span> " +
             (r.ok ? '<button class="secondary" data-act="recover" data-ship="' + esc(l.ship.id) + '">Take her back</button>' : '<span class="note">' + esc(r.why) + "</span>") + "</div>";
         }).join("") + "</div>";
     }
@@ -2282,6 +2282,7 @@
       return "<tr><td>" + dirtyName(r.label, r.dirty) + (info && info.stores ? " " + STORES : "") + "</td><td>" + r.n + "</td><td>" + (r.n ? '<div class="buyrow">' + qstep("q-jet-" + i, 1, r.n) +
         '<button class="secondary" data-act="jettison" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '" data-for="q-jet-' + i + '" data-big="' + (r.what === "treasure" ? 1 : 0) + '"' + lockAttr(shipLock(false)) + '>Over the side</button></div>' : "") + "</td></tr>";
     }).join("") + "</table>";
+    html += forgeBlock();
     var used = PC.crew.usedThisSeason(state, "stores");
     var choices = PC.crew.storeChoices(state);
     var need = PC.crew.storesNeeded(state);
@@ -2289,6 +2290,37 @@
       (used ? '<p class="note">Opened this season.</p>' : !choices.length ? '<p class="note">Not enough drink or tobacco aboard.</p>' :
         '<div class="actions">' + choices.map(function (c) { return '<button class="secondary" data-act="stores" data-good="' + esc(c.good) + '"' + lockAttr(shipLock(false)) + '>Open the ' + esc(c.good.toLowerCase()) + " (+" + c.morale + " morale)</button>"; }).join("") + "</div>") + "</div>";
     return html;
+  }
+
+  // Forge a Clearance (§20.3): roll first, then pick what to clear.
+  function forgeBlock() {
+    var FG = PC.forgery, f = FG.rec(state), stk = FG.stacks(state);
+    var html = '<div class="svc"><h4>Forge a Clearance</h4><p class="small">Once a season, 1 action, in port or at sea. Forged papers make dirty cargo clean: it passes inspections and sells to any merchant. ' +
+      "Precious goods take two units of papers each.</p>";
+    if (!f) {
+      var c = FG.canForge(state);
+      return html + opts([opt({ act: "forge", label: "Forge the papers " + apText(1), ap: 1, check: c.ok ? PC.checks.assess(state, FG.check(), { conditions: [] }) : null,
+        meta: "Clean: about " + FG.budget(state, "clean") + " units. Partial: about " + FG.budget(state, "partial") + ". Setback: the papers won't pass, and this season's try is spent.", lock: c.ok ? (shipLock(false) || null) : c.why })]) + "</div>";
+    }
+    html += '<p class="' + OUTCOME[f.outcome][1] + '"><b>' + OUTCOME[f.outcome][0] + "</b>" + (f.rerolled ? " (rerolled with " + esc(f.rerolled) + ")" : "") +
+      (state.settings.showDice && f.dice ? ' <span class="note">(dice ' + f.dice.join(" + ") + ", edge " + f.edge + ")</span>" : "") + "</p>";
+    var rr = FG.rerollAvailable(state);
+    if (rr) html += '<div class="actions"><button class="secondary" data-act="forgereroll">Reroll (' + esc(rr.name) + ")</button></div>";
+    if (f.applied) return html + '<p class="note">Cleared this season: ' + esc(f.applied.join(", ") || "nothing") + ".</p></div>";
+    if (f.done || !f.budget) return html + '<p class="note">No papers that would pass this season.</p></div>';
+    if (!stk.length) return html + '<p class="note">Nothing dirty aboard any more.</p></div>';
+    var picks = FG.defaultPicks(state, f.budget);
+    html += '<p class="small">Your papers cover <b>' + f.budget + " units</b>. Pick what to clear (most valuable first):</p>" +
+      '<table class="grid"><tr><th>Dirty cargo</th><th>Aboard</th><th>Clear</th></tr>' + stk.map(function (s, i) {
+        return "<tr><td>" + dirtyName(s.what === "treasure" ? "Treasure" : s.what, true) + (s.weight > 1 ? ' <span class="note">(' + s.weight + " units each)</span>" : "") + "</td><td>" + s.n + "</td><td>" +
+          qstep("q-forge-" + i, picks[s.what] || 0, s.n, 0) + '<input type="hidden" class="forgewhat" data-i="' + i + '" value="' + esc(s.what) + '"></td></tr>';
+      }).join("") + "</table>" +
+      '<p class="small">' + totalSlot(function () {
+        var used = 0; stk.forEach(function (s, i) { used += val("q-forge-" + i) * s.weight; });
+        return used > f.budget ? '<b style="color:#8f2a1c">' + used + " of " + f.budget + " units: too many</b>" : used + " of " + f.budget + " units";
+      }) + "</p>" +
+      '<div class="actions"><button class="primary" data-act="forgeapply">Make them clean</button></div>';
+    return html + "</div>";
   }
 
   function cabinTab() {
@@ -2719,12 +2751,12 @@
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
         hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
       var r = N().layUp(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Then " + gold(r.season) + " gold a season"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
+      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Plus " + gold(r.season) + " gold a season, paid when you take her back"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
         r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
     },
     "recover": function (el) {
       var id = who("shipwright"), r = N().recover(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? goldChip(-r.owed) : null] });
+      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? textChip("gold", "−" + gold(r.owed) + " gold for her anchorage", "mid") : null] });
     },
     "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
     "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },
@@ -2916,6 +2948,14 @@
       var f = (state.fleet || []).filter(function (x) { return x.id === (el.dataset.to === "flagship" ? el.dataset.from : el.dataset.to); })[0];
       say("ship:fleet", null, plural(r.n, "hand") + (el.dataset.to === "flagship" ? " come back aboard the flagship from the " : " go across to the ") + (f ? f.name || f.cls : "ship") + ".", null, null,
         { chips: [textChip("officer", Object.keys(r.tiers).map(function (t) { return r.tiers[t] + " " + t; }).join(", "))] });
+    },
+    "forge": function () { var f = PC.forgery.roll(state); toast(f.outcome === "setback" ? "The papers won't pass" : "Papers for " + f.budget + " units"); },
+    "forgereroll": function () { PC.forgery.reroll(state); },
+    "forgeapply": function () {
+      var picks = {};
+      document.querySelectorAll(".forgewhat").forEach(function (el) { picks[el.value] = val("q-forge-" + el.dataset.i); });
+      var r = PC.forgery.apply(state, picks);
+      toast(r.cleared.length ? "Cleared: " + r.cleared.join(", ") : "Nothing cleared");
     },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship:stores", null, "The crew drink to your health.", null, null, { chips: [moraleChip(m)] }); },
     "closepopup": function () { state.location.popup = null; },

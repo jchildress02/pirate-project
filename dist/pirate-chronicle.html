@@ -2796,7 +2796,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function nodeData(id) { var n = PC.data.nodes[id]; if (!n) throw new Error("Unknown node: " + id); return n; }
   function here(state) { return state.location && state.location.node; }
   function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
-  function money(n) { return Math.round(n * 100) / 100; }
+  // Prices are whole gold (the author's ruling, November 24).
+  function money(n) { return Math.round(n); }
 
   // ---- The node's state ---------------------------------------------------
 
@@ -3576,7 +3577,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function canRecover(state, fid) {
     var l = laidUpHere(state).filter(function (x) { return x.ship.id === fid; })[0];
     if (!l) return { ok: false, why: "She isn't laid up here" };
-    if (l.owed && !PC.crew.canPay(state, l.owed)) return { ok: false, why: "Clear the " + l.owed + " gold you owe on her first" };
+    if (l.owed && !PC.crew.canPay(state, l.owed)) return { ok: false, why: "Needs " + l.owed + " gold for her anchorage" };
     var spare = state.crew.count - (state.ship.crewMin || 5);
     if (spare < (l.ship.crewMin || 0)) return { ok: false, why: "Needs " + l.ship.crewMin + " hands to spare from your flagship" };
     return { ok: true, rec: l };
@@ -3589,7 +3590,6 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (!c.ok) throw new Error(c.why);
     var l = c.rec, f = l.ship;
     if (l.owed) PC.crew.payFrom(state, l.owed);
-    if (l.rungDown) PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), 1); // the debt is cleared
     state.laidUp = state.laidUp.filter(function (x) { return x !== l; });
     var tiers = PC.hunt.takeHands(state, f.crewMin || 0);
     f.crewTiers = tiers; f.crew = f.crewMin || 0;
@@ -3603,25 +3603,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
     } else { f.kind = "prize"; f.officer = null; }
     state.fleet = (state.fleet || []).concat([f]);
-    PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying the " + l.owed + " gold owed" : "") + ".");
+    PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying " + l.owed + " gold for her anchorage" : "") + ".");
     return { ship: f, kind: f.kind, officer: o ? o.first : null, owed: l.owed, line: E().LAYUP.lines.recovered };
   }
-  // The season's charge (§20.4): 3% of hull value. DEFAULT: what can't be
-  // paid is owed, and must be cleared before she's taken back.
+  // The season's charge (§20.4): 3% of hull value, run up at each season's
+  // end and paid when she's taken back (the author's ruling, November 24).
+  // Until then nothing is owed anywhere else.
   function layUpSeason(state) {
-    var lines = [];
     (state.laidUp || []).forEach(function (l) {
-      var nd0 = nodeData(l.node), g = PC.meters.officialGate(state, l.node);
-      var due = Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
-      if (PC.crew.canPay(state, due)) { PC.crew.payFrom(state, due); lines.push("Anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + due + " gold."); }
-      else {
-        l.owed += due;
-        lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed.");
-        // The shipwright holding her thinks less of you until it's paid (the author's ruling).
-        if (!l.rungDown) { l.rungDown = true; PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), -1); lines.push(PC.npcs.get(state, slotNpc(l.node, "shipwright")).first + " won't forget it until you pay."); }
-      }
+      var g = PC.meters.officialGate(state, l.node);
+      l.owed = (l.owed || 0) + Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
     });
-    return lines;
+    return [];
   }
 
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
@@ -10262,8 +10255,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
-    // Laid-up ships' anchorage (§20.4).
-    out.lines = out.lines.concat(PC.node.layUpSeason(state));
+    // Laid-up ships' anchorage runs up (§20.4), paid when she's taken back.
+    PC.node.layUpSeason(state);
     // The meters (§28): Heat bleed, Standing's drift, Dread's decay.
     var mt = PC.meters.seasonEnd(state);
     out.lines = out.lines.concat(mt.lines);
@@ -12122,6 +12115,138 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — Forge a Clearance (§20.3; Milestone 8, PR 4b).
+ *
+ * Once a season, 1 AP, from the Cargo tab, in port or at sea: a Forge roll
+ * at a flat DR 2 (no Heat, no audience). Units made clean, by Forge
+ * training 0 / 1 / 2 / 3: clean 20 / 30 / 40 / 50; partial 10 / 20 / 30 /
+ * 40; setback none (the season's attempt is spent). Bulk, fine and treasure
+ * weigh 1 a unit, precious goods 2. Goods that are always dirty are left
+ * out. The Forger's Kit (a reroll, +5 units) and the Engraver's Seal
+ * Matrices (+1 Forge, +10 units) add on (§32.8); an era multiplier (×1 in
+ * the Slice). Forged goods are clean everywhere (§28.5).
+ *
+ * The roll comes first; then the captain picks what to clear, most
+ * valuable first by default.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function F() { return PC.data.forgeRules; }
+  function stamp(state) { return PC.state.stamp(state); }
+
+  function check() { return { type: "Forge", dr: F().DR }; }
+  function rec(state) { var f = state.forge; return f && f.stamp === stamp(state) ? f : null; }
+
+  // What can be forged: dirty treasure and dirty goods, never anything
+  // always dirty (church plate; crated muskets, §20.9).
+  function stacks(state) {
+    var out = [];
+    if (state.cargo.treasure.dirty) out.push({ what: "treasure", n: state.cargo.treasure.dirty, weight: F().WEIGHT.treasure, value: PC.data.economy.TREASURE_UNIT });
+    Object.keys(state.cargo.goods).forEach(function (g) {
+      var n = (state.cargo.goods[g] || {}).dirty || 0, info = PC.data.goods[g] || {};
+      if (!n || info.alwaysDirty) return;
+      out.push({ what: g, n: n, weight: F().WEIGHT[info.kind] || 1, value: info.base || 0 });
+    });
+    // Most valuable a weight-unit first (§20.3: the picker opens that way).
+    return out.sort(function (a, b) { return b.value / b.weight - a.value / a.weight; });
+  }
+
+  function canForge(state) {
+    if (rec(state)) return { ok: false, why: "You've already forged papers this season" };
+    if (state.ap.left < 1) return { ok: false, why: "No actions left this season" };
+    if (!stacks(state).length) return { ok: false, why: "Nothing dirty aboard to clear" };
+    return { ok: true };
+  }
+
+  function itemBonus(state) {
+    return (state.captain.items || []).reduce(function (a, id) { var m = PC.data.modifiers[id]; return a + ((m && m.forgeUnits) || 0); }, 0);
+  }
+  // The units the roll clears (§20.3).
+  function budget(state, outcome) {
+    if (outcome === "setback") return 0;
+    var t = Math.min(3, (state.captain.training || {}).Forge || 0);
+    var base = (outcome === "clean" ? F().CLEAN : F().PARTIAL)[t];
+    return Math.round((base + itemBonus(state)) * F().ERA);
+  }
+
+  // Roll: 1 AP, once a season.
+  function roll(state) {
+    var c = canForge(state);
+    if (!c.ok) throw new Error(c.why);
+    PC.crew.spendAP(state, 1);
+    var key = [state.world.seed, stamp(state), "forge"].join("|");
+    var r = PC.checks.resolve(state, check(), key, { conditions: [] });
+    state.forge = { stamp: stamp(state), outcome: r.outcome, key: key, budget: budget(state, r.outcome), dice: r.dice, edge: r.assessment.edge, done: false };
+    if (r.outcome === "setback") state.forge.done = true;
+    PC.state.addLog(state, "Forged clearances: " + r.outcome + (state.forge.budget ? " (" + state.forge.budget + " units)" : "") + ".");
+    return state.forge;
+  }
+
+  function rerollAvailable(state) {
+    var f = rec(state);
+    if (!f || f.rerolled || f.applied || f.outcome === "clean") return null;
+    return PC.checks.availableReroll(state, check(), f.outcome, { conditions: [] });
+  }
+  function reroll(state) {
+    var f = rec(state), r = rerollAvailable(state);
+    if (!r) throw new Error("No reroll available.");
+    state.rerollsUsed[r.id] = (state.rerollsUsed[r.id] || 0) + 1;
+    var res = PC.checks.resolve(state, check(), f.key + "|reroll", { conditions: [] });
+    f.outcome = res.outcome; f.rerolled = r.name; f.dice = res.dice; f.edge = res.assessment.edge;
+    f.budget = budget(state, f.outcome);
+    f.done = f.outcome === "setback";
+    return f;
+  }
+
+  // The default picks: most valuable first, until the budget runs out.
+  function defaultPicks(state, units) {
+    var left = units, out = {};
+    stacks(state).forEach(function (s) {
+      var n = Math.min(s.n, Math.floor(left / s.weight));
+      if (n > 0) { out[s.what] = n; left -= n * s.weight; }
+    });
+    return out;
+  }
+  function weightOf(state, picks) {
+    var byWhat = {};
+    stacks(state).forEach(function (s) { byWhat[s.what] = s; });
+    return Object.keys(picks).reduce(function (a, w) { return a + (byWhat[w] ? byWhat[w].weight * picks[w] : 0); }, 0);
+  }
+
+  // Clear the picked units. Returns what was cleared.
+  function apply(state, picks) {
+    var f = rec(state);
+    if (!f || f.done || !f.budget) throw new Error("No forged papers to use.");
+    var byWhat = {};
+    stacks(state).forEach(function (s) { byWhat[s.what] = s; });
+    var w = 0, done = [];
+    Object.keys(picks).forEach(function (k) {
+      var n = Math.max(0, Math.floor(picks[k] || 0));
+      if (!n || !byWhat[k]) return;
+      n = Math.min(n, byWhat[k].n);
+      w += n * byWhat[k].weight;
+    });
+    if (w > f.budget) throw new Error("That's more than your papers cover (" + f.budget + " units).");
+    Object.keys(picks).forEach(function (k) {
+      var n = Math.min(Math.max(0, Math.floor(picks[k] || 0)), byWhat[k] ? byWhat[k].n : 0);
+      if (!n) return;
+      if (k === "treasure") { state.cargo.treasure.dirty -= n; state.cargo.treasure.clean += n; }
+      else { state.cargo.goods[k].dirty -= n; state.cargo.goods[k].clean += n; }
+      done.push(n + " " + (k === "treasure" ? "treasure" : k));
+    });
+    f.done = true; f.applied = done;
+    PC.state.addLog(state, "Forged papers cleared " + (done.join(", ") || "nothing") + ".");
+    return { cleared: done, weight: w, budget: f.budget };
+  }
+
+  PC.forgery = { check: check, rec: rec, stacks: stacks, canForge: canForge, budget: budget, roll: roll, rerollAvailable: rerollAvailable, reroll: reroll, defaultPicks: defaultPicks, weightOf: weightOf, apply: apply };
+})();
+</script>
+  <script>
 /* Pirate Chronicle — Developer tools that change the game state (§41.12).
  *
  * Skip the mandatory quests: A Dying Pirate's Wish, Welcome to the
@@ -12436,6 +12561,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Failing Eyes", { edge: plus(["Keep Watch", "Appraise"], -1) });
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
+  // Forging (§32.8): the kit rerolls Forge and adds 5 units on a clean or
+  // partial; the matrices add +1 Forge and 10 units. They stack.
+  add("Forger's Kit", { reroll: reroll(["Forge"]), forgeUnits: 5 });
+  add("Engraver's Seal Matrices", { edge: plus(["Forge"], 1), forgeUnits: 10 });
   add("Shark-Tooth Necklace", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
   // The minigames' tags and items (§14.5, §14.4, §32.12).
   // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
@@ -13133,6 +13262,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         "Trusted": "PLACEHOLDER: Admiral Key trusts you.",
       },
     },
+  };
+
+  // Forge a Clearance (§20.3): units cleared by Forge training 0-3.
+  PC.data.forgeRules = {
+    DR: 2,
+    CLEAN: [20, 30, 40, 50], PARTIAL: [10, 20, 30, 40],
+    WEIGHT: { treasure: 1, bulk: 1, fine: 1, drink: 1, precious: 2 },
+    ERA: 1,                    // the era multiplier: ×1 in the Slice
   };
 
   // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
@@ -20574,7 +20711,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           // Lay her up at anchor (§22.7): 10% up front, 3% a season.
           (function () {
             var lu = N().canLayUp(state, f.id), pr = lu.price || N().layUpPrice(state, f);
-            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
+            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, plus " + gold(pr.season) + " a season when you take her back</button>"
               : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
           })() + "</div>" +
           (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + (p.cut ? ", less " + gold(p.cut) + " to your letter's issuer" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
@@ -20589,7 +20726,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         N().laidUpHere(state).length + " of " + N().layUpSlots(N().here(state)) + " berths used.</p>" +
         lu.map(function (l) {
           var r = N().canRecover(state, l.ship.id);
-          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · " + l.owed + " gold owed" : "")) + "</span></span> " +
+          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · anchorage so far " + l.owed + " gold, paid when you take her back" : "")) + "</span></span> " +
             (r.ok ? '<button class="secondary" data-act="recover" data-ship="' + esc(l.ship.id) + '">Take her back</button>' : '<span class="note">' + esc(r.why) + "</span>") + "</div>";
         }).join("") + "</div>";
     }
@@ -21678,6 +21815,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       return "<tr><td>" + dirtyName(r.label, r.dirty) + (info && info.stores ? " " + STORES : "") + "</td><td>" + r.n + "</td><td>" + (r.n ? '<div class="buyrow">' + qstep("q-jet-" + i, 1, r.n) +
         '<button class="secondary" data-act="jettison" data-what="' + esc(r.what) + '" data-dirty="' + (r.dirty ? 1 : 0) + '" data-for="q-jet-' + i + '" data-big="' + (r.what === "treasure" ? 1 : 0) + '"' + lockAttr(shipLock(false)) + '>Over the side</button></div>' : "") + "</td></tr>";
     }).join("") + "</table>";
+    html += forgeBlock();
     var used = PC.crew.usedThisSeason(state, "stores");
     var choices = PC.crew.storeChoices(state);
     var need = PC.crew.storesNeeded(state);
@@ -21685,6 +21823,37 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       (used ? '<p class="note">Opened this season.</p>' : !choices.length ? '<p class="note">Not enough drink or tobacco aboard.</p>' :
         '<div class="actions">' + choices.map(function (c) { return '<button class="secondary" data-act="stores" data-good="' + esc(c.good) + '"' + lockAttr(shipLock(false)) + '>Open the ' + esc(c.good.toLowerCase()) + " (+" + c.morale + " morale)</button>"; }).join("") + "</div>") + "</div>";
     return html;
+  }
+
+  // Forge a Clearance (§20.3): roll first, then pick what to clear.
+  function forgeBlock() {
+    var FG = PC.forgery, f = FG.rec(state), stk = FG.stacks(state);
+    var html = '<div class="svc"><h4>Forge a Clearance</h4><p class="small">Once a season, 1 action, in port or at sea. Forged papers make dirty cargo clean: it passes inspections and sells to any merchant. ' +
+      "Precious goods take two units of papers each.</p>";
+    if (!f) {
+      var c = FG.canForge(state);
+      return html + opts([opt({ act: "forge", label: "Forge the papers " + apText(1), ap: 1, check: c.ok ? PC.checks.assess(state, FG.check(), { conditions: [] }) : null,
+        meta: "Clean: about " + FG.budget(state, "clean") + " units. Partial: about " + FG.budget(state, "partial") + ". Setback: the papers won't pass, and this season's try is spent.", lock: c.ok ? (shipLock(false) || null) : c.why })]) + "</div>";
+    }
+    html += '<p class="' + OUTCOME[f.outcome][1] + '"><b>' + OUTCOME[f.outcome][0] + "</b>" + (f.rerolled ? " (rerolled with " + esc(f.rerolled) + ")" : "") +
+      (state.settings.showDice && f.dice ? ' <span class="note">(dice ' + f.dice.join(" + ") + ", edge " + f.edge + ")</span>" : "") + "</p>";
+    var rr = FG.rerollAvailable(state);
+    if (rr) html += '<div class="actions"><button class="secondary" data-act="forgereroll">Reroll (' + esc(rr.name) + ")</button></div>";
+    if (f.applied) return html + '<p class="note">Cleared this season: ' + esc(f.applied.join(", ") || "nothing") + ".</p></div>";
+    if (f.done || !f.budget) return html + '<p class="note">No papers that would pass this season.</p></div>';
+    if (!stk.length) return html + '<p class="note">Nothing dirty aboard any more.</p></div>';
+    var picks = FG.defaultPicks(state, f.budget);
+    html += '<p class="small">Your papers cover <b>' + f.budget + " units</b>. Pick what to clear (most valuable first):</p>" +
+      '<table class="grid"><tr><th>Dirty cargo</th><th>Aboard</th><th>Clear</th></tr>' + stk.map(function (s, i) {
+        return "<tr><td>" + dirtyName(s.what === "treasure" ? "Treasure" : s.what, true) + (s.weight > 1 ? ' <span class="note">(' + s.weight + " units each)</span>" : "") + "</td><td>" + s.n + "</td><td>" +
+          qstep("q-forge-" + i, picks[s.what] || 0, s.n, 0) + '<input type="hidden" class="forgewhat" data-i="' + i + '" value="' + esc(s.what) + '"></td></tr>';
+      }).join("") + "</table>" +
+      '<p class="small">' + totalSlot(function () {
+        var used = 0; stk.forEach(function (s, i) { used += val("q-forge-" + i) * s.weight; });
+        return used > f.budget ? '<b style="color:#8f2a1c">' + used + " of " + f.budget + " units: too many</b>" : used + " of " + f.budget + " units";
+      }) + "</p>" +
+      '<div class="actions"><button class="primary" data-act="forgeapply">Make them clean</button></div>';
+    return html + "</div>";
   }
 
   function cabinTab() {
@@ -22115,12 +22284,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
         hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
       var r = N().layUp(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Then " + gold(r.season) + " gold a season"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
+      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Plus " + gold(r.season) + " gold a season, paid when you take her back"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
         r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
     },
     "recover": function (el) {
       var id = who("shipwright"), r = N().recover(state, el.dataset.ship);
-      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? goldChip(-r.owed) : null] });
+      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? textChip("gold", "−" + gold(r.owed) + " gold for her anchorage", "mid") : null] });
     },
     "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
     "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },
@@ -22312,6 +22481,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var f = (state.fleet || []).filter(function (x) { return x.id === (el.dataset.to === "flagship" ? el.dataset.from : el.dataset.to); })[0];
       say("ship:fleet", null, plural(r.n, "hand") + (el.dataset.to === "flagship" ? " come back aboard the flagship from the " : " go across to the ") + (f ? f.name || f.cls : "ship") + ".", null, null,
         { chips: [textChip("officer", Object.keys(r.tiers).map(function (t) { return r.tiers[t] + " " + t; }).join(", "))] });
+    },
+    "forge": function () { var f = PC.forgery.roll(state); toast(f.outcome === "setback" ? "The papers won't pass" : "Papers for " + f.budget + " units"); },
+    "forgereroll": function () { PC.forgery.reroll(state); },
+    "forgeapply": function () {
+      var picks = {};
+      document.querySelectorAll(".forgewhat").forEach(function (el) { picks[el.value] = val("q-forge-" + el.dataset.i); });
+      var r = PC.forgery.apply(state, picks);
+      toast(r.cleared.length ? "Cleared: " + r.cleared.join(", ") : "Nothing cleared");
     },
     "stores": function (el) { var m = PC.crew.openStores(state, el.dataset.good); say("ship:stores", null, "The crew drink to your health.", null, null, { chips: [moraleChip(m)] }); },
     "closepopup": function () { state.location.popup = null; },

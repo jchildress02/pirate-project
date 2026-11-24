@@ -18,7 +18,8 @@
   function nodeData(id) { var n = PC.data.nodes[id]; if (!n) throw new Error("Unknown node: " + id); return n; }
   function here(state) { return state.location && state.location.node; }
   function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
-  function money(n) { return Math.round(n * 100) / 100; }
+  // Prices are whole gold (the author's ruling, November 24).
+  function money(n) { return Math.round(n); }
 
   // ---- The node's state ---------------------------------------------------
 
@@ -798,7 +799,7 @@
   function canRecover(state, fid) {
     var l = laidUpHere(state).filter(function (x) { return x.ship.id === fid; })[0];
     if (!l) return { ok: false, why: "She isn't laid up here" };
-    if (l.owed && !PC.crew.canPay(state, l.owed)) return { ok: false, why: "Clear the " + l.owed + " gold you owe on her first" };
+    if (l.owed && !PC.crew.canPay(state, l.owed)) return { ok: false, why: "Needs " + l.owed + " gold for her anchorage" };
     var spare = state.crew.count - (state.ship.crewMin || 5);
     if (spare < (l.ship.crewMin || 0)) return { ok: false, why: "Needs " + l.ship.crewMin + " hands to spare from your flagship" };
     return { ok: true, rec: l };
@@ -811,7 +812,6 @@
     if (!c.ok) throw new Error(c.why);
     var l = c.rec, f = l.ship;
     if (l.owed) PC.crew.payFrom(state, l.owed);
-    if (l.rungDown) PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), 1); // the debt is cleared
     state.laidUp = state.laidUp.filter(function (x) { return x !== l; });
     var tiers = PC.hunt.takeHands(state, f.crewMin || 0);
     f.crewTiers = tiers; f.crew = f.crewMin || 0;
@@ -825,25 +825,18 @@
       if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
     } else { f.kind = "prize"; f.officer = null; }
     state.fleet = (state.fleet || []).concat([f]);
-    PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying the " + l.owed + " gold owed" : "") + ".");
+    PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying " + l.owed + " gold for her anchorage" : "") + ".");
     return { ship: f, kind: f.kind, officer: o ? o.first : null, owed: l.owed, line: E().LAYUP.lines.recovered };
   }
-  // The season's charge (§20.4): 3% of hull value. DEFAULT: what can't be
-  // paid is owed, and must be cleared before she's taken back.
+  // The season's charge (§20.4): 3% of hull value, run up at each season's
+  // end and paid when she's taken back (the author's ruling, November 24).
+  // Until then nothing is owed anywhere else.
   function layUpSeason(state) {
-    var lines = [];
     (state.laidUp || []).forEach(function (l) {
-      var nd0 = nodeData(l.node), g = PC.meters.officialGate(state, l.node);
-      var due = Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
-      if (PC.crew.canPay(state, due)) { PC.crew.payFrom(state, due); lines.push("Anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + due + " gold."); }
-      else {
-        l.owed += due;
-        lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed.");
-        // The shipwright holding her thinks less of you until it's paid (the author's ruling).
-        if (!l.rungDown) { l.rungDown = true; PC.npcs.moveRung(state, slotNpc(l.node, "shipwright"), -1); lines.push(PC.npcs.get(state, slotNpc(l.node, "shipwright")).first + " won't forget it until you pay."); }
-      }
+      var g = PC.meters.officialGate(state, l.node);
+      l.owed = (l.owed || 0) + Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
     });
-    return lines;
+    return [];
   }
 
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
