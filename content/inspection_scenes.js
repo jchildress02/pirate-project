@@ -36,7 +36,7 @@
   var scenes = {};
   function S(id, o) {
     o.id = id; o.ap = o.ap || 0; o.repeat = o.repeat || "always"; o.kind = o.kind || "check";
-    o.title = o.title || "Customs"; o.where = o.where || "{insp_port}, the docks";
+    o.title = o.title || "Customs"; o.where = o.where || "The docks";
     o.conditions = o.conditions || ["Harbor", "Official"];
     o.choices.forEach(function (c, i) { c.id = c.id || "c" + i; c.approval = c.approval || []; });
     scenes[id] = o;
@@ -126,4 +126,11 @@
   });
 
   Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });
+
+  // Shown at each port's arrival banner (§41.1), wherever an inspection plays.
+  Object.keys(PC.data.nodes || {}).forEach(function (n) {
+    var pr = PC.data.nodes[n].present;
+    if (!pr || !pr.scenes || !(pr.places || {}).arrival) return;
+    Object.keys(scenes).forEach(function (id) { pr.scenes[id] = pr.scenes[id] || { place: "arrival" }; });
+  });
 })();
