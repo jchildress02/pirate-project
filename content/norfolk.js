@@ -47,6 +47,7 @@
     freePort: false,
     portFeeBase: 75,               // × Size × the Avalon band; halved with a letter (M8)
     feeTakerName: "Rupert Snodgrass",
+    layUpSlots: 2,                 // two ships at anchor here (§22.7)
     yardMax: 4,                    // the best yard in Avalon (§17.4.1)
     yardGate: { level: 4, standing: 20, faction: "avalon" }, // level 4 at Avalon 20+
     hullSales: "clean",            // clean hulls only (§17.4.4)

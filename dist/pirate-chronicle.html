@@ -3327,6 +3327,97 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
+  // ---- Laying a ship up at anchor (§22.7, §20.4, §28.2; Milestone 8, PR 3) ----
+  // Any ship but the flagship, from the Docks: 10% of hull value up front
+  // and 3% a season; Wary or better with the port's faction (+20% at Wary);
+  // one slot per node, two at Norfolk. Her crew and officer come off (to the
+  // flagship's berths, the rest paid off). She burns nothing, can't be
+  // struck by a hurricane and doesn't sail with the fleet. Recovered at the
+  // same port for 0 AP, crewed back to her minimum from the flagship.
+  function layUpValue(f) { return PC.data.hunt.HULL_VALUE[f.cls] || 0; }
+  function layUpSlots(id) { return nodeData(id).layUpSlots || E().LAYUP.SLOTS; }
+  function laidUpHere(state, id) { return (state.laidUp || []).filter(function (l) { return l.node === (id || here(state)); }); }
+  function layUpPrice(state, f) {
+    var g = PC.meters.officialGate(state, here(state));
+    return { up: Math.round(layUpValue(f) * E().LAYUP.UP * g.mult), season: Math.round(layUpValue(f) * E().LAYUP.SEASON * g.mult), gate: g };
+  }
+  function canLayUp(state, fid) {
+    var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
+    if (!f) return { ok: false, why: "No such ship" };
+    if (shipwrightGreeting(state).refuse) return { ok: false, why: "The yard won't deal with you" };
+    var p = layUpPrice(state, f);
+    if (!p.gate.ok) return { ok: false, why: p.gate.why, price: p };
+    if (laidUpHere(state).length >= layUpSlots(here(state))) return { ok: false, why: "The anchorage here is full (" + layUpSlots(here(state)) + (layUpSlots(here(state)) === 1 ? " ship" : " ships") + ")", price: p };
+    if (!PC.crew.canPay(state, p.up)) return { ok: false, why: "Needs " + p.up + " gold", price: p };
+    return { ok: true, price: p };
+  }
+  function layUp(state, fid) {
+    var c = canLayUp(state, fid);
+    if (!c.ok) throw new Error(c.why);
+    var f = state.fleet.filter(function (x) { return x.id === fid; })[0];
+    var paid = PC.crew.payFrom(state, c.price.up);
+    state.fleet = state.fleet.filter(function (x) { return x !== f; });
+    var wasFleet = f.kind === "fleet", officer = f.officer || null;
+    (state.officers || []).forEach(function (o) { if (o.aboard === fid) o.aboard = "flagship"; });
+    var home = 0, paidOff = 0, each = PC.crew.payOffEach(state);
+    var tiers = f.crewTiers || { Green: f.crew };
+    E().TIER_ORDER.forEach(function (t) {
+      var n = tiers[t] || 0, k = Math.min(n, PC.crew.berths(state));
+      if (k) { state.crew.tiers[t] = (state.crew.tiers[t] || 0) + k; state.crew.count += k; home += k; }
+      paidOff += n - k;
+    });
+    if (paidOff) PC.crew.payFrom(state, paidOff * each, true);
+    f.crew = 0; f.crewTiers = {};
+    (state.laidUp = state.laidUp || []).push({ ship: f, node: here(state), wasFleet: wasFleet, officer: officer, owed: 0, since: PC.state.stamp(state) });
+    var thrown = PC.crew.jettisonOverflow(state);
+    PC.state.addLog(state, "Laid up the " + (f.name || f.cls) + " at " + nodeData(here(state)).name + " for " + c.price.up + " gold.");
+    return { up: c.price.up, season: c.price.season, paid: paid, home: home, paidOff: paidOff, jettisoned: thrown, line: E().LAYUP.lines.laidUp };
+  }
+  function canRecover(state, fid) {
+    var l = laidUpHere(state).filter(function (x) { return x.ship.id === fid; })[0];
+    if (!l) return { ok: false, why: "She isn't laid up here" };
+    if (l.owed && !PC.crew.canPay(state, l.owed)) return { ok: false, why: "Clear the " + l.owed + " gold you owe on her first" };
+    var spare = state.crew.count - (state.ship.crewMin || 5);
+    if (spare < (l.ship.crewMin || 0)) return { ok: false, why: "Needs " + l.ship.crewMin + " hands to spare from your flagship" };
+    return { ok: true, rec: l };
+  }
+  // DEFAULT: a fleet ship comes back as a fleet ship if her old officer (or
+  // another non-mentor officer on the flagship) can take her; otherwise as
+  // a prize ship.
+  function recover(state, fid) {
+    var c = canRecover(state, fid);
+    if (!c.ok) throw new Error(c.why);
+    var l = c.rec, f = l.ship;
+    if (l.owed) PC.crew.payFrom(state, l.owed);
+    state.laidUp = state.laidUp.filter(function (x) { return x !== l; });
+    var tiers = PC.hunt.takeHands(state, f.crewMin || 0);
+    f.crewTiers = tiers; f.crew = f.crewMin || 0;
+    var o = null;
+    if (l.wasFleet) {
+      o = (state.officers || []).filter(function (x) { return x.id === l.officer && !x.gone && (x.aboard || "flagship") === "flagship"; })[0]
+        || (state.officers || []).filter(function (x) { return !x.gone && (x.aboard || "flagship") === "flagship" && !x.mentor; })[0];
+    }
+    if (o) {
+      f.kind = "fleet"; f.officer = o.id; o.aboard = f.id;
+      if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
+    } else { f.kind = "prize"; f.officer = null; }
+    state.fleet = (state.fleet || []).concat([f]);
+    PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying the " + l.owed + " gold owed" : "") + ".");
+    return { ship: f, kind: f.kind, officer: o ? o.first : null, owed: l.owed, line: E().LAYUP.lines.recovered };
+  }
+  // The season's charge (§20.4): 3% of hull value. DEFAULT: what can't be
+  // paid is owed, and must be cleared before she's taken back.
+  function layUpSeason(state) {
+    var lines = [];
+    (state.laidUp || []).forEach(function (l) {
+      var nd0 = nodeData(l.node), g = PC.meters.officialGate(state, l.node);
+      var due = Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
+      if (PC.crew.canPay(state, due)) { PC.crew.payFrom(state, due); lines.push("Anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + due + " gold."); }
+      else { l.owed += due; lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed."); }
+    });
+    return lines;
+  }
+
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
   function stripGuns(state, fid) {
     var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
@@ -3641,6 +3732,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
+    // An arrival inspection (§28.5): a line for a clean hold, the scene for a
+    // dirty one.
+    var insp = PC.inspections ? PC.inspections.onArrival(state, id) : null;
+    if (insp && insp.line) lines.push(insp.line);
+    if (insp && insp.scene) {
+      state.location.queue = (state.location.queue || []).concat([insp.scene]);
+      var all0 = pre.concat(lines);
+      state.location.popup = { title: "Arrival at " + nd.name, lines: all0, chips: all0.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), ok: "popupscene" };
+      return state.location.popup;
+    }
     // P16: the lines carry which pot paid in brackets, so the old pay chips
     // under them (which repeated the lines) are gone.
     var all = pre.concat(lines);
@@ -3692,6 +3793,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     shopPrice: shopPrice,
     demandOf: demandOf,
     standingBand: standingBand, docksConditions: docksConditions,
+    layUpPrice: layUpPrice, canLayUp: canLayUp, layUp: layUp, laidUpHere: laidUpHere, layUpSlots: layUpSlots, canRecover: canRecover, recover: recover, layUpSeason: layUpSeason,
     purchaseMult: purchaseMult,
     slotNpc: slotNpc,
     greeting: greeting,
@@ -9215,7 +9317,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         var d = H().UNCOVERED[side + " " + kind], key = fac.toLowerCase();
         PC.scenes.applyEffect(state, { standing: { faction: key, delta: d[1] } });
         out.push(mchip("standing", "standing:" + key, d[1], fac + " Standing {+n}", key));
-        if (!executed) { PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } }); out.push(mchip("heat", "heat:" + key, d[0], fac + " Heat {+n}", key)); }
+        if (!executed) {
+          var wasB = PC.meters.betrayalActive(state, key), h0 = state.meters.heat[key] || 0;
+          PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } });
+          var gained = (state.meters.heat[key] || 0) - h0;
+          out.push(mchip("heat", "heat:" + key, gained, fac + " Heat {+n}", key));
+          if (!wasB && PC.meters.betrayalActive(state, key)) out.push({ icon: "heat", text: "Betrayal: " + fac + " remembers. Your Heat gains with them are doubled for a year.", ink: "bad" });
+        }
       });
     }
     // France and Sicily keep grudge counters (§22.5); Spain feeds France's.
@@ -9410,7 +9518,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
           draft: s.draft, cue: s.cue, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
-          legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s) };
+          legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s, state) };
       }),
     };
   }
@@ -9431,9 +9539,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return best;
   }
 
-  function meterNote(s) {
-    if (s.flag === "Avalon" || s.flag === "Burgundy" || s.flag === "Sweden") return "taking her costs Avalon Standing and Heat.";
-    if (s.flag === "Frisia" || s.flag === "Ireland") return "taking her costs Frisian Standing and Heat.";
+  // A prize against a faction you stand at 40+ with is a betrayal (§28.6):
+  // the scouting card says so before you engage.
+  function betrayalNote(state, f) {
+    if (!state || (state.meters.standing[f] || 0) < 40) return "";
+    return " Betrayal: you stand high with " + (f === "avalon" ? "Avalon" : "Frisia") + ", so taking her costs +" + PC.data.meterRules.BETRAYAL_HEAT + " Heat on top, and doubles your Heat gains with them for a year.";
+  }
+  function meterNote(s, state) {
+    if (s.flag === "Avalon" || s.flag === "Burgundy" || s.flag === "Sweden") return "taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
+    if (s.flag === "Frisia" || s.flag === "Ireland") return "taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
     if (s.flag === "France" || s.flag === "Spain") return "France will remember it.";
     if (s.flag === "Sicily") return "Sicily will send hunters after you.";
     return "nobody here will mind.";
@@ -9590,7 +9704,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
-    doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
+    takeHands: takeHands, doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
@@ -9921,6 +10035,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
+    // Laid-up ships' anchorage (§20.4).
+    out.lines = out.lines.concat(PC.node.layUpSeason(state));
     // The meters (§28): Heat bleed, Standing's drift, Dread's decay.
     var mt = PC.meters.seasonEnd(state);
     out.lines = out.lines.concat(mt.lines);
@@ -11605,6 +11721,172 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — arrival inspections (§28.5; Milestone 8, PR 3).
+ *
+ * Inspections go by the port's control: Admiralty ports from Heat 20
+ * (Noticed 10%, Wanted 25%, Hunted 50%, Most Wanted 75%), governor ports at
+ * half the band's chance from Heat 40, merchant ports never (they shake you
+ * down on the fee instead: not live in this build). A clean hold gets a line
+ * in the arrival popup; a dirty one plays the inspection scene
+ * (content/inspection_scenes.js). Norfolk's scripted first arrival is its
+ * own scene (js/norfolk.js) and fires instead of this, once.
+ *
+ * No screen code here.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function R() { return PC.data.inspectionRules; }
+  function E() { return PC.data.economy; }
+  function here(state) { return state.location && state.location.node; }
+  function nd(id) { return PC.data.nodes[id]; }
+
+  // What kind of port this is for inspections: "admiralty", "governor",
+  // "merchant" or null (no faction control: Ocracoke).
+  function kind(id) {
+    var n = nd(id), c = (n && n.control) || "";
+    if (n && n.inspect) return n.inspect;
+    if (/Admiralty/.test(c)) return "admiralty";
+    if (/Governor/.test(c)) return "governor";
+    if (/Merchant/.test(c)) return "merchant";
+    return null;
+  }
+
+  function chance(state, id) {
+    var k = kind(id), n = nd(id);
+    if (!k || k === "merchant" || !n || (n.faction !== "avalon" && n.faction !== "frisia")) return 0;
+    var h = state.meters.heat[n.faction] || 0, band = PC.meters.heatBand(h);
+    var p = R().CHANCE[band] || 0;
+    if (k === "governor") return h >= R().GOVERNOR_FROM ? p * R().GOVERNOR_MULT : 0;
+    return p;
+  }
+
+  // ---- The goods and their price -------------------------------------------
+
+  function unitValue(state, id, what) {
+    if (what === "treasure") return E().TREASURE_UNIT * PC.node.tierOf(state, id).treasure;
+    return PC.node.salePrice(state, id, what);
+  }
+  // Every dirty stack aboard (dirty treasure counts as searchable cargo,
+  // ruled D6). Forged goods are clean already (§20.3).
+  function dirtyStacks(state) {
+    var out = [];
+    Object.keys(state.cargo.goods).forEach(function (g) { var n = (state.cargo.goods[g] || {}).dirty || 0; if (n) out.push({ what: g, n: n }); });
+    if (state.cargo.treasure.dirty) out.push({ what: "treasure", n: state.cargo.treasure.dirty });
+    return out;
+  }
+  // The fence value of what they found (§28.5: the bribe and the jail
+  // threshold both read it).
+  function foundValue(state, id) {
+    id = id || here(state);
+    return Math.round(dirtyStacks(state).reduce(function (a, s) { return a + s.n * unitValue(state, id, s.what) * E().FENCE_RATE; }, 0));
+  }
+  function k(state) { return kind(here(state)) || "admiralty"; }
+  function bribeBefore(state) { return R().BRIBE_BEFORE[k(state)] * PC.node.portFee(state, here(state)); }
+  function bribeFound(state) { return Math.max(R().BRIBE_FOUND_MIN, Math.round(R().BRIBE_FOUND[k(state)] * foundValue(state))); }
+  function threshold(state) { return R().JAIL_ABOVE[k(state)]; }
+  // Above the threshold "Take it, then" is locked: the captain has to roll.
+  function overThreshold(state) { return foundValue(state) > threshold(state); }
+  function crate(state) {
+    var r = dirtyStacks(state).slice().sort(function (a, b) { return b.n - a.n; })[0];
+    if (!r) return "contraband";
+    return r.what === "treasure" ? "stolen silver" : r.what.toLowerCase();
+  }
+
+  function confiscate(state) {
+    var gone = [];
+    dirtyStacks(state).forEach(function (s) {
+      if (s.what === "treasure") state.cargo.treasure.dirty -= s.n;
+      else PC.crew.removeGood(state, s.what, s.n, true);
+      gone.push(s.n + " " + (s.what === "treasure" ? "dirty treasure" : s.what));
+    });
+    return gone;
+  }
+
+  // Bribes come from the purse (§27.1); crew gold covers what it can't.
+  function pay(state, amt) {
+    amt = Math.round(amt);
+    var fromPurse = Math.min(state.money.purse, amt);
+    state.money.purse -= fromPurse;
+    var fromCrew = Math.min(state.money.crew, amt - fromPurse);
+    state.money.crew -= fromCrew;
+    return (fromPurse ? fromPurse + " purse gold" : "") + (fromPurse && fromCrew ? ", " : "") + (fromCrew ? fromCrew + " crew gold" : "");
+  }
+  function canPay(state, amt) { return state.money.purse + state.money.crew >= Math.round(amt); }
+
+  // ---- On arrival -------------------------------------------------------------
+  // Returns null (no inspection), { line } (a clean hold) or { scene }.
+  function onArrival(state, id) {
+    var p = chance(state, id);
+    if (!p) return null;
+    var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), id, "inspection", state.rolls.inspection = (state.rolls.inspection || 0) + 1].join("|"));
+    if (r() >= p) return null;
+    state.flags.insp_last = PC.state.stamp(state);
+    if (!dirtyStacks(state).length) return { line: R().lines.clean };
+    return { scene: "insp_search" };
+  }
+
+  // ---- The scene's tests and effects ---------------------------------------------
+  var F = PC.sceneFns;
+  F.addCond("inspDirty", function (state) { return dirtyStacks(state).length > 0; });
+  F.addCond("inspJailed", function (state) { return !!(state.gameOver && state.gameOver.line === "jailed"); });
+  F.addCond("inspUnder", function (state) { return !overThreshold(state); });
+  F.addCond("inspAfford", function (state, what, mult) {
+    var base = what === "found" ? bribeFound(state) : bribeBefore(state);
+    return canPay(state, base * Number(mult || 1));
+  });
+  F.addHook("insp_pay", {
+    amount: function (state, e) { return Math.round((e.what === "found" ? bribeFound(state) : bribeBefore(state)) * (e.mult || 1)); },
+    apply: function (state, e) { return "Paid " + pay(state, this.amount(state, e)) + "."; },
+    chip: function (state, e) { return { icon: "gold", text: "−" + this.amount(state, e) + " gold (your purse first)", ink: "mid" }; },
+  });
+  // "Take it, then" (§28.5): confiscation and Heat +5, never jail.
+  F.addHook("insp_take", {
+    apply: function (state) {
+      var g = confiscate(state);
+      PC.meters.addHeat(state, nd(here(state)).faction, R().HEAT_CONFISCATED);
+      return g.length ? "Confiscated: " + g.join(", ") + "." : null;
+    },
+    chip: function (state) { return { icon: "treasure", text: "Confiscated: everything dirty aboard · " + factionName(state) + " Heat +" + R().HEAT_CONFISCATED, ink: "bad" }; },
+  });
+  // A setback (§28.5): confiscation, Heat +5 and the port fee again; jail
+  // above the threshold. Jail ends the run until §43 is built (PR 6).
+  F.addHook("insp_setback", {
+    apply: function (state) {
+      var id = here(state), jail = overThreshold(state);
+      var g = confiscate(state);
+      PC.meters.addHeat(state, nd(id).faction, R().HEAT_CONFISCATED);
+      var fee = PC.node.portFee(state, id), paid = PC.crew.payFrom(state, fee, true);
+      var line = (g.length ? "Confiscated: " + g.join(", ") + ". " : "") + "Fined " + (paid.crew + paid.purse) + " gold.";
+      if (jail) {
+        state.flags.jailed_at = id;
+        state.gameOver = { how: "captured", line: "jailed" };
+        line += " Jailed.";
+      }
+      return line;
+    },
+    chip: function (state) {
+      return { icon: "treasure", text: "Confiscated · " + factionName(state) + " Heat +" + R().HEAT_CONFISCATED + " · a fine of the port fee" + (overThreshold(state) ? " · jail" : ""), ink: "bad" };
+    },
+  });
+  function factionName(state) { return nd(here(state)).faction === "frisia" ? "Frisian" : "Avalon"; }
+
+  // Tokens for the scene's text.
+  PC.text.vars.insp_before = function (state) { return bribeBefore(state) + " gold"; };
+  PC.text.vars.insp_before_2 = function (state) { return bribeBefore(state) * 2 + " gold"; };
+  PC.text.vars.insp_found = function (state) { return bribeFound(state) + " gold"; };
+  PC.text.vars.insp_found_2 = function (state) { return bribeFound(state) * 2 + " gold"; };
+  PC.text.vars.insp_crate = function (state) { return crate(state); };
+  PC.text.vars.insp_port = function (state) { return nd(here(state)).name; };
+
+  PC.inspections = {
+    kind: kind, chance: chance, onArrival: onArrival, dirtyStacks: dirtyStacks, foundValue: foundValue,
+    bribeBefore: bribeBefore, bribeFound: bribeFound, threshold: threshold, overThreshold: overThreshold, confiscate: confiscate,
+  };
+})();
+</script>
+  <script>
 /* Pirate Chronicle — Developer tools that change the game state (§41.12).
  *
  * Skip the mandatory quests: A Dying Pirate's Wish, Welcome to the
@@ -12580,6 +12862,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     "Gold dust": { base: 400, kind: "precious" },
     "Emeralds": { base: 600, kind: "precious" },
     "Bengali gems": { base: 800, kind: "precious" },
+  };
+
+  // Laying a ship up (§22.7, §20.4): 10% of hull value up front, 3% a season;
+  // one slot a node (Norfolk sets its own two). Lines are PLACEHOLDERs.
+  PC.data.economy.LAYUP = {
+    UP: 0.10, SEASON: 0.03, SLOTS: 1,
+    lines: {
+      laidUp: "PLACEHOLDER: The yard's boatmen tow her out to the anchorage and set a watchman aboard.",
+      recovered: "PLACEHOLDER: Your hands row out, the watchman climbs down, and she's yours again.",
+    },
   };
 
   // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
@@ -17046,6 +17338,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     freePort: false,
     portFeeBase: 75,               // × Size × the Avalon band; halved with a letter (M8)
     feeTakerName: "Rupert Snodgrass",
+    layUpSlots: 2,                 // two ships at anchor here (§22.7)
     yardMax: 4,                    // the best yard in Avalon (§17.4.1)
     yardGate: { level: 4, standing: 20, faction: "avalon" }, // level 4 at Avalon 20+
     hullSales: "clean",            // clean hulls only (§17.4.4)
@@ -17994,7 +18287,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         R("He steps back. \"Oh, you must be the timber merchant from New Scotland that he mentioned! I apologize for the trouble. Enjoy your time in Norfolk.\" He and the soldiers depart without another word."),
         R("He steps back and sizes you up. \"Hmm, I'm not sure that I buy that story, but the inspection is at my discretion. I might reconsider if you made it worth my while.\"", [], "nor_fv1_deal", { carry: true }),
         R("\"A likely story. Unfortunately, the inspection is required of all ships.\"", [], "nor_fv1_hold")),
-      // Bribe: base DR 1, +1 at an Admiralty port (records §5). DEFAULT: Heat's step (§6) isn't added yet.
+      // Bribe: base DR 1, +1 at an Admiralty port (records §5). Heat's DR step joins by itself (§28.4, ruled D6).
       K("I'm just now realizing I gave you the wrong amount for the port fee earlier. Here's the rest. ({bribe_before})", ["Caution"], { type: "Bribe", dr: 2 },
         R(DEAL_ONE, [{ hook: "nor_pay", what: "bribe_before", mult: 1 }]),
         R("He shifts uncomfortably. He lowers his voice and whispers, \"Double.\"", [], "nor_fv1_double_before", { carry: true }),
@@ -18281,6 +18574,144 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   });
   PC.data.nodes.norfolk.firstArrival = "nor_fv1";
   PC.data.nodes.norfolk.firstEntry = Object.assign(PC.data.nodes.norfolk.firstEntry || {}, { tavern: ["nor_ht_1", "nor_ht_reentry"] });
+})();
+</script>
+  <script>
+/* Pirate Chronicle — the general arrival inspection (§28.5; Milestone 8, PR 3).
+ *
+ * Plays when an inspection finds a dirty hold at an Admiralty or governor
+ * port (js/inspections.js). Norfolk's first arrival has its own written
+ * scene (records §5); this is the slimmed version for every later
+ * inspection. Every line is a PLACEHOLDER for the author (PH25).
+ *
+ * The rules: the bribe before the search is 4× the port fee at an
+ * Admiralty port (2× at a governor's), Bribe DR 1 +1; after the goods are
+ * found, half their fence value (a quarter), DR 1 +2; a partial doubles it.
+ * Heat's DR step joins Bribe and Ship Concealment by itself (§28.4, D6).
+ * "Take it, then" confiscates with Heat +5 and never jails, and locks above
+ * the jail threshold. A setback confiscates, Heat +5, fines the port fee
+ * again, and jails above the threshold.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+  PC.data.scenes = PC.data.scenes || {};
+
+  PC.data.inspectionRules = {
+    // §28.4's table: Admiralty ports from Heat 20.
+    CHANCE: { "Cold": 0, "Noticed": 0.10, "Wanted": 0.25, "Hunted": 0.50, "Most Wanted": 0.75 },
+    GOVERNOR_FROM: 40, GOVERNOR_MULT: 0.5,           // governor ports: half the chance, from Heat 40
+    BRIBE_BEFORE: { admiralty: 4, governor: 2 },      // × the port fee
+    BRIBE_FOUND: { admiralty: 0.5, governor: 0.25 },  // × the fence value of the goods found
+    BRIBE_FOUND_MIN: 20,                              // the floor on the found bribe (PH23, ruled D6)
+    JAIL_ABOVE: { admiralty: 1500, governor: 3000 },  // fence value of the goods found
+    HEAT_CONFISCATED: 5,
+    lines: {
+      clean: "PLACEHOLDER: Customs men come aboard and poke through your hold. They find nothing worth their time.",
+    },
+  };
+
+  var scenes = {};
+  function S(id, o) {
+    o.id = id; o.ap = o.ap || 0; o.repeat = o.repeat || "always"; o.kind = o.kind || "check";
+    o.title = o.title || "Customs"; o.where = o.where || "The docks";
+    o.conditions = o.conditions || ["Harbor", "Official"];
+    o.choices.forEach(function (c, i) { c.id = c.id || "c" + i; c.approval = c.approval || []; });
+    scenes[id] = o;
+  }
+  function R(text, effects, exit, more) { return Object.assign({ text: text || "", effects: effects || [], exit: exit || "hub" }, more || {}); }
+  function K(label, approval, check, clean, partial, setback, more) {
+    return Object.assign({ label: label, approval: approval, check: check, outcomes: { clean: clean, partial: partial, setback: setback } }, more || {});
+  }
+  function C(label, approval, result, more) { return Object.assign({ label: label, approval: approval, result: result }, more || {}); }
+
+  var LEAVE = "PLACEHOLDER: The officer tucks his ledger under his arm and leads his men back down the gangplank.";
+  var PAID = "PLACEHOLDER: The pouch disappears into his coat. \"Everything appears to be in order, Captain.\"";
+  var afford = function (what, mult) { return { lockedUnless: { fn: "inspAfford:" + what + ":" + mult }, lockedReason: "Not enough gold" }; };
+  var take = C("Take it, then.", ["Retreat"], R("PLACEHOLDER: His men carry the goods off as he writes your name in his ledger.", [{ hook: "insp_take" }]),
+    { lockedUnless: { fn: "inspUnder" }, lockedReason: "Too much to walk away from" });
+  var bribeFound = K("PLACEHOLDER: Surely there's a fee for the paperwork. ({insp_found})", ["Caution"], { type: "Bribe", dr: 3 },
+    R(PAID, [{ hook: "insp_pay", what: "found", mult: 1 }]),
+    R("PLACEHOLDER: He lowers his voice. \"Double.\"", [], "insp_double_found", { carry: true }),
+    R("", [], "insp_setback"),
+    afford("found", 1));
+
+  S("insp_search", {
+    setup: "PLACEHOLDER: Customs officers come down the dock as your crew makes fast. Their officer opens his ledger. \"Orders from the Admiralty, Captain. We'll be searching your hold.\"",
+    manyChoices: true,
+    choices: [
+      C("Search away.", ["Caution"], R("", [], "insp_found")),
+      K("PLACEHOLDER: I think I owe a little more on the port fee. ({insp_before})", ["Caution"], { type: "Bribe", dr: 2 },
+        R(PAID, [{ hook: "insp_pay", what: "before", mult: 1 }]),
+        R("PLACEHOLDER: He lowers his voice. \"Double.\"", [], "insp_double_before", { carry: true }),
+        R("PLACEHOLDER: \"Put your purse away, Captain.\" His men head for your hatch.", [], "insp_found"),
+        afford("before", 1)),
+      K("PLACEHOLDER: We've been searched twice this month. Surely you have better uses for your men.", ["Deceit"], { type: "Persuade", dr: 2 },
+        R(LEAVE),
+        R("PLACEHOLDER: \"Nice try.\" His men head for your hatch.", [], "insp_found"),
+        R("PLACEHOLDER: \"Now I'm curious.\" His men head for your hatch.", [], "insp_found")),
+      K("PLACEHOLDER: Cast off before they reach the gangplank.", ["Risk"], { type: "Ship Concealment", dr: 2 },
+        R("PLACEHOLDER: By the time they reach your berth, you're halfway across the harbor with another ship between you. They don't bother coming after you."),
+        R("PLACEHOLDER: They catch your lines before you're clear, and come aboard red-faced.", [], "insp_found"),
+        R("PLACEHOLDER: A guard boat cuts you off. They come aboard red-faced.", [], "insp_found")),
+    ],
+  });
+
+  S("insp_double_before", {
+    setup: "PLACEHOLDER: He lowers his voice. \"Double.\"",
+    choices: [
+      C("Deal. ({insp_before_2})", ["Caution"], R(PAID, [{ hook: "insp_pay", what: "before", mult: 2 }]), afford("before", 2)),
+      C("That's too much.", ["Defiance"], R("PLACEHOLDER: \"Then we search.\"", [], "insp_found")),
+    ],
+  });
+
+  S("insp_found", {
+    manyChoices: true,
+    setup: "PLACEHOLDER: His men come up from your hold carrying a crate of {insp_crate}. \"No customs seal on this, Captain.\"",
+    choices: [
+      take,
+      bribeFound,
+      K("PLACEHOLDER: That's a clerk's mistake, nothing more. Check your ledger again.", ["Deceit"], { type: "Persuade", dr: 3 },
+        R("PLACEHOLDER: He frowns at his ledger for a long moment, then waves his men off. \"Keep it below decks.\""),
+        R("PLACEHOLDER: He glances along the dock. \"I might be persuaded.\"", [], "insp_limited", { carry: true }),
+        R("", [], "insp_setback")),
+    ],
+  });
+
+  S("insp_limited", {
+    setup: "PLACEHOLDER: He glances along the dock. \"I might be persuaded.\"",
+    choices: [take, bribeFound],
+  });
+
+  S("insp_double_found", {
+    setup: "PLACEHOLDER: He lowers his voice. \"Double.\"",
+    choices: [
+      C("Deal. ({insp_found_2})", ["Caution"], R(PAID, [{ hook: "insp_pay", what: "found", mult: 2 }]), afford("found", 2)),
+      take,
+      C("That's too much.", ["Defiance"], R("", [], "insp_setback")),
+    ],
+  });
+
+  // The setback: confiscation, Heat +5, the fee again; jail above the
+  // threshold (to the end screen until §43 is built, PR 6).
+  S("insp_setback", {
+    kind: "beat",
+    setup: [
+      { when: { fn: "inspUnder" }, text: "PLACEHOLDER: \"Smuggling is a serious matter, Captain.\" His men haul the goods away, and he writes out a fine." },
+      { when: { not: { fn: "inspUnder" } }, text: "PLACEHOLDER: \"This much contraband? You're coming with us, Captain.\" Soldiers seize you by the arms as your crew looks on." },
+    ],
+    choices: [C("Continue", [], R("", [{ hook: "insp_setback" }], [{ when: { fn: "inspUnder" }, to: "hub" }, "end"]))], // the exit is read before the effects land
+  });
+
+  Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });
+
+  // Shown at each port's arrival banner (§41.1), wherever an inspection plays.
+  Object.keys(PC.data.nodes || {}).forEach(function (n) {
+    var pr = PC.data.nodes[n].present;
+    if (!pr || !pr.scenes || !(pr.places || {}).arrival) return;
+    Object.keys(scenes).forEach(function (id) { pr.scenes[id] = pr.scenes[id] || { place: "arrival" }; });
+  });
 })();
 </script>
   <script>
@@ -19878,11 +20309,28 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(f.name || f.cls, f.dirty) + '</b> <span class="note">' + esc(f.cls + " · " + (f.kind === "fleet" ? "fleet ship" : "prize ship") +
           " · hull " + Math.round(f.hull) + "/" + f.hullMax + " · " + f.guns + " guns · " + f.crew + " aboard") + "</span></span> " +
           (p.ok ? '<button class="secondary" data-act="sellhull" data-ship="' + esc(f.id) + '">Sell her · ' + gold(p.total) + " gold</button>" : '<span class="note">' + esc(p.why) + "</span>") +
-          (f.guns && room > 0 ? '<button class="secondary" data-act="stripguns" data-ship="' + esc(f.id) + '">Move ' + Math.min(f.guns, room) + " guns to your flagship</button>" : "") + "</div>" +
+          (f.guns && room > 0 ? '<button class="secondary" data-act="stripguns" data-ship="' + esc(f.id) + '">Move ' + Math.min(f.guns, room) + " guns to your flagship</button>" : "") +
+          // Lay her up at anchor (§22.7): 10% up front, 3% a season.
+          (function () {
+            var lu = N().canLayUp(state, f.id), pr = lu.price || N().layUpPrice(state, f);
+            return lu.ok ? '<button class="secondary" data-act="layup" data-ship="' + esc(f.id) + '">Lay her up · ' + gold(pr.up) + " gold, then " + gold(pr.season) + " a season</button>"
+              : '<span class="note">Lay her up: ' + esc(lu.why) + "</span>";
+          })() + "</div>" +
           (p.ok ? '<p class="note" style="margin:2px 0 8px">Hull ' + gold(p.hull) + (p.repair ? " (after " + gold(p.repair) + " of repairs)" : "") + " + guns " + gold(p.guns) + ". Her hands come back aboard; any without a berth are paid off." +
             // Her effect on the hold (A9).
             " The hold goes from " + hh.capBefore + " to " + hh.capAfter + " (" + hh.used + " used)" + (hh.over ? '; <b style="color:#8f2a1c">' + hh.over + " slots won't fit and go over the side</b>" : "") + ".</p>" : "");
       }).join("") + "</div>";
+    }
+    // At anchor here (§22.7): take a laid-up ship back, 0 AP.
+    var lu = N().laidUpHere(state);
+    if (lu.length || fl.length) {
+      html += '<div class="svc"><h4>At anchor here</h4><p class="small">Laid-up ships burn nothing, are safe from hurricanes and stay here until you take them back. ' +
+        N().laidUpHere(state).length + " of " + N().layUpSlots(N().here(state)) + " berths used.</p>" +
+        lu.map(function (l) {
+          var r = N().canRecover(state, l.ship.id);
+          return '<div class="buyrow" style="flex-wrap:wrap"><span><b>' + dirtyName(l.ship.name || l.ship.cls, l.ship.dirty) + '</b> <span class="note">' + esc(l.ship.cls + " · needs " + (l.ship.crewMin || 0) + " hands" + (l.owed ? " · " + l.owed + " gold owed" : "")) + "</span></span> " +
+            (r.ok ? '<button class="secondary" data-act="recover" data-ship="' + esc(l.ship.id) + '">Take her back</button>' : '<span class="note">' + esc(r.why) + "</span>") + "</div>";
+        }).join("") + "</div>";
     }
     html += "</div>" + DIVIDER;
     // Hands on the Docks (§24.7, §41.8)
@@ -21103,6 +21551,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // The full captain sheet (§41.12).
+  // How the meters move, in plain words (§28; the author asked that the
+  // offense and betrayal rules be clear to the player).
+  function meterHelp() {
+    var R = PC.data.meterRules, b = [];
+    ["avalon", "frisia"].forEach(function (f) {
+      if (PC.meters.betrayalActive(state, f)) b.push((f === "avalon" ? "Avalon" : "Frisia") + " is still angry about your betrayal: Heat gains with them are doubled.");
+    });
+    return '<details class="card2" style="margin-top:10px"><summary><b>How these move</b>' + CARET + '</summary><div class="inner small">' +
+      "<p><b>Heat</b> cools every season: −" + R.BLEED.mid.clean + " (−" + R.BLEED.high.clean + " if they think well of you, −" + R.BLEED.low.clean + " if they hate you). " +
+      "In a season when you gain Heat with a faction (an <b>offense</b>, like taking one of their ships), it cools less: −" + R.BLEED.mid.offense + ". Executing a crew leaves no witnesses, so it gains no Heat and is no offense.</p>" +
+      "<p><b>Betrayal:</b> an offense against a faction you stand at 40 or more with costs +" + R.BETRAYAL_HEAT + " Heat on top, and doubles your Heat gains with them for a year. The scouting card warns you first.</p>" +
+      "<p><b>Standing</b> below Neutral mends by " + R.DRIFT + " a season with no offense against that faction, up to Neutral's edge (−9).</p>" +
+      "<p><b>Dread</b> fades by " + R.DREAD_DECAY + " a season unless you do something fearsome (a ship striking without a fight, winning a duel, an execution, Make an Example), and never below your Dread floor.</p>" +
+      b.map(function (x) { return '<p class="notice warn">' + esc(x) + "</p>"; }).join("") + "</div></details>";
+  }
+
   function menuCaptain() {
     var c = state.captain, pic = PC.creator.captainPortrait(c);
     var loss = (PC.data.creator.LOSSES || []).filter(function (l) { return l.id === c.loss; })[0];
@@ -21126,7 +21590,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", state.provisions + " lots · " + esc(seaTime(state.provisions))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
-      meters(true) + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+      meters(true) + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -21367,6 +21831,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths" + (r.paidFromPurse ? " (" + gold(r.paidFromPurse) + " from your purse)" : "")) : null]
           .concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) } : null);
       if (r.gold) toast("Sold her · +" + gold(r.gold) + " crew gold");
+    },
+    // Laying a ship up (§22.7): her hold leaves with her, so warn as a sale does.
+    "layup": function (el) {
+      var id = who("shipwright"), hh = N().hullSaleHold(state, el.dataset.ship);
+      if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
+      var r = N().layUp(state, el.dataset.ship);
+      say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Then " + gold(r.season) + " gold a season"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
+        r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
+    },
+    "recover": function (el) {
+      var id = who("shipwright"), r = N().recover(state, el.dataset.ship);
+      say(id, firstName(id), r.line, null, null, { chips: [textChip("ship", "She sails with you again as a " + r.kind + " ship" + (r.officer ? " under " + r.officer : "")), r.owed ? goldChip(-r.owed) : null] });
     },
     "stripguns": function (el) { var n = N().stripGuns(state, el.dataset.ship); toast(plural(n, "gun") + " moved to your flagship"); },
     "goplace": function (el) { if (state.current.screen === "node") enterPlace(el.dataset.place); },

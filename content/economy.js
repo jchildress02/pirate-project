@@ -103,6 +103,16 @@
     "Bengali gems": { base: 800, kind: "precious" },
   };
 
+  // Laying a ship up (§22.7, §20.4): 10% of hull value up front, 3% a season;
+  // one slot a node (Norfolk sets its own two). Lines are PLACEHOLDERs.
+  PC.data.economy.LAYUP = {
+    UP: 0.10, SEASON: 0.03, SLOTS: 1,
+    lines: {
+      laidUp: "PLACEHOLDER: The yard's boatmen tow her out to the anchorage and set a watchman aboard.",
+      recovered: "PLACEHOLDER: Your hands row out, the watchman climbs down, and she's yours again.",
+    },
+  };
+
   // §28 The meters' numbers (Milestone 8, PR 2). Every one a placeholder;
   // the Tuning Table lists them. Rules in js/meters.js.
   PC.data.meterRules = {

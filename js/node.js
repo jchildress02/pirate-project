@@ -732,6 +732,97 @@
     return { gold: p.total, home: home, paid: paid, payEach: each, paidFromPurse: paidOff.purse, jettisoned: thrown, line: nodeData(here(state)).lines.shipwright.hullSold || "PLACEHOLDER: \"I'll have my boys break her down for parts. Pleasure doing business.\"" };
   }
 
+  // ---- Laying a ship up at anchor (§22.7, §20.4, §28.2; Milestone 8, PR 3) ----
+  // Any ship but the flagship, from the Docks: 10% of hull value up front
+  // and 3% a season; Wary or better with the port's faction (+20% at Wary);
+  // one slot per node, two at Norfolk. Her crew and officer come off (to the
+  // flagship's berths, the rest paid off). She burns nothing, can't be
+  // struck by a hurricane and doesn't sail with the fleet. Recovered at the
+  // same port for 0 AP, crewed back to her minimum from the flagship.
+  function layUpValue(f) { return PC.data.hunt.HULL_VALUE[f.cls] || 0; }
+  function layUpSlots(id) { return nodeData(id).layUpSlots || E().LAYUP.SLOTS; }
+  function laidUpHere(state, id) { return (state.laidUp || []).filter(function (l) { return l.node === (id || here(state)); }); }
+  function layUpPrice(state, f) {
+    var g = PC.meters.officialGate(state, here(state));
+    return { up: Math.round(layUpValue(f) * E().LAYUP.UP * g.mult), season: Math.round(layUpValue(f) * E().LAYUP.SEASON * g.mult), gate: g };
+  }
+  function canLayUp(state, fid) {
+    var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
+    if (!f) return { ok: false, why: "No such ship" };
+    if (shipwrightGreeting(state).refuse) return { ok: false, why: "The yard won't deal with you" };
+    var p = layUpPrice(state, f);
+    if (!p.gate.ok) return { ok: false, why: p.gate.why, price: p };
+    if (laidUpHere(state).length >= layUpSlots(here(state))) return { ok: false, why: "The anchorage here is full (" + layUpSlots(here(state)) + (layUpSlots(here(state)) === 1 ? " ship" : " ships") + ")", price: p };
+    if (!PC.crew.canPay(state, p.up)) return { ok: false, why: "Needs " + p.up + " gold", price: p };
+    return { ok: true, price: p };
+  }
+  function layUp(state, fid) {
+    var c = canLayUp(state, fid);
+    if (!c.ok) throw new Error(c.why);
+    var f = state.fleet.filter(function (x) { return x.id === fid; })[0];
+    var paid = PC.crew.payFrom(state, c.price.up);
+    state.fleet = state.fleet.filter(function (x) { return x !== f; });
+    var wasFleet = f.kind === "fleet", officer = f.officer || null;
+    (state.officers || []).forEach(function (o) { if (o.aboard === fid) o.aboard = "flagship"; });
+    var home = 0, paidOff = 0, each = PC.crew.payOffEach(state);
+    var tiers = f.crewTiers || { Green: f.crew };
+    E().TIER_ORDER.forEach(function (t) {
+      var n = tiers[t] || 0, k = Math.min(n, PC.crew.berths(state));
+      if (k) { state.crew.tiers[t] = (state.crew.tiers[t] || 0) + k; state.crew.count += k; home += k; }
+      paidOff += n - k;
+    });
+    if (paidOff) PC.crew.payFrom(state, paidOff * each, true);
+    f.crew = 0; f.crewTiers = {};
+    (state.laidUp = state.laidUp || []).push({ ship: f, node: here(state), wasFleet: wasFleet, officer: officer, owed: 0, since: PC.state.stamp(state) });
+    var thrown = PC.crew.jettisonOverflow(state);
+    PC.state.addLog(state, "Laid up the " + (f.name || f.cls) + " at " + nodeData(here(state)).name + " for " + c.price.up + " gold.");
+    return { up: c.price.up, season: c.price.season, paid: paid, home: home, paidOff: paidOff, jettisoned: thrown, line: E().LAYUP.lines.laidUp };
+  }
+  function canRecover(state, fid) {
+    var l = laidUpHere(state).filter(function (x) { return x.ship.id === fid; })[0];
+    if (!l) return { ok: false, why: "She isn't laid up here" };
+    if (l.owed && !PC.crew.canPay(state, l.owed)) return { ok: false, why: "Clear the " + l.owed + " gold you owe on her first" };
+    var spare = state.crew.count - (state.ship.crewMin || 5);
+    if (spare < (l.ship.crewMin || 0)) return { ok: false, why: "Needs " + l.ship.crewMin + " hands to spare from your flagship" };
+    return { ok: true, rec: l };
+  }
+  // DEFAULT: a fleet ship comes back as a fleet ship if her old officer (or
+  // another non-mentor officer on the flagship) can take her; otherwise as
+  // a prize ship.
+  function recover(state, fid) {
+    var c = canRecover(state, fid);
+    if (!c.ok) throw new Error(c.why);
+    var l = c.rec, f = l.ship;
+    if (l.owed) PC.crew.payFrom(state, l.owed);
+    state.laidUp = state.laidUp.filter(function (x) { return x !== l; });
+    var tiers = PC.hunt.takeHands(state, f.crewMin || 0);
+    f.crewTiers = tiers; f.crew = f.crewMin || 0;
+    var o = null;
+    if (l.wasFleet) {
+      o = (state.officers || []).filter(function (x) { return x.id === l.officer && !x.gone && (x.aboard || "flagship") === "flagship"; })[0]
+        || (state.officers || []).filter(function (x) { return !x.gone && (x.aboard || "flagship") === "flagship" && !x.mentor; })[0];
+    }
+    if (o) {
+      f.kind = "fleet"; f.officer = o.id; o.aboard = f.id;
+      if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
+    } else { f.kind = "prize"; f.officer = null; }
+    state.fleet = (state.fleet || []).concat([f]);
+    PC.state.addLog(state, "Took the " + (f.name || f.cls) + " back from the anchorage" + (l.owed ? ", paying the " + l.owed + " gold owed" : "") + ".");
+    return { ship: f, kind: f.kind, officer: o ? o.first : null, owed: l.owed, line: E().LAYUP.lines.recovered };
+  }
+  // The season's charge (§20.4): 3% of hull value. DEFAULT: what can't be
+  // paid is owed, and must be cleared before she's taken back.
+  function layUpSeason(state) {
+    var lines = [];
+    (state.laidUp || []).forEach(function (l) {
+      var nd0 = nodeData(l.node), g = PC.meters.officialGate(state, l.node);
+      var due = Math.round(layUpValue(l.ship) * E().LAYUP.SEASON * g.mult);
+      if (PC.crew.canPay(state, due)) { PC.crew.payFrom(state, due); lines.push("Anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + due + " gold."); }
+      else { l.owed += due; lines.push("You couldn't pay the anchorage at " + nd0.name + " for the " + (l.ship.name || l.ship.cls) + ": " + l.owed + " gold owed."); }
+    });
+    return lines;
+  }
+
   // Move a fleet or prize ship's guns to the flagship, free (§21.6).
   function stripGuns(state, fid) {
     var f = (state.fleet || []).filter(function (x) { return x.id === fid; })[0];
@@ -1046,6 +1137,16 @@
     }
     var fee = payPortFee(state, id);
     lines = lines.concat(fee.lines);
+    // An arrival inspection (§28.5): a line for a clean hold, the scene for a
+    // dirty one.
+    var insp = PC.inspections ? PC.inspections.onArrival(state, id) : null;
+    if (insp && insp.line) lines.push(insp.line);
+    if (insp && insp.scene) {
+      state.location.queue = (state.location.queue || []).concat([insp.scene]);
+      var all0 = pre.concat(lines);
+      state.location.popup = { title: "Arrival at " + nd.name, lines: all0, chips: all0.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), ok: "popupscene" };
+      return state.location.popup;
+    }
     // P16: the lines carry which pot paid in brackets, so the old pay chips
     // under them (which repeated the lines) are gone.
     var all = pre.concat(lines);
@@ -1097,6 +1198,7 @@
     shopPrice: shopPrice,
     demandOf: demandOf,
     standingBand: standingBand, docksConditions: docksConditions,
+    layUpPrice: layUpPrice, canLayUp: canLayUp, layUp: layUp, laidUpHere: laidUpHere, layUpSlots: layUpSlots, canRecover: canRecover, recover: recover, layUpSeason: layUpSeason,
     purchaseMult: purchaseMult,
     slotNpc: slotNpc,
     greeting: greeting,

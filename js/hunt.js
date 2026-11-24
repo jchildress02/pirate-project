@@ -510,7 +510,13 @@
         var d = H().UNCOVERED[side + " " + kind], key = fac.toLowerCase();
         PC.scenes.applyEffect(state, { standing: { faction: key, delta: d[1] } });
         out.push(mchip("standing", "standing:" + key, d[1], fac + " Standing {+n}", key));
-        if (!executed) { PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } }); out.push(mchip("heat", "heat:" + key, d[0], fac + " Heat {+n}", key)); }
+        if (!executed) {
+          var wasB = PC.meters.betrayalActive(state, key), h0 = state.meters.heat[key] || 0;
+          PC.scenes.applyEffect(state, { heat: { faction: key, delta: d[0] } });
+          var gained = (state.meters.heat[key] || 0) - h0;
+          out.push(mchip("heat", "heat:" + key, gained, fac + " Heat {+n}", key));
+          if (!wasB && PC.meters.betrayalActive(state, key)) out.push({ icon: "heat", text: "Betrayal: " + fac + " remembers. Your Heat gains with them are doubled for a year.", ink: "bad" });
+        }
       });
     }
     // France and Sicily keep grudge counters (§22.5); Spain feeds France's.
@@ -705,7 +711,7 @@
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
           draft: s.draft, cue: s.cue, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
-          legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s) };
+          legit: s.flag === "Pirate" ? "A pirate: always fair game, and her cargo is clean." : "You hold no letter: her cargo will be dirty, and " + meterNote(s, state) };
       }),
     };
   }
@@ -726,9 +732,15 @@
     return best;
   }
 
-  function meterNote(s) {
-    if (s.flag === "Avalon" || s.flag === "Burgundy" || s.flag === "Sweden") return "taking her costs Avalon Standing and Heat.";
-    if (s.flag === "Frisia" || s.flag === "Ireland") return "taking her costs Frisian Standing and Heat.";
+  // A prize against a faction you stand at 40+ with is a betrayal (§28.6):
+  // the scouting card says so before you engage.
+  function betrayalNote(state, f) {
+    if (!state || (state.meters.standing[f] || 0) < 40) return "";
+    return " Betrayal: you stand high with " + (f === "avalon" ? "Avalon" : "Frisia") + ", so taking her costs +" + PC.data.meterRules.BETRAYAL_HEAT + " Heat on top, and doubles your Heat gains with them for a year.";
+  }
+  function meterNote(s, state) {
+    if (s.flag === "Avalon" || s.flag === "Burgundy" || s.flag === "Sweden") return "taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
+    if (s.flag === "Frisia" || s.flag === "Ireland") return "taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
     if (s.flag === "France" || s.flag === "Spain") return "France will remember it.";
     if (s.flag === "Sicily") return "Sicily will send hunters after you.";
     return "nobody here will mind.";
@@ -885,7 +897,7 @@
 
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
-    doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
+    takeHands: takeHands, doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
