@@ -50,9 +50,13 @@
   }
   function caName(b) { return H().CA_NAMES[String(b)]; }
 
-  function dreadBonus(state) {
-    var d = (state.meters && state.meters.dread) || 0;
-    return d >= 70 ? 3 : d >= 40 ? 2 : d >= 20 ? 1 : 0;
+  function dreadBonus(state) { return PC.meters.dreadBonus(state); }
+
+  // A fear deed in battle (§28.8): Dread +2 and pirate Standing +1, noted in
+  // the battle log.
+  function fearDeed(state, game, why) {
+    var chips = PC.meters.fearDeed(state, null);
+    if (chips.length) say(state, game, chips.map(function (c) { return c.text; }).join(" · ") + " (a fear deed: " + why + ").");
   }
 
   // ---- The player's ships ---------------------------------------------------
@@ -440,6 +444,8 @@
     noteRaw(game, "Call on her to strike", r, { clean: "she strikes without a fight", partial: "she won't strike, but she's shaken", setback: "she won't strike" }[r.outcome]);
     if (r.outcome === "clean") {
       say(state, game, L().struckPre);
+      // A clean surrender from an armed ship is a fear deed (§28.8).
+      if (fightingEnemies(b).some(function (x) { return (ship(state, b, x.id).guns || 0) > 0; })) fearDeed(state, game, "she struck without a fight");
       fightingEnemies(b).forEach(function (x) { x.out = "struck"; x.noFight = true; });
       return endBattle(state, game);
     }
@@ -903,7 +909,8 @@
     list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
-    list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8), extra: dreadBonus(state) ? [{ label: "Dread", value: dreadBonus(state) }] : [] },
+    // Dread joins Intimidate through the meter modifiers now (§11.8.5).
+    list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8) },
       note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
     return list;
   }
@@ -959,6 +966,7 @@
       if (p.outcome === "clean") {
         say(state, game, L().duel.clean);
         game.duelsWon = (game.duelsWon || 0) + 1;
+        fearDeed(state, game, "you cut down her captain"); // killing a captain in a duel (§28.8)
         e.leaderless = true;
         if (strikeRoll(state, game, b, e, crewAdvantage(state, b, "flagship", e.id), "duel")) return afterBoardingOut(state, game);
       } else if (p.outcome === "partial") say(state, game, L().duel.partial);
@@ -966,7 +974,7 @@
     } else if (id === "demand") {
       // A clean demand shows only the surrender line (B40 of the M5 playtest).
       say(state, game, L().demand[p.outcome]);
-      if (p.outcome === "clean") { e.demanded = true; knockOut(state, game, b, e, "struck", true); return afterBoardingOut(state, game); }
+      if (p.outcome === "clean") { e.demanded = true; fearDeed(state, game, "they struck at your word"); knockOut(state, game, b, e, "struck", true); return afterBoardingOut(state, game); }
       e.refusedDemand = true; // the Quarter Asked Article's test (§22.7)
       if (p.outcome === "partial") shake(e, 1);
     }

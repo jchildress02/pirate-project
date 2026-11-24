@@ -29,6 +29,8 @@
     name: "Ocracoke",
     control: "No control",
     faction: "pirates",        // whose Standing sets fees and prices here
+    haven: true,               // a pirate haven: Dread sizes the crew pool (§24.7)
+    closedAt: "Enemy",         // black Standing -70: turned away (§28.1)
     leader: "twopenny",
     tier: "Very poor",
     prosperity: 10,            // start (§20.2)

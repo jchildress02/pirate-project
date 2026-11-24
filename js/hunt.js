@@ -186,7 +186,13 @@
     if (i === 0 && b.hunter) grp = G().sighting(state, game.waters, r, { kind: "hunter", flag: b.hunter });
     else if (b.force && i === 0) grp = G().sighting(state, game.waters, r, b.force);
     else if (r() < G().density(state, b.condition) || (i === b.n - 1 && !b.found)) grp = G().sighting(state, game.waters, r);
-    if (grp) { b.found += 1; game.sighting = grp; game.phase = grp.hunter ? "hunter" : "scout"; M().say(state, game, grp.hunter ? L().hunter : L().sail); }
+    if (grp) {
+      b.found += 1; game.sighting = grp; game.phase = grp.hunter ? "hunter" : "scout";
+      // A navy ship at Heat 50+, or a pirate at black -70, may attack first (§28.1, §28.4).
+      var first = PC.meters.attacksFirst(state, grp, r);
+      if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); }
+      else M().say(state, game, grp.hunter ? L().hunter : L().sail);
+    }
     else { game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]); }
   }
 
@@ -848,6 +854,8 @@
     };
     M().start(state, game, "node");
     M().say(state, game, "The weather: " + PC.weather.badge(o.condition) + ".");
+    var first = PC.meters.attacksFirst(state, grp, M().rand(state, game, "attack-first"));
+    if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); return game; }
     if (!grp.hunter && grp.ships[0].flag === "Pirate") {
       var sv = scoutView(state, game);
       if (sv && sv.ca <= 0) { game.phase = "hunter"; game.pirateFirst = true; M().say(state, game, "PLACEHOLDER: She's a pirate, and she likes her odds. She's coming for you."); return game; }

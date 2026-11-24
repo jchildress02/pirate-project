@@ -437,14 +437,16 @@
     else if ("hull" in e) { state.ship.hull = clamp(state.ship.hull + e.hull, 0, state.ship.hullMax); }
     else if ("morale" in e) { state.crew.morale = clamp(state.crew.morale + e.morale, 0, 100); }
     else if ("pressure" in e) { state.crew.pressure = Math.max(0, state.crew.pressure + e.pressure); }
-    else if ("dread" in e) { state.meters.dread = clamp(state.meters.dread + e.dread, 0, 100); }
+    // The meters go through js/meters.js, which tracks the season's offenses
+    // and fear deeds (§28.6, §28.8).
+    else if ("dread" in e) { if (PC.meters) PC.meters.addDread(state, e.dread); else state.meters.dread = clamp(state.meters.dread + e.dread, 0, 100); }
     else if ("standing" in e) {
       var f = e.standing.faction;
-      state.meters.standing[f] = clamp(state.meters.standing[f] + e.standing.delta, -100, 100);
+      if (PC.meters) PC.meters.addStanding(state, f, e.standing.delta); else state.meters.standing[f] = clamp(state.meters.standing[f] + e.standing.delta, -100, 100);
     }
     else if ("heat" in e) {
       var h = e.heat.faction;
-      state.meters.heat[h] = clamp((state.meters.heat[h] || 0) + e.heat.delta, 0, 100);
+      if (PC.meters) PC.meters.addHeat(state, h, e.heat.delta); else state.meters.heat[h] = clamp((state.meters.heat[h] || 0) + e.heat.delta, 0, 100);
     }
     else if ("ladder" in e) {
       if (PC.npcs) PC.npcs.moveRung(state, e.ladder.npc, e.ladder.delta);
@@ -460,6 +462,7 @@
       else if (i < 0) tags.push(e.tag);
       // A temporary tag that lapses when the season turns (§5.3).
       if (e.untilSeasonEnd && !e.remove) { state.captain.tagsUntil = state.captain.tagsUntil || {}; state.captain.tagsUntil[e.tag] = seasonStamp(state); }
+      if (PC.meters) PC.meters.liftToFloor(state); // a floor tag lifts Dread at once (§5.6)
     }
     else if ("rung" in e) {
       // Set an NPC's rung outright ("Twopenny Friendly", §15.6).

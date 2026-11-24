@@ -771,10 +771,10 @@
   }
 
   // The pool's size this season after its modifiers: the Articles'
-  // reputation (§26.5) and Dread at a pirate haven (§24.7). The Dread bonus
-  // comes with meter modifiers (not built yet), so it is +0 for now.
+  // reputation (§26.5), and Dread at a pirate haven or Standing in an Avalon
+  // or Frisian port (§24.7, §28.1: Wary halves it, Hostile and below none).
   function poolMult(state) {
-    return PC.articles.currentReputation(state).pool;
+    return PC.articles.currentReputation(state).pool * PC.meters.poolMult(state, here(state));
   }
 
   // A node can close its crew pool below a Standing (Norfolk: Avalon 0+).

@@ -92,7 +92,7 @@
   add("Revolutionary", { edge: plus(["Petition", "Negotiate"], -1, { condition: "Official" }), note: "In Avalon ports only, once a faction-port condition exists." });
   add("Animal Friend", { note: "Pet prices -15% (§32.12)." });
   add("Brute", { edge: [{ type: "Intimidate", value: 1 }, { type: "Persuade", value: -1 }] });
-  add("Touched", { reroll: reroll(["Ghost Sense"]), note: "Dread floor +5." });
+  add("Touched", { dreadFloor: 5, reroll: reroll(["Ghost Sense"]), note: "Dread floor +5." });
   add("Haunted", { edge: plus(["Persuade"], -1) });
   add("Heathen", { edge: plus(["Persuade", "Petition"], -1, { condition: "Pious NPC" }) });
   add("Drunkard", { reroll: reroll(["Cast-Iron Stomach", "Cards & Dice", "Tavern Talk"]),
@@ -116,7 +116,7 @@
   add("Failing Eyes", { edge: plus(["Keep Watch", "Appraise"], -1) });
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
-  add("Shark-Tooth Necklace", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Shark-Tooth Necklace", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
   // The minigames' tags and items (§14.5, §14.4, §32.12).
   // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
   add("Careened", { edge: plus(["Outrun"], 1) });
@@ -127,12 +127,12 @@
   add("Loaded Dice", { note: "One reroll of the Cheat roll per Liar's Dice session (§18.3)." });
   add("Diver's Mask", { note: "+1 breath on a dive (§18.2)." });
   add("Diving Barrel", { note: "+2 breath on a dive (§18.2)." });
-  add("Velvet Buccaneer Coat", { edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Velvet Buccaneer Coat", { dreadFloor: 5, edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32)" });
   add("Tin Whistle", { note: "Morale floor +5 (§32.12)." });
   add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
   add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
   add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
-  add("Obsidian Amulet", { note: "Dread floor +5 (§32): Dread floors aren't built yet." });
+  add("Obsidian Amulet", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
   add("Parisian Rapier", { edge: plus(["Swordsmanship"], 1, { condition: "Duel" }) }); // §32.8
   add("Abyssinian Scimitar", { edge: plus(["Swordsmanship"], 1, { condition: "Lead the Charge" }) }); // §32.8
   add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
@@ -145,7 +145,7 @@
   add("Marsh Fever", { note: "Fever Flares fire more often and last two seasons (§11.9)." });
 
   // ---- Earned physical tags the prototype can already reach (§14.5) ----
-  add("One Eye", { edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
+  add("One Eye", { dreadFloor: 10, edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
 
   PC.data.modifiers = M;
 })();

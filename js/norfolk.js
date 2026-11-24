@@ -154,7 +154,7 @@
       if (delivered(state) >= D().DS_UNITS) {
         state.flags.nor_ds_done = true;
         PC.npcs.moveRung(state, "horace", 1);
-        state.meters.standing.avalon = Math.max(-100, Math.min(100, (state.meters.standing.avalon || 0) + D().DS_STANDING));
+        PC.meters.addStanding(state, "avalon", D().DS_STANDING);
         out.done = true;
         out.line = PC.data.nodes.norfolk.lines.drunkenSailors.done;
       } else out.line = PC.data.nodes.norfolk.lines.drunkenSailors.partial.replace("[number]", delivered(state));
