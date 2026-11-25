@@ -82,7 +82,14 @@ button.link { background: none; border: 0; padding: 0; color: var(--oxblood); te
 .corner svg { width: 56px; height: 56px; }
 
 /* ---- Top bar (§38.5): line 1 title, season, actions, seal; line 2 the five buttons ---- */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 14px 74px 10px 78px; border-bottom: 1px solid #a88a58; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; padding: 10px 74px 8px 78px; border-bottom: 1px solid #a88a58; }
+/* The sticky top bar (Playtest Pins 0.9, #11): stays put while the page scrolls, desktop and phone. */
+.topbar { position: sticky; top: 0; z-index: 5; background-color: #ecdfc0; box-shadow: 0 2px 6px rgba(60,40,10,.12); }
+.barstats { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: 16px; }
+.bstat { white-space: nowrap; }
+.bstat .bl { font-family: var(--sc); font-size: 14px; color: var(--faded); letter-spacing: .03em; margin-right: 3px; }
+.bstat .bs { display: none; }
+.bfeeds { font-size: 13.5px; color: var(--faded); }
 .brand { font-family: var(--gp); font-size: 27px; line-height: 1; }
 .wt { font-size: 15px; font-style: italic; color: var(--faded); margin-left: 8px; }
 .when { font-family: var(--sc); font-size: 21px; color: var(--oxblood); }
@@ -261,7 +268,6 @@ h2.title { font-family: var(--gp); font-size: 42px; margin: 0 0 6px; line-height
 .devgroup .sc { color: var(--faded); font-size: 16px; }
 .devgroup .actions { margin-top: 6px; }
 .devgroup button { font-size: 16px; }
-.pgold { display: none; }
 .haggled { border: 1px solid var(--rule); background: rgba(255,251,238,.7); padding: 6px 12px 10px; margin: 6px 0 12px; max-width: 680px; }
 .haggled .badge { margin: 4px 0 6px; }
 .toast { position: fixed; bottom: 1.2em; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--parchment); padding: .6em 1.2em; border-radius: 3px; z-index: 40; font-size: 18px; }
@@ -401,7 +407,10 @@ button.big { font-size: 22px; padding: 12px 30px; }
   .topbar .brand, .topbar .wt, .topbar .line2, .topbar .seal { display: none; }
   .topbar .when { font-size: 17px; }
   .toast { bottom: 76px; }
-  .topbar .pgold { display: inline; font-size: 15px; white-space: nowrap; }
+  .barstats { flex-basis: 100%; gap: 2px 10px; font-size: 14.5px; }
+  .bstat .bl { display: none; }
+  .bstat .bs { display: inline; font-family: var(--sc); font-size: 12.5px; color: var(--faded); margin-right: 2px; }
+  .bfeeds { font-size: 12.5px; }
   .pip { width: 12px; height: 12px; }
   .cols { display: block; }
   .strip { display: none; }
