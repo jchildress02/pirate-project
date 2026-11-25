@@ -299,13 +299,89 @@
     expiryWarning();
     moraleBandNotice();
     var screen = state.current.screen;
+    if (screen !== jailScreen) { if (jailScreen === "jail" || jailScreen === "shipless") jailSay = null; jailScreen = screen; }
     if (screen === "end") return drawEnd();
     var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() :
-      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
+      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "jail" ? jailPanel() : screen === "shipless" ? shiplessPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
     wire();
+  }
+
+  // ---- Imprisonment (§43; Milestone 8, PR 6) ----
+  var jailSay = null; // the last step's lines and chips, shown above the choices
+  var jailScreen = null;
+
+  function jailPanel() {
+    var v = PC.prison.view(state);
+    if (!v) return "";
+    var J = PC.data.prison, html;
+    if (v.kind === "marooned") {
+      html = '<div class="where">' + esc(PC.state.seasonName(state) + " " + state.time.year) + '</div><h2 class="title">Marooned</h2>' +
+        '<div class="prose dropcap">' + prose(v.log.join("\n\n")) + "</div>" + jailResult();
+      if (v.stage === "drift") html += opts([opt({ act: "jdrift", label: "Wait for a sail", meta: J.MAROON_AP + " actions pass." })]);
+      else html += opts([opt({ act: "jrescue", label: "Hail her and ask to be taken aboard", check: PC.checks.assess(state, v.rescueCheck, { conditions: [] }),
+        meta: "Clean: taken aboard and landed at Norfolk. Partial: they want paying first. Setback: they sail on, and you wait again." })]);
+      return html;
+    }
+    html = '<div class="where">' + esc(v.name + " · " + PC.state.seasonName(state) + " " + state.time.year) + "</div>" + banner("a cell: straw, a barred window, a heavy door") +
+      '<h2 class="title">' + esc(v.name) + "</h2>" +
+      (v.standIn ? '<p class="note">St. Augustine isn\'t built yet: this cell stands in for its castle dungeon, and you\'ll be let go at Ocracoke.</p>' : "") +
+      '<table class="ledger" style="max-width:520px">' + lrow("The charge", esc(v.charge || "")) + lrow("Cell actions left this season", String(v.ap)) +
+      lrow("Your ship", { port: "waiting in port with your Quartermaster", lost: "lost", impounded: "impounded", sailed: "gone: your crew sailed without you" }[v.ship] || "") + "</table>" +
+      (jailSay ? jailResult() : '<div class="prose">' + prose(v.log.slice(-3).join("\n\n")) + "</div>");
+    var turn = opt({ act: "jseason", label: "Let the season turn", meta: "The world goes on without you." });
+    if (v.stage === "interrogate") {
+      html += '<div class="prose">' + prose(J.lines.interrogation) + "</div>";
+      if (!v.secrets.length) return html + opts([opt({ act: "jresist", label: "Tell them nothing", meta: "You have no secrets worth their trouble." })]);
+      var offer = J.lines.talkOffer[v.offer];
+      return html + '<p class="small">Your secrets: ' + v.secrets.map(function (x) { return esc(x.name) + " (" + x.size + ")"; }).join(", ") + " · " + plural(v.points, "point") + ".</p>" + opts([
+        opt({ act: "jresist", label: "Resist", check: PC.checks.assess(state, v.resist, { conditions: [] }),
+          meta: "Clean: nothing given up. Partial: you give up one small secret of your choosing. Setback: they take one at random." }),
+        opt({ act: "jtalk", label: "Talk freely", meta: inline(offer) + " Exposes every secret, with every cost, and earns the Snitch tag.", lock: v.offer === "laugh" ? "What you know isn't worth a lighter sentence" : null }),
+      ]);
+    }
+    if (v.stage === "givePick") return html + '<p>Give them one:</p>' + opts(v.pick.map(function (x) { return opt({ act: "jgive", attrs: 'data-id="' + esc(x.id) + '"', label: x.name, meta: "If exposed: " + esc(x.penalty) }); }));
+    var escape = opt({ act: "noop", label: "Plan an escape", lock: J.lines.escapeSoon });
+    if (v.stage === "held" || v.stage === "awaitTrial") {
+      var what = v.stage === "held" ? plural(v.left, "more action") + " here, then a fine of " + J.FINE_FEES + "× the port fee and you're out." : plural(v.left, "more action") + " until your trial.";
+      return html + '<p class="small">' + esc(what) + "</p>" + opts([v.ap > 0 ? opt({ act: "jwait", label: "Wait", meta: "One cell action." }) : turn, escape]);
+    }
+    if (v.stage === "trial") {
+      return html + (v.confidant ? '<p class="small">' + esc(v.confidant) + " will speak for you: +1.</p>" : "") +
+        (v.judgeShift ? '<p class="small">The judge is known to be ' + (v.judgeShift > 0 ? "harsh: a sentence runs a season longer." : "merciful: a sentence runs a season shorter.") + "</p>" : "") +
+        opts([opt({ act: "jtrial", label: "Petition the court", check: PC.checks.assess(state, v.trialCheck, { conditions: ["Official"] }),
+          meta: v.charge === "Condemned" ? "Clean: free. Partial: 4-8 seasons in prison. Setback: the gallows at the end of next season." :
+            "Clean: free, with a fine and a drop in " + esc(v.faction) + " Standing. Partial: 1-3 seasons. Setback: 2-5 seasons." })]);
+    }
+    if (v.stage === "serving") {
+      return html + '<p class="small">' + plural(v.sentence, "season") + " left to serve. Serving the whole sentence clears your Heat with " + esc(v.faction) + ".</p>" +
+        opts([opt({ act: "jserve", label: "Serve your time", meta: "The seasons pass. You'll see what happened outside when you're let out." }), turn, escape]);
+    }
+    if (v.stage === "gallows") {
+      return html + '<p class="notice warn">The gallows ' + (v.gallowsIn <= 1 ? "at the end of this season." : "at the end of next season.") + "</p>" + opts([turn, escape]);
+    }
+    return html;
+  }
+
+  function jailResult() {
+    if (!jailSay) return "";
+    var h = (jailSay.lines || []).length ? '<div class="say">' + (jailSay.lines || []).map(inline).join("<br>") + "</div>" : "";
+    return h + chips(jailSay.chips);
+  }
+
+  function shiplessPanel() {
+    var nd = N().nodeData(N().here(state)), O = PC.prison.shiplessOptions(state), L = PC.data.prison.lines;
+    var meta = { buy: "A used cutter with her minimum crew, today. " + gold(PC.data.prison.CUTTER_PRICE) + " gold from crew gold, then your purse.",
+      steal: "Four little cutthroat urchins know a cutter nobody's watching. Clean: she's yours. Partial: yours, and Heat +" + PC.data.prison.STEAL_HEAT + ". Setback: caught.",
+      work: "A season of hard work for a shabby cutter with a bare crew.", stash: "A friend here fetches your stash: a season.", retire: "Your story ends here." };
+    return '<div class="where">' + esc(nd.name + " · " + PC.state.seasonName(state) + " " + state.time.year) + '</div><h2 class="title">Without a Ship</h2>' +
+      '<div class="prose dropcap">' + prose(L.shipless) + "</div>" + jailResult() +
+      '<p class="small">' + gold(state.money.crew + state.money.purse) + " gold on hand · " + plural(state.crew.count, "hand") + " with you.</p>" +
+      opts(O.map(function (o) {
+        return opt({ act: "jship", attrs: 'data-id="' + o.id + '"', label: o.label, check: o.check ? PC.checks.assess(state, o.check, { conditions: ["Town"] }) : null, meta: meta[o.id], lock: o.ok ? null : o.why });
+      }));
   }
 
   // The morale band changed since the last screen (P7b): a one-line notice.
@@ -447,8 +523,8 @@
       '<div class="xpline" aria-hidden="true"></div>' +
       '<p class="capname">' + esc((c.first + " " + c.last).trim()) + '</p><p class="muted" style="margin:3px 0 0;font-size:17.5px;font-style:italic">Age ' + c.age + "</p>" +
       '<table class="ledger">' + lrow("Your purse", gold(state.money.purse)) + lrow("Crew gold", gold(state.money.crew)) +
-      lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
-      lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
+      (state.shipless ? lrow("Ship", "<i>none</i>") : lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
+      lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>')) +
       // Crew with the wounded (A16, §38.5); provisions as lots under morale (P8).
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
@@ -473,7 +549,7 @@
   function phoneStrip() {
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
-      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
+      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(state.shipless ? "no ship" : sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
       "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " " + esc(PC.crew.band(state.crew.morale)) + " · Provisions " + PC.crew.food(state) + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
@@ -2109,6 +2185,8 @@
 
   function gameOverPanel(v) {
     var go = v.hunt.gameOver || {};
+    if (go.how === "captured" && PC.prison) return '<div class="prose dropcap">' + prose(PC.data.prison.lines.capturedSea) + "</div>" +
+      '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
     return '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[go.how === "died" ? "died" : "captured"]) + "</div>" +
       '<div class="actions"><button class="primary" data-act="endgameover">See how it ended</button></div>';
   }
@@ -2193,6 +2271,7 @@
   function lockAttr(lock) { return lock ? ' disabled title="' + esc(lock) + '"' : ""; }
   function menuShip() {
     if (!state.location) return "<h2>The Ship</h2><p class=\"note\">Only in port.</p>";
+    if (state.shipless || state.jail) return "<h2>The Ship</h2><p class=\"note\">" + (state.jail ? "You're in no position to give orders." : "You have no ship.") + "</p>";
     var lock = shipLock(false);
     return "<h2>The Ship</h2>" + '<p class="note" style="margin:0 0 8px"><i>' + esc(state.ship.name) + "</i>, your " + esc(state.ship.type.toLowerCase()) +
       (lock ? " · " + esc(lock) + ": you can look, but nothing changes." : state.current.screen !== "node" ? " · Away from port: what takes an action waits until you're back." : "") + "</p>" + shipMenu();
@@ -2505,6 +2584,11 @@
     var html = "<h2>Rumors</h2>";
     var q = PC.quests.journal(state).filter(function (j) { return j.needed && j.status !== "done"; });
     if (q.length) html += '<div class="svc"><h4>Leads</h4>' + q.map(function (j) { return '<p class="small" style="margin:2px 0">' + esc(j.name) + ": " + j.leads + " of " + j.needed + "</p>"; }).join("") + "</div>";
+    // The Secrets tab (§30.12): what interrogators could take from you.
+    var sec = PC.prison ? PC.prison.secrets(state) : [];
+    html += '<div class="qcard"><h4>Secrets</h4>' + (sec.length ? '<ul style="padding-left:1.1em;font-size:18px">' + sec.map(function (x) {
+      return "<li>" + esc(x.name) + ' <span class="note">(' + esc(x.size) + ", " + plural(x.points, "point") + (x.exposed ? "; exposed" : "; if exposed: " + x.penalty) + ")</span></li>";
+    }).join("") + "</ul>" : '<p class="note">None yet. Some things you do become secrets: your fences, for one.</p>') + "</div>";
     var live = PC.rumors.liveRumors(state);
     var types = {};
     live.forEach(function (r) { (types[r.type] = types[r.type] || []).push(r); });
@@ -2660,7 +2744,11 @@
         '<p class="small">Jump to a scene: <select class="devscene">' + PC.devtools.jumpable().map(function (id) {
           return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
         }).join("") + "</select> " + b("devjump", "Go") + "</p>" +
-        '<div class="actions">' + b("devnorfolk", "Arrive at Norfolk (first visit)") + "</div>") : "") +
+        '<div class="actions">' + b("devnorfolk", "Arrive at Norfolk (first visit)") + "</div>" +
+        // Milestone 8, PR 6: imprisonment.
+        '<p class="small">Jail at Norfolk, ship in port: ' + ["Held", "Imprisoned", "Condemned"].map(function (c) { return b("devjail", c, ' data-charge="' + c + '"'); }).join("") +
+        " · Taken at sea by: " + ["Avalon", "Frisia", "Pirate"].map(function (f) { return b("devcaptured", f, ' data-flag="' + f + '"'); }).join("") +
+        " · " + b("devsecret", "Make Bobby a secret") + "</p>") : "") +
       (state.location ? grp("The hunt", '<p class="small">Next sighting: ' + b("devforce", "Avalon hunter", ' data-kind="hunter" data-flag="Avalon"') + b("devforce", "Frisian hunter", ' data-kind="hunter" data-flag="Frisia"') +
         b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
         b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
@@ -3799,6 +3887,23 @@
       if (state.ap.left > 0 && confirmFirst(el, "End the prototype?", "You still have " + plural(state.ap.left, "action") + " this season. End the run here?")) return;
       menu = null; PC.summary.end(state, "stopped");
     },
+    "jdrift": function () { jailSay = PC.prison.drift(state); },
+    "jrescue": function () { jailSay = PC.prison.rescue(state); },
+    "jresist": function () { jailSay = PC.prison.interrogate(state, "resist"); },
+    "jtalk": function (el) {
+      if (confirmFirst(el, "Talk freely?", PC.data.prison.lines.talkWarning, "Tell them everything")) return;
+      jailSay = PC.prison.interrogate(state, "talk");
+    },
+    "jgive": function (el) { jailSay = PC.prison.giveUp(state, el.dataset.id); },
+    "jwait": function () { jailSay = PC.prison.wait(state); },
+    "jseason": function () { var t = PC.prison.seasonTurn(state); jailSay = { lines: (t.turn && t.turn.lines || []).concat(t.lines || []), chips: t.chips }; },
+    "jtrial": function () { jailSay = PC.prison.trial(state); },
+    "jserve": function () { jailSay = PC.prison.serve(state); },
+    "jship": function (el) {
+      if (el.dataset.id === "retire" && confirmFirst(el, "Retire?", "You hang up your cutlass, and your story ends here.", "Retire")) return;
+      jailSay = PC.prison.shiplessChoose(state, el.dataset.id);
+    },
+    "noop": function () {},
     "endgameover": function () { PC.minigames.leave(state); menu = null; PC.summary.end(state); },
     "keepplaying": function () { PC.summary.keepPlaying(state); },
     "export": function () { dialog = "export"; },
@@ -3875,6 +3980,9 @@
     },
     "devfleet": function (el) { var r = PC.hunt.devFleetShip(state, el.dataset.cls); toast("A " + r.ship + " joins your fleet under " + r.officer + "."); },
     "devheat": function (el) { state.meters.heat[el.dataset.f] = Number(el.dataset.v); },
+    "devjail": function (el) { PC.devtools.jail(state, el.dataset.charge); menu = null; },
+    "devcaptured": function (el) { PC.devtools.captured(state, el.dataset.flag); menu = null; },
+    "devsecret": function () { state.flags.fenceUsed_bobby = true; },
     "devpressure": function (el) { state.crew.pressure = Number(el.dataset.v); if (state.crew.pressure < 3) state.crew.qmWarned = false; },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {

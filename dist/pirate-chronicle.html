@@ -1466,7 +1466,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 10;
+  var SAVE_VERSION = 11;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -1491,6 +1491,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       money: c.money,           // { crew, purse } — §27
       provisions: c.provisions, // lots — §20.6
       hardtack: 0, // hardtack lots (P11 of the build 0.9 playtest pins)
+      jail: null, shipless: false, secretsExposed: {}, fenceShut: {}, // §43, §30.12 (M8 PR 6)
       ship: c.ship,
       crew: c.crew,
       meters: c.meters,         // Dread, Standing, Heat — §28
@@ -1709,6 +1710,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // The build 0.9 playtest pins: hardtack (P11) and the morale band notice (P7).
       data.hardtack = data.hardtack || 0;
       data.saveVersion = 10;
+    }
+    if (data.saveVersion === 10) {
+      // Milestone 8, PR 6: imprisonment (§43) and the Secrets tab (§30.12).
+      data.jail = data.jail || null; data.shipless = !!data.shipless;
+      data.secretsExposed = data.secretsExposed || {}; data.fenceShut = data.fenceShut || {};
+      data.saveVersion = 11;
     }
     return data;
   }
@@ -3348,6 +3355,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function fenceOpen(state) {
     var f = nodeData(here(state)).fence;
+    // An exposed fence is shut for a season or two (§30.12, PR 6).
+    if (f && PC.prison && PC.prison.fenceShut(state, f.npc)) return false;
     return !!(f && flag(state, f.opensWith));
   }
 
@@ -3381,6 +3390,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     markDealt(state, who);
     noteSale(state, buyer, gold);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
+    if (dirty) state.flags["fenceUsed_" + nd.fence.npc] = true; // a secret from now on (§30.12)
     // Selling here slowly raises prosperity (§20.2; fence sales count, assumption).
     s.soldGold += gold;
     var gain = Math.min(E().PROSPERITY_SEASON_CAP, Math.floor(s.soldGold / E().PROSPERITY_PER_SOLD)) - s.prosperityGained;
@@ -4249,7 +4259,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // "hub" means back to where the captain is: the node's menus (and any
   // scene queued to fire there next, §17.2), or the engine's test harbor.
   function goTo(state, exit) {
-    if (exit === "end") return PC.summary.end(state); // the story ends here (jail, until §43; Milestone 7)
+    if (exit === "end") {
+      if (PC.prison && PC.prison.fromScene(state)) return; // jail (§43, Milestone 8 PR 6)
+      return PC.summary.end(state);
+    }
     if (!exit || exit === "hub") {
       if (state.location && state.location.node) {
         var next = PC.node ? PC.node.nextQueued(state) : null;
@@ -9791,7 +9804,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // the port fee), back on the open sea at an ocean node, or sailing on to
   // another place from the hunting grounds (§4, §22.1).
   function exit(state, game) {
-    if (game.phase === "gameover") { state.gameOver = game.gameOver; if (game.encounter) state.voyage = null; return "node"; }
+    if (game.phase === "gameover") {
+      // Taken at sea: the cells or a marooning (§43.3, Milestone 8 PR 6).
+      if (game.gameOver && game.gameOver.how === "captured" && PC.prison) { PC.prison.captureAtSea(state, game); return null; }
+      state.gameOver = game.gameOver; if (game.encounter) state.voyage = null; return "node";
+    }
     if (game.encounter) { // back to the voyage it interrupted (§44.4)
       state.minigame = null;
       PC.voyageEvents.resume(state);
@@ -12043,9 +12060,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       return r.length ? { icon: "treasure", text: "Confiscated: " + r.map(function (s) { return s.n + " " + (s.what === "treasure" ? "dirty treasure" : s.what); }).join(", "), ink: "bad" } : null;
     },
   });
-  // Jail (§43) isn't built: the story ends here (§37.1), until Milestone 8.
+  // Jail (§43, Milestone 8 PR 6): charged by Avalon Heat; the scene's
+  // "end" exit takes him to the cells (a Cold captain is Held).
   F.addHook("nor_jail", {
-    apply: function (state) { state.flags.nor_jailed = true; state.gameOver = { how: "captured", line: "jailed" }; return "Jailed at Norfolk."; },
+    apply: function (state) { state.flags.nor_jailed = true; state.jailPending = { node: "norfolk", faction: "avalon" }; return "Jailed at Norfolk (" + PC.prison.chargeFor(state, "avalon") + ")."; },
     chip: function () { return { icon: "person", text: "Hauled off to prison", ink: "bad" }; },
   });
   F.addHook("godfrey_join", {
@@ -12216,7 +12234,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // ---- The scene's tests and effects ---------------------------------------------
   var F = PC.sceneFns;
   F.addCond("inspDirty", function (state) { return dirtyStacks(state).length > 0; });
-  F.addCond("inspJailed", function (state) { return !!(state.gameOver && state.gameOver.line === "jailed"); });
+  F.addCond("inspJailed", function (state) { return !!state.jailPending; });
   F.addCond("inspUnder", function (state) { return !overThreshold(state); });
   F.addCond("inspAfford", function (state, what, mult) {
     var base = what === "found" ? bribeFound(state) : bribeBefore(state);
@@ -12237,7 +12255,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     chip: function (state) { return { icon: "treasure", text: "Confiscated: everything dirty aboard · " + factionName(state) + " Heat +" + R().HEAT_CONFISCATED, ink: "bad" }; },
   });
   // A setback (§28.5): confiscation, Heat +5 and the port fee again; jail
-  // above the threshold. Jail ends the run until §43 is built (PR 6).
+  // above the threshold: the cells, charged by Heat (§43, PR 6).
   F.addHook("insp_setback", {
     apply: function (state) {
       var id = here(state), jail = overThreshold(state);
@@ -12247,8 +12265,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var line = (g.length ? "Confiscated: " + g.join(", ") + ". " : "") + "Fined " + (paid.crew + paid.purse) + " gold.";
       if (jail) {
         state.flags.jailed_at = id;
-        state.gameOver = { how: "captured", line: "jailed" };
-        line += " Jailed.";
+        state.jailPending = { node: id, faction: nd(id).faction }; // the cells (§43, PR 6)
+        line += " Jailed (" + PC.prison.chargeFor(state, nd(id).faction) + ").";
       }
       return line;
     },
@@ -12553,6 +12571,617 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — imprisonment I (§43.1-§43.6, §43.10, §43.13, §21.8,
+ * §30.12; Milestone 8, PR 6): the ways in, where captors take you, capture
+ * at sea, the charge by Heat, the Secrets tab and interrogation, the trial,
+ * serving your time, the outside, the marooned loop and the shipless popup.
+ * The cell's plans, the break-out, Twopenny and the gallows' rescues are
+ * PR 7. Numbers and lines: content/prison.js. No screen code here.
+ *
+ * state.jail (null when free):
+ *   { kind: "cell"|"marooned", node, faction, name, charge, stage, served,
+ *     sentence, gallows, ship: "port"|"lost"|"impounded"|"sailed",
+ *     cell: { officers: [ids], tiers: {} }, items: [], outside: [], log: [],
+ *     since, releaseAt, interrogated, pick, trial, ... }
+ * state.shipless: true while the captain has no ship.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  function P() { return PC.data.prison; }
+  function L() { return P().lines; }
+  function stamp(state) { return PC.state.stamp(state); }
+  function key(state, what) { return [state.world.seed, stamp(state), "jail", what, state.rolls.jail = (state.rolls.jail || 0) + 1].join("|"); }
+  function between(r, lo, hi) { return lo + Math.floor(r() * (hi - lo + 1)); }
+  var FACTION_NAME = { avalon: "Avalon", frisia: "Frisia" };
+  var TIERS = ["Held", "Imprisoned", "Condemned"];
+
+  // ---- Secrets (§30.12) ----------------------------------------------------------
+
+  // The captain's live secrets: the Slice's starter list, where it applies.
+  function secrets(state) {
+    var out = [], S = P().SECRETS, ex = state.secretsExposed || {};
+    Object.keys(S).forEach(function (id) {
+      var s = S[id];
+      if (s.fence && !(state.flags["fenceUsed_" + s.fence])) return;
+      out.push({ id: id, name: s.name, size: s.size, points: P().SECRET_POINTS[s.size] || 1, penalty: s.penalty, exposed: !!ex[id] });
+    });
+    return out;
+  }
+  function liveSecrets(state) { return secrets(state).filter(function (s) { return !s.exposed; }); }
+  function secretPoints(state) { return liveSecrets(state).reduce(function (a, s) { return a + s.points; }, 0); }
+
+  // Seasons count as an index so "shut until" compares simply.
+  function seasonIndex(state) { return state.time.year * 4 + state.time.season; }
+
+  function expose(state, id) {
+    var s = P().SECRETS[id];
+    if (!s) return null;
+    state.secretsExposed = state.secretsExposed || {};
+    state.secretsExposed[id] = stamp(state);
+    var line = s.name + " is out.";
+    if (s.fence) {
+      var r = PC.rng.fromKey(key(state, "fence-shut"));
+      var n = between(r, P().FENCE_SHUT[0], P().FENCE_SHUT[1]);
+      state.fenceShut = state.fenceShut || {};
+      state.fenceShut[s.fence] = seasonIndex(state) + n;
+      line += " " + s.penalty.replace("1-2 seasons", n === 1 ? "a season" : n + " seasons");
+    }
+    PC.state.addLog(state, "Secret exposed: " + s.name + ".");
+    return line;
+  }
+
+  // An exposed fence is shut for a season or two (§30.12).
+  function fenceShut(state, npc) { var u = (state.fenceShut || {})[npc]; return u != null && seasonIndex(state) < u; }
+
+  // ---- The charge (§43.4) ----------------------------------------------------------
+
+  function chargeFor(state, faction) {
+    var b = PC.meters.heatBand((state.meters.heat || {})[faction] || 0);
+    return b === "Cold" || b === "Noticed" ? "Held" : b === "Wanted" ? "Imprisoned" : "Condemned";
+  }
+
+  // Who jails, and where (§43.2): Avalon at Norfolk, Frisia at St.
+  // Augustine's castle (a jail screen only, D4b); anyone else maroons him.
+  function captorFor(flag) { return P().CAPTORS[flag] || null; }
+
+  function jailInfo(node) { return P().JAILS[node] || { name: "The Cells", judge: null, admiralty: false }; }
+
+  function fineFor(state, j) {
+    var node = PC.data.nodes[j.node] ? j.node : "norfolk";
+    try { return Math.round(PC.node.portFee(state, node) * P().FINE_FEES); } catch (e) { return 200; }
+  }
+
+  // ---- Going in -----------------------------------------------------------------------
+
+  // Items taken at the cell door: all but concealable weapons and Lockpicks
+  // (§43.3), returned on release.
+  function concealable(id) {
+    var m = PC.data.modifiers[id] || {};
+    return !!m.concealable || /knife|dagger|stiletto|lockpick/i.test(id);
+  }
+  function takeItems(state) {
+    var c = state.captain, keep = [], took = [];
+    (c.items || []).forEach(function (id) { (concealable(id) ? keep : took).push(id); });
+    c.items = keep;
+    return took;
+  }
+
+  // Put the captain in a cell. o: { node, faction, how: "sea"|"port"|"tow",
+  // cell: { officers, tiers } (sea), lines: [] }.
+  function enter(state, o) {
+    var info = jailInfo(o.node);
+    var charge = o.charge || chargeFor(state, o.faction);
+    var j = {
+      kind: "cell", node: o.node, faction: o.faction, name: info.name, charge: charge, how: o.how,
+      stage: charge === "Held" ? "held" : "interrogate", served: 0, sentence: 0, gallows: null,
+      ship: o.how === "port" ? "port" : "lost", cell: o.cell || { officers: [], tiers: {} },
+      items: takeItems(state), outside: [], log: (o.lines || []).slice(), since: stamp(state),
+      releaseAt: (P().CAPTORS[FACTION_NAME[o.faction]] || {}).releaseAt || null, inPortSeasons: 0,
+    };
+    j.log.push(o.how === "port" ? L().capturedPort : L().capturedSea);
+    j.log.push(L().charge[charge]);
+    state.jail = j;
+    state.jailPending = null;
+    state.gameOver = null;
+    if (j.ship !== "port") state.shipless = true;
+    if (PC.data.nodes[o.node]) { state.location = { node: o.node, place: null, queue: [] }; PC.node.initNode(state, o.node); }
+    state.ap.left = Math.min(state.ap.left, P().CELL_AP);
+    state.current = { screen: "jail" };
+    PC.state.addLog(state, "Jailed in " + info.name + " (" + charge + ").");
+    return j;
+  }
+
+  // A scene that ends in jail (Norfolk's beat 1, an inspection over the
+  // threshold) leaves a pending jailing; the scene's "end" exit lands here.
+  function fromScene(state) {
+    var p = state.jailPending;
+    if (!p) return false;
+    enter(state, { node: p.node, faction: p.faction, how: "port" });
+    return true;
+  }
+
+  // Capture at sea (§43.3): officers and 10 hands (or a quarter of the crew,
+  // whichever is more) go into the cell with him; the purse, cargo, crew
+  // gold and every ship are lost. Pirate and foreign captors maroon him.
+  function captureAtSea(state, game) {
+    var b = game.battle, lead = b ? (b.enemies.filter(function (e) { return e.id === b.target; })[0] || b.enemies[0]) : null;
+    var flag = lead ? lead.flag : "Avalon";
+    var cap = captorFor(flag);
+    var officers = (state.officers || []).filter(function (o) { return !o.gone; }).map(function (o) { o.aboard = "flagship"; return o.id; });
+    var C = P().CAPTURED_CREW, n = Math.min(state.crew.count, Math.max(C.min, Math.ceil(state.crew.count * C.share)));
+    var tiers = {};
+    PC.data.economy.TIER_ORDER.slice().reverse().forEach(function (t) { var k = Math.min(n, state.crew.tiers[t] || 0); if (k) { tiers[t] = k; n -= k; } });
+    loseEverything(state);
+    state.minigame = null; state.voyage = null;
+    if (!cap) return maroon(state, { officers: officers, by: flag });
+    PC.state.addLog(state, "Captured at sea by " + (flag === "Avalon" ? "an Avalon ship" : "a Frisian ship") + ".");
+    return enter(state, { node: cap.node, faction: cap.faction, how: "sea", cell: { officers: officers, tiers: tiers } });
+  }
+
+  // The purse, crew gold, cargo, the crew and every ship (§43.3).
+  function loseEverything(state) {
+    state.money.purse = 0; state.money.crew = 0;
+    state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } };
+    state.provisions = 0; state.hardtack = 0;
+    state.fleet = [];
+    var c = state.crew;
+    PC.data.economy.TIER_ORDER.forEach(function (t) { c.tiers[t] = 0; });
+    c.count = 0; c.wounded = 0; c.woundedTiers = {}; c.raw = 0;
+    state.captives = 0;
+    state.shipless = true;
+    if (state.actingQM) state.actingQM.active = false;
+  }
+
+  // ---- Interrogation (§43.5) -------------------------------------------------------
+
+  function talkOffer(state) {
+    var p = secretPoints(state), T = P().TALK_FREELY;
+    return p >= T.free ? "free" : p >= T.drop ? "drop" : "laugh";
+  }
+
+  function interrogate(state, how) {
+    var j = state.jail;
+    if (!j || j.stage !== "interrogate") throw new Error("Not the moment for that.");
+    var live = liveSecrets(state), out = { lines: [], chips: [] };
+    if (!live.length) { out.lines.push(L().noSecrets); return toTrialWait(state, out); }
+    if (how === "talk") {
+      var offer = talkOffer(state);
+      if (offer === "laugh") throw new Error("They'd laugh at what you've got.");
+      live.forEach(function (s) { var l = expose(state, s.id); if (l) out.chips.push({ icon: "rumor", text: l, ink: "bad" }); });
+      if (state.captain.tags.indexOf("Snitch") < 0) state.captain.tags.push("Snitch");
+      out.lines.push(L().talked);
+      out.chips.push({ icon: "person", text: "Tag earned: Snitch", ink: "bad" });
+      if (offer === "free") { j.log.push(L().talked); return release(state, { walk: true, lines: out.lines, chips: out.chips }); }
+      j.charge = TIERS[Math.max(0, TIERS.indexOf(j.charge) - 1)];
+      out.chips.push({ icon: "person", text: "The charge drops to " + j.charge, ink: "good" });
+      if (j.charge === "Held") { j.stage = "held"; j.interrogated = true; return finishStep(state, out); }
+      return toTrialWait(state, out);
+    }
+    var r = PC.checks.resolve(state, { type: "Resist Interrogation", dr: P().INTERROGATION_DR }, key(state, "resist"), { conditions: [] });
+    out.outcome = r.outcome;
+    out.lines.push(L().resist[r.outcome]);
+    if (r.outcome === "partial") {
+      var small = live.filter(function (s) { return s.size === "Small"; });
+      if (small.length) { j.stage = "givePick"; j.pick = small.map(function (s) { return s.id; }); return finishStep(state, out); }
+    }
+    if (r.outcome === "setback") {
+      var pick = live[Math.floor(PC.rng.fromKey(key(state, "secret"))() * live.length)];
+      var l = expose(state, pick.id);
+      if (l) out.chips.push({ icon: "rumor", text: l, ink: "bad" });
+    }
+    return toTrialWait(state, out);
+  }
+
+  // A partial: the player gives up one Small secret of his choosing.
+  function giveUp(state, id) {
+    var j = state.jail;
+    if (!j || j.stage !== "givePick" || (j.pick || []).indexOf(id) < 0) throw new Error("Not the moment for that.");
+    var out = { lines: [], chips: [] }, l = expose(state, id);
+    if (l) out.chips.push({ icon: "rumor", text: l, ink: "bad" });
+    j.pick = null;
+    return toTrialWait(state, out);
+  }
+
+  function toTrialWait(state, out) {
+    var j = state.jail;
+    j.interrogated = true;
+    j.stage = "awaitTrial";
+    return finishStep(state, out);
+  }
+
+  function finishStep(state, out) {
+    var j = state.jail;
+    if (j) { (out.lines || []).forEach(function (l) { j.log.push(l); }); (out.chips || []).forEach(function (c) { j.log.push(c.text); }); }
+    return out;
+  }
+
+  // ---- Time in the cell -----------------------------------------------------------
+
+  // Wait out an action in the cell (Held, or awaiting trial).
+  function wait(state) {
+    var j = state.jail;
+    if (!j || (j.stage !== "held" && j.stage !== "awaitTrial")) throw new Error("Not the moment for that.");
+    if (state.ap.left < 1) throw new Error("No actions left this season: let the season turn.");
+    state.ap.left -= 1;
+    j.served += 1;
+    var out = { lines: [L().cellWait], chips: [] };
+    if (j.stage === "held" && j.served >= P().HELD_AP) return heldDone(state, out);
+    if (j.stage === "awaitTrial" && j.served >= P().TRIAL_AP) { j.stage = "trial"; out.lines.push(L().trialOpen); }
+    return finishStep(state, out);
+  }
+
+  // Held: three actions lost, then out with a fine of 4× the port fee.
+  function heldDone(state, out) {
+    var j = state.jail, fine = fineFor(state, j), paid = PC.crew.payFrom(state, fine, true);
+    out.chips.push({ icon: "gold", text: L().fined.replace("[gold]", String(paid.crew + paid.purse)) + (paid.short ? " (" + paid.short + " they couldn't take)" : ""), ink: "bad" });
+    return release(state, { lines: out.lines, chips: out.chips });
+  }
+
+  // The season turns with the captain inside: the world moves on (§43.10).
+  function seasonTurn(state) {
+    var j = state.jail;
+    if (!j) throw new Error("You're not in a cell.");
+    var turn = PC.world.endSeason(state);
+    var out = { lines: [], chips: [], turn: turn };
+    if (state.ended) return out; // past Winter 1754: the end-of-year screen (D4a)
+    if (state.split) { state.split = null; out.lines.push("No split this Winter: the captain is in the cells."); }
+    state.current = { screen: j.kind === "marooned" ? "jail" : "jail" };
+    state.ap.left = j.kind === "marooned" ? state.ap.max : P().CELL_AP;
+    if (j.kind === "cell") outsideSeason(state, out);
+    if (j.stage === "serving") {
+      j.sentence = Math.max(0, j.sentence - 1);
+      if (!j.sentence) { out.served = true; served(state, out); }
+    }
+    if (state.jail && j.stage === "gallows") {
+      if (j.gallows <= seasonIndex(state)) { out.hanged = true; hang(state); }
+    }
+    (turn.lines || []).forEach(function (l) { if (state.jail) state.jail.outside.push(l); });
+    if (state.jail) finishStep(state, out);
+    return out;
+  }
+
+  // The outside (§43.10): a ship in port waits with the Quartermaster at
+  // -5 morale a season; the crew sail without you when morale falls to
+  // Mutinous or the food runs out; an Admiralty port impounds her after one
+  // season. DEFAULT: an impounded ship is lost to the captain; officers at
+  // Friend or better wait ashore for him, the rest sail with the crew.
+  function outsideSeason(state, out) {
+    var j = state.jail;
+    if (j.ship !== "port") return;
+    j.inPortSeasons += 1;
+    PC.crew.addMorale(state, P().OUTSIDE_MORALE);
+    j.outside.push(L().outsideMorale);
+    var fill = function (l) { return l.replace("[Ship]", state.ship.name); };
+    if (jailInfo(j.node).admiralty && j.inPortSeasons >= 1) {
+      j.ship = "impounded";
+      j.outside.push(fill(L().impounded));
+      out.chips.push({ icon: "hull", text: "The " + state.ship.name + " is impounded", ink: "bad" });
+      shipGone(state, false);
+      return;
+    }
+    if (state.crew.morale < P().CREW_LEAVE_MORALE || PC.crew.food(state) <= 0) {
+      j.ship = "sailed";
+      j.outside.push(fill(L().crewSailed));
+      out.chips.push({ icon: "hull", text: "Your crew sailed without you", ink: "bad" });
+      shipGone(state, true);
+    }
+  }
+
+  // She's gone: the crew with her (sailed) or scattered (impounded), the
+  // cargo and crew gold with her; loyal officers stay ashore.
+  function shipGone(state, sailed) {
+    var keep = (state.officers || []).filter(function (o) { return !o.gone && o.rung >= PC.npcs.RUNG_VALUE.Friend; }).map(function (o) { return o.id; });
+    (state.officers || []).forEach(function (o) { if (!o.gone && keep.indexOf(o.id) < 0) { o.gone = true; o.goneWhy = sailed ? "sailed without you" : "scattered"; } });
+    state.jail.cell.officers = (state.jail.cell.officers || []).concat(keep.filter(function (id) { return (state.jail.cell.officers || []).indexOf(id) < 0; }));
+    var purse = state.money.purse;
+    loseEverything(state);
+    state.money.purse = purse; // the captain's purse isn't aboard
+  }
+
+  // ---- The trial (§43.6) ------------------------------------------------------------
+
+  // A Friend or better at the jail's node who isn't an Underworld figure.
+  function confidant(state, node) {
+    var nd = PC.data.nodes[node];
+    if (!nd) return null;
+    var ids = nd.slots.map(function (s) { return PC.node.slotNpc(node, s.key); }).filter(Boolean);
+    var best = null;
+    ids.forEach(function (id) {
+      if (P().NO_TESTIMONY.indexOf(id) >= 0) return;
+      var n = (state.npcs || {})[id];
+      if (n && n.rung >= PC.npcs.RUNG_VALUE.Friend && !best) best = id;
+    });
+    return best;
+  }
+
+  function judgeShift(state, node) {
+    var id = jailInfo(node).judge, d = id ? ((PC.data.npcs || {})[id] || (state.generated || {})[id]) : null;
+    var n = 0;
+    ((d && d.traits) || []).forEach(function (t) { n += P().JUDGE_TRAITS[t] || 0; });
+    return Math.max(-1, Math.min(1, n));
+  }
+
+  function trialCheck(state) {
+    var j = state.jail, extra = [], c = confidant(state, j.node);
+    if (c) extra.push({ label: npcName(state, c) + " speaks for you", value: P().CONFIDANT_BONUS });
+    if (j.trialDR) extra.push({ label: "Caught trying to escape", value: -j.trialDR });
+    return { type: "Petition", dr: P().TRIAL_DR[j.charge], extra: extra };
+  }
+
+  function npcName(state, id) {
+    var g = (state.generated || {})[id] || (PC.data.npcs || {})[id] || {};
+    return g.full || [g.first, g.last].filter(Boolean).join(" ") || id;
+  }
+
+  function trial(state) {
+    var j = state.jail;
+    if (!j || j.stage !== "trial") throw new Error("Not the moment for that.");
+    var c = confidant(state, j.node), out = { lines: [], chips: [] };
+    if (c) out.lines.push(L().confidant.replace("[Name]", npcName(state, c)));
+    var r = PC.checks.resolve(state, trialCheck(state), key(state, "trial"), { conditions: ["Official"] });
+    out.outcome = r.outcome;
+    var V = L().verdict[j.charge][r.outcome], S = P().SENTENCE[j.charge], rnd = PC.rng.fromKey(key(state, "sentence"));
+    if (r.outcome === "clean") {
+      out.lines.push(V);
+      if (j.charge === "Imprisoned") {
+        var fine = fineFor(state, j), paid = PC.crew.payFrom(state, fine, true);
+        out.chips.push({ icon: "gold", text: L().fined.replace("[gold]", String(paid.crew + paid.purse)), ink: "bad" });
+        PC.meters.addStanding(state, j.faction, P().ACQUIT_STANDING);
+        out.chips.push({ icon: "standing", text: FACTION_NAME[j.faction] + " Standing " + P().ACQUIT_STANDING, ink: "bad" });
+      }
+      return release(state, { lines: out.lines, chips: out.chips, acquitted: true });
+    }
+    if (j.charge === "Condemned" && r.outcome === "setback") {
+      j.stage = "gallows";
+      j.gallows = seasonIndex(state) + 2; // hanged as next season ends (the clock reads +2 then)
+      out.lines.push(V);
+      return finishStep(state, out);
+    }
+    var range = S[r.outcome], n = between(rnd, range[0], range[1]) + judgeShift(state, j.node);
+    n = Math.max(1, n);
+    j.stage = "serving"; j.sentence = n; j.sentenced = n;
+    out.lines.push(V.replace("[n]", String(n)));
+    out.chips.push({ icon: "person", text: "Sentenced to " + n + " season" + (n === 1 ? "" : "s"), ink: "bad" });
+    return finishStep(state, out);
+  }
+
+  // Serve your time: fast-forward the seasons (§43.6). Stops at the end of
+  // the year (D4a) or the gallows.
+  function serve(state) {
+    var j = state.jail;
+    if (!j || j.stage !== "serving") throw new Error("Not the moment for that.");
+    var out = { lines: [], chips: [], seasons: 0 };
+    while (state.jail && state.jail.stage === "serving" && !state.ended && out.seasons < 40) {
+      var t = seasonTurn(state);
+      out.seasons += 1;
+      if (t.served) { out.released = true; out.popup = t.popup; }
+    }
+    return out;
+  }
+
+  // The full sentence served: Heat with the jailing faction is cleared.
+  function served(state, out) {
+    var j = state.jail;
+    state.meters.heat[j.faction] = 0;
+    out.chips.push({ icon: "heat", text: L().servedHeat.replace("[Faction]", FACTION_NAME[j.faction]), ink: "good" });
+    var r = release(state, { lines: [], chips: out.chips, served: true });
+    out.popup = r.popup;
+  }
+
+  function hang(state) {
+    var j = state.jail;
+    j.log.push(L().hanged);
+    state.jail = null;
+    state.gameOver = { how: "died", line: "hanged" };
+    PC.state.addLog(state, "Hanged at " + j.name + ".");
+    PC.summary.end(state);
+  }
+
+  // ---- Release ----------------------------------------------------------------------
+
+  // Out: the items back, the cellmates with him, then the ship in port, or
+  // the shipless popup (§43.13). Returns { popup } for the summary.
+  function release(state, o) {
+    o = o || {};
+    var j = state.jail;
+    state.captain.items = (state.captain.items || []).concat(j.items || []);
+    // Cellmates: the officers rejoin; the hands come out with him (DEFAULT).
+    (j.cell.officers || []).forEach(function (id) { var of = (state.officers || []).filter(function (x) { return x.id === id; })[0]; if (of) { of.gone = false; of.aboard = "flagship"; } });
+    Object.keys(j.cell.tiers || {}).forEach(function (t) { if (j.cell.tiers[t]) PC.crew.addHands(state, t, j.cell.tiers[t]); });
+    var at = j.releaseAt || j.node;
+    if (!PC.data.nodes[at]) at = "ocracoke";
+    var lines = [L().released].concat(o.lines || []);
+    var all = lines.concat(j.outside.length ? ["While you were inside:"].concat(j.outside) : []);
+    var popup = { title: "Free", text: all.join("\n\n"), lines: all, chips: o.chips || [] };
+    var shipHere = j.ship === "port";
+    state.jail = null;
+    state.location = { node: at, place: null, queue: [] };
+    PC.node.initNode(state, at);
+    state.location.popup = popup;
+    PC.state.addLog(state, "Released from " + j.name + ".");
+    if (shipHere) { state.shipless = false; state.current = { screen: "node" }; return { popup: popup }; }
+    state.shipless = true;
+    state.current = { screen: "shipless" };
+    return { popup: popup };
+  }
+
+  // ---- Marooned (§21.8, §24.13) ----------------------------------------------------
+
+  function maroon(state, o) {
+    o = o || {};
+    var j = { kind: "marooned", stage: "drift", node: null, faction: "avalon", name: "Marooned", charge: null, served: 0,
+      cell: { officers: o.officers || [], tiers: {} }, items: [], outside: [], log: [L().marooned], tries: 0, since: stamp(state), ship: "lost" };
+    if (j.cell.officers.length) j.log.push(L().maroonedOfficers.replace("[Officers]", j.cell.officers.map(function (id) { var x = state.officers.filter(function (q) { return q.id === id; })[0]; return x ? x.first : id; }).join(" and ")));
+    state.jail = j;
+    state.shipless = true;
+    state.gameOver = null;
+    state.current = { screen: "jail" };
+    PC.state.addLog(state, "Marooned" + (o.by ? " by a " + o.by + " ship" : "") + ".");
+    return j;
+  }
+
+  // Two actions pass, then a sail (D4c: an Avalon ship, towing to Norfolk).
+  function drift(state) {
+    var j = state.jail;
+    if (!j || j.kind !== "marooned" || j.stage !== "drift") throw new Error("Not the moment for that.");
+    var need = P().MAROON_AP, out = { lines: [L().drift], chips: [] };
+    while (need > 0) {
+      if (state.ap.left < 1) { var t = seasonTurn(state); if (state.ended) return out; out.lines = out.lines.concat(t.lines); continue; }
+      state.ap.left -= 1; need -= 1;
+    }
+    j.stage = "rescue";
+    out.lines.push(L().rescueSail);
+    return finishStep(state, out);
+  }
+
+  function rescueCheck(state) {
+    var j = state.jail, extra = [];
+    var friend = (state.officers || []).some(function (o) { return !o.gone && (j.cell.officers || []).indexOf(o.id) >= 0 && o.rung >= PC.npcs.RUNG_VALUE.Friend; });
+    if (friend) extra.push({ label: "An officer at Friend or better", value: 1 });
+    return { type: "Persuade", dr: P().RESCUE_DR, extra: extra };
+  }
+
+  function rescue(state) {
+    var j = state.jail;
+    if (!j || j.kind !== "marooned" || j.stage !== "rescue") throw new Error("Not the moment for that.");
+    var r = PC.checks.resolve(state, rescueCheck(state), key(state, "rescue"), { conditions: [] });
+    var out = { lines: [L().rescue[r.outcome]], chips: [], outcome: r.outcome };
+    j.tries += 1;
+    if (r.outcome === "setback") { j.stage = "drift"; return finishStep(state, out); }
+    var to = "norfolk";
+    if (r.outcome === "partial") {
+      // A price (DEFAULT: 2× the port fee; Haggle isn't built for it): what
+      // he has, if not all of it.
+      var price = Math.round(PC.node.portFee(state, to) * P().RESCUE_PRICE_FEES), paid = PC.crew.payFrom(state, price, true);
+      out.chips.push({ icon: "gold", text: "The price of a passage: " + (paid.crew + paid.purse) + " gold" + (paid.short ? " (all you had)" : ""), ink: "bad" });
+    }
+    var officers = j.cell.officers || [];
+    state.jail = null;
+    out.lines.push(L().towed.replace("[Place]", PC.world.placeName(to)));
+    // A node his Standing bars means jail (§21.8, §43.1).
+    var nd = PC.data.nodes[to];
+    if (nd.closedAt && PC.node.standingBand(state, nd.faction).name === nd.closedAt) {
+      out.lines.push(L().barred);
+      enter(state, { node: to, faction: nd.faction, how: "tow", cell: { officers: officers, tiers: {} }, lines: out.lines });
+      return out;
+    }
+    state.location = { node: to, place: null, queue: [] };
+    PC.node.initNode(state, to);
+    state.location.popup = { title: PC.world.placeName(to), text: out.lines.join("\n\n"), lines: out.lines, chips: out.chips };
+    state.shipless = true;
+    state.current = { screen: "shipless" };
+    return out;
+  }
+
+  // ---- The shipless popup (§43.13) -----------------------------------------------
+
+  function onHand(state) { return state.money.crew + state.money.purse; }
+
+  function shiplessOptions(state) {
+    var here = PC.node.here(state), nd = PC.data.nodes[here] || {};
+    var friend = nd.slots ? nd.slots.map(function (s) { return PC.node.slotNpc(here, s.key); }).filter(function (id) { var n = (state.npcs || {})[id]; return n && n.rung >= PC.npcs.RUNG_VALUE.Friend; })[0] : null;
+    return [
+      { id: "buy", label: "Buy a cutter outright", cost: P().CUTTER_PRICE, ok: onHand(state) >= P().CUTTER_PRICE, why: onHand(state) >= P().CUTTER_PRICE ? null : "Needs " + P().CUTTER_PRICE + " gold on hand" },
+      { id: "steal", label: "Steal a ship", check: { type: "Light Fingers", dr: P().STEAL_DR }, ok: true },
+      { id: "work", label: "Work in town", ok: true, meta: "A season passes." },
+      { id: "stash", label: "Send someone for the stash", ok: false, why: friend ? "You have no stash yet" : "No friend here, and no stash yet" },
+      { id: "retire", label: "Retire", ok: true },
+    ];
+  }
+
+  // A cutter with her minimum crew (Green hands topping up whoever came
+  // out of the cell with him), a few lots of food and nothing else.
+  function newCutter(state, opts) {
+    opts = opts || {};
+    var c = PC.data.hunt.CLASSES.Cutter;
+    var hull = Math.max(1, Math.round(c.hull * (opts.shabby ? P().SHABBY_HULL : 1)));
+    var names = (PC.data.names.SHIPS || {}).pirate || ["Second Wind"];
+    var nm = names[Math.floor(PC.rng.fromKey(key(state, "cutter-name"))() * names.length)];
+    state.ship = { name: nm, type: "Cutter", hull: hull, hullMax: c.hull, baseHull: c.hull, guns: Math.round(c.guns / 2), gunsMax: c.guns, cargo: c.cargo, size: c.size,
+      crewMin: c.crewMin, crewMax: c.crewMax, speed: c.speed, speedMax: c.speed, handling: c.handling, rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: !!opts.dirty };
+    // Hands beyond her berths are lost (DEFAULT).
+    var over = state.crew.count - c.crewMax;
+    PC.data.economy.TIER_ORDER.forEach(function (t) { if (over > 0) { var k = Math.min(over, state.crew.tiers[t] || 0); if (k) { PC.crew.removeHands(state, t, k); over -= k; } } });
+    if (state.crew.count < c.crewMin) PC.crew.addHands(state, "Green", c.crewMin - state.crew.count);
+    state.provisions = Math.max(state.provisions, P().CUTTER_PROVISIONS);
+    state.shipless = false;
+    state.current = { screen: "node" };
+    PC.officers.ensureQuartermaster && PC.officers.ensureQuartermaster(state);
+    PC.state.addLog(state, "A new ship: the cutter " + nm + ".");
+    return state.ship;
+  }
+
+  function shiplessChoose(state, id) {
+    if (!state.shipless) throw new Error("You have a ship.");
+    var opt = shiplessOptions(state).filter(function (o) { return o.id === id; })[0];
+    if (!opt || !opt.ok) throw new Error(opt ? opt.why : "Not an option.");
+    var out = { lines: [], chips: [] };
+    if (id === "buy") {
+      var paid = PC.crew.payFrom(state, P().CUTTER_PRICE);
+      newCutter(state);
+      out.lines.push(L().boughtCutter);
+      out.chips.push({ icon: "gold", text: "−" + (paid.crew + paid.purse) + " gold", ink: "mid" });
+    } else if (id === "steal") {
+      var r = PC.checks.resolve(state, opt.check, key(state, "steal"), { conditions: ["Town"] });
+      out.outcome = r.outcome;
+      out.lines.push(L().steal[r.outcome]);
+      var nd = PC.node.nodeData(PC.node.here(state));
+      if (r.outcome !== "setback") {
+        newCutter(state, { dirty: true });
+        if (r.outcome === "partial" && (nd.faction === "avalon" || nd.faction === "frisia")) { PC.meters.addHeat(state, nd.faction, P().STEAL_HEAT); out.chips.push({ icon: "heat", text: FACTION_NAME[nd.faction] + " Heat +" + P().STEAL_HEAT, ink: "bad" }); }
+      } else if (nd.faction === "avalon" || nd.faction === "frisia") {
+        enter(state, { node: PC.node.here(state), faction: nd.faction, how: "tow", lines: out.lines });
+      } else {
+        // No jail here (Ocracoke has the stocks, §43.14): a night in them, an action lost.
+        out.lines.push(L().stocks);
+        state.ap.left = Math.max(0, state.ap.left - 1);
+      }
+    } else if (id === "work") {
+      var t = PC.world.endSeason(state);
+      if (state.ended) return out;
+      state.split = null;
+      newCutter(state, { shabby: true });
+      out.lines.push(L().worked);
+      out.lines = out.lines.concat(t.lines || []);
+    } else if (id === "retire") {
+      state.gameOver = { how: "retired", line: "retired" };
+      PC.state.addLog(state, "Retired.");
+      PC.summary.end(state, "retired");
+      return out;
+    }
+    if (state.location && !state.ended) state.location.popup = { title: state.shipless ? "Still ashore" : "A ship of your own", text: out.lines.join("\n\n"), lines: out.lines, chips: out.chips };
+    return out;
+  }
+
+  // ---- The screen's view ------------------------------------------------------------
+
+  function view(state) {
+    var j = state.jail;
+    if (!j) return null;
+    var v = { kind: j.kind, name: j.name, charge: j.charge, stage: j.stage, served: j.served, sentence: j.sentence, log: j.log.slice(-12), ap: state.ap.left,
+      faction: FACTION_NAME[j.faction], ship: j.ship, standIn: !!(P().JAILS[j.node] || {}).standIn };
+    if (j.stage === "interrogate") { v.secrets = liveSecrets(state); v.points = secretPoints(state); v.offer = talkOffer(state); v.resist = { type: "Resist Interrogation", dr: P().INTERROGATION_DR }; }
+    if (j.stage === "givePick") v.pick = (j.pick || []).map(function (id) { return { id: id, name: P().SECRETS[id].name, penalty: P().SECRETS[id].penalty }; });
+    if (j.stage === "held") v.left = P().HELD_AP - j.served;
+    if (j.stage === "awaitTrial") v.left = P().TRIAL_AP - j.served;
+    if (j.stage === "trial") { v.trialCheck = trialCheck(state); var c = confidant(state, j.node); v.confidant = c ? npcName(state, c) : null; v.judgeShift = judgeShift(state, j.node); }
+    if (j.stage === "gallows") v.gallowsIn = j.gallows - seasonIndex(state);
+    if (j.kind === "marooned" && j.stage === "rescue") v.rescueCheck = rescueCheck(state);
+    return v;
+  }
+
+  PC.prison = {
+    secrets: secrets, liveSecrets: liveSecrets, secretPoints: secretPoints, expose: expose, fenceShut: fenceShut, seasonIndex: seasonIndex,
+    chargeFor: chargeFor, captorFor: captorFor, enter: enter, fromScene: fromScene, captureAtSea: captureAtSea,
+    talkOffer: talkOffer, interrogate: interrogate, giveUp: giveUp, wait: wait, seasonTurn: seasonTurn,
+    confidant: confidant, judgeShift: judgeShift, trialCheck: trialCheck, trial: trial, serve: serve, release: release,
+    maroon: maroon, drift: drift, rescue: rescue, rescueCheck: rescueCheck,
+    shiplessOptions: shiplessOptions, shiplessChoose: shiplessChoose, newCutter: newCutter, view: view,
+  };
+})();
+</script>
+  <script>
 /* Pirate Chronicle — Developer tools that change the game state (§41.12).
  *
  * Skip the mandatory quests: A Dying Pirate's Wish, Welcome to the
@@ -12643,7 +13272,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return Object.keys(PC.data.scenes).filter(function (id) { return /^(ocr_|nor_|fav_)/.test(id); }).sort();
   }
 
-  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace };
+  // Imprisonment (§43, M8 PR 6): jail the captain at Norfolk on a chosen
+  // charge with his ship in port, or have him taken at sea by a flag.
+  function jail(state, charge) {
+    state.minigame = null;
+    return PC.prison.enter(state, { node: "norfolk", faction: "avalon", how: "port", charge: charge });
+  }
+  function captured(state, flag) {
+    state.minigame = null;
+    return PC.prison.captureAtSea(state, { battle: { enemies: [{ id: "dev", flag: flag || "Avalon" }], target: "dev" } });
+  }
+
+  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace, jail: jail, captured: captured };
 })();
 </script>
 
@@ -17802,6 +18442,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // Milestone 7: the Norfolk cells (until §43, Milestone 8) and the sea (§44.7).
       jailed: "PLACEHOLDER: The cell door slams shut behind you. Imprisonment comes with Milestone 8; until then, your story ends here.",
       drowned: "PLACEHOLDER: The sea takes your ship, and then it takes you. Your story ends here.",
+      // Milestone 8, PR 6 (§43): the gallows and retiring (D4d: the end screen until inheritance).
+      hanged: "PLACEHOLDER: The crowd falls silent as the trapdoor opens. Your story ends here.",
+      retired: "PLACEHOLDER: You hang up your cutlass. Your story ends here.",
       shipwrecked: "PLACEHOLDER: You wash ashore with nothing but the clothes on your back. A captain with no ship comes in a later milestone; for now, your story ends here.",
     },
     // The Quartermaster's advice (§24.14): {qm} is his first name.
@@ -19715,6 +20358,119 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Imprisonment (§43): the numbers, the jails and every line. Every number
+ * is a placeholder (the Tuning Table lists them); every line marked
+ * PLACEHOLDER is the author's to write (the imprisonment scene records,
+ * §43.15; PH28 of the Milestone 8 build plan).
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+
+  PC.data.prison = {
+    // ---- Numbers (§43.4-§43.6, §43.10, §43.13) ----
+    CELL_AP: 3,                  // cell actions a season (§43.7)
+    HELD_AP: 3,                  // Held: three actions lost (§43.4)
+    TRIAL_AP: 3,                 // held three actions, then tried (§43.6)
+    FINE_FEES: 4,                // a fine of 4× the port fee
+    TRIAL_DR: { Imprisoned: 3, Condemned: 4 },
+    SENTENCE: { Imprisoned: { partial: [1, 3], setback: [2, 5] }, Condemned: { partial: [4, 8] } },
+    ACQUIT_STANDING: -5,         // Imprisoned, clean: freed with a fine and a Standing drop (DEFAULT: -5)
+    CONFIDANT_BONUS: 1,
+    JUDGE_TRAITS: { Merciful: -1, Forgiving: -1, Ruthless: 1, Vengeful: 1 }, // ±1 season (§43.6)
+    INTERROGATION_DR: 2,         // Resist Interrogation (DEFAULT: §43.5 names no DR)
+    TALK_FREELY: { free: 12, drop: 6 }, // secret points: 12+ walks free; 6-11 drops a tier
+    CAPTURED_CREW: { min: 10, share: 0.25 }, // into the cell with the captain (§43.3)
+    OUTSIDE_MORALE: -5,          // a season, while the crew wait in port (§43.10)
+    CREW_LEAVE_MORALE: 15,       // below this (Mutinous) they sail without you (DEFAULT)
+    MAROON_AP: 2,                // the stranded-rescue loop (§21.8)
+    RESCUE_DR: 2,                // Persuade to be taken in tow (DEFAULT: §21.8 names no DR)
+    RESCUE_PRICE_FEES: 2,        // a partial: they help for a price (DEFAULT: 2× the port fee; Haggle not built)
+    CUTTER_PRICE: 1000,          // buy a cutter outright (§43.13)
+    CUTTER_PROVISIONS: 4,        // lots aboard a new cutter (DEFAULT)
+    SHABBY_HULL: 0.6,            // Work in town: a shabby cutter (DEFAULT: 60% hull)
+    STEAL_DR: 2,                 // the urchin heist (DEFAULT: Light Fingers, DR 2)
+    STEAL_HEAT: 5,
+    FENCE_SHUT: [1, 2],          // seasons an exposed fence is shut (§30.12)
+
+    // Who jails, and where (§43.2; D4 of the M8 build plan). Captors not
+    // listed maroon the captain (§43.1).
+    CAPTORS: {
+      Avalon: { node: "norfolk", faction: "avalon" },
+      Frisia: { node: "staugustine", faction: "frisia", releaseAt: "ocracoke" }, // a jail screen only until St. Augustine is built (D4b)
+    },
+    // The node jails (§43.14). Only the live ones and St. Augustine's
+    // stand-in are listed.
+    JAILS: {
+      norfolk: { name: "The Admiralty House Cells", judge: "key", admiralty: true, guard: "Wealthy" },
+      staugustine: { name: "The Castle Dungeon", judge: null, admiralty: false, guard: "Modest", standIn: true },
+    },
+    // Which NPCs may never speak for you at a trial (§43.6).
+    NO_TESTIMONY: ["bobby"],
+
+    // The Secrets tab (§30.12): the Slice's starter list, the live entries.
+    SECRETS: {
+      fence_bobby: { name: "Bobby Rats is your fence", size: "Small", penalty: "Bobby's fence shuts for 1-2 seasons.", fence: "bobby" },
+    },
+    SECRET_POINTS: { Small: 1, Medium: 3, Large: 6 },
+
+    lines: {
+      // The ways in
+      capturedSea: "PLACEHOLDER: Your ship is taken. They put you in irons with what's left of your crew.",
+      capturedPort: "PLACEHOLDER: The soldiers march you off to the cells.",
+      marooned: "PLACEHOLDER: They row you to a spit of sand and leave you there with nothing but the clothes on your back.",
+      maroonedOfficers: "PLACEHOLDER: [Officers] wade ashore beside you.",
+      // The charge (§43.4)
+      charge: {
+        Held: "PLACEHOLDER: \"You'll cool your heels here a while, then pay what you owe.\"",
+        Imprisoned: "PLACEHOLDER: \"You'll stand trial for your crimes.\"",
+        Condemned: "PLACEHOLDER: \"Piracy on the high seas. You'll hang for it, if the court agrees.\"",
+      },
+      // Interrogation (§43.5)
+      interrogation: "PLACEHOLDER: They take you to a windowless room. A man with a ledger wants names.",
+      noSecrets: "PLACEHOLDER: You've nothing worth telling them, and after a while even they believe it.",
+      resist: { clean: "PLACEHOLDER: You give them nothing.", partial: "PLACEHOLDER: You let one small thing slip, to make them stop.", setback: "PLACEHOLDER: They get something out of you." },
+      talkOffer: { free: "PLACEHOLDER: \"Tell us everything, and you walk out of here.\"", drop: "PLACEHOLDER: \"Tell us everything, and we'll go easier on you.\"", laugh: "PLACEHOLDER: They laugh. What you know isn't worth a lighter sentence." },
+      talkWarning: "Talking freely exposes every secret you hold, and every exposure has its cost. You'll be known as a snitch.",
+      talked: "PLACEHOLDER: You tell them everything. The clerk's pen scratches for an hour.",
+      // The cell
+      cellWait: "PLACEHOLDER: The hours crawl by in the dark.",
+      escapeSoon: "Planning an escape comes in the next update.",
+      // The trial (§43.6)
+      trialOpen: "PLACEHOLDER: They bring you up to the court in chains.",
+      confidant: "PLACEHOLDER: [Name] stands up in the gallery to speak for you.",
+      verdict: {
+        Condemned: { clean: "PLACEHOLDER: \"You've got the wrong man!\" And somehow, they believe you.", partial: "PLACEHOLDER: The court spares your neck: [n] seasons in prison.", setback: "PLACEHOLDER: The judge pronounces the sentence: you'll hang at the end of next season." },
+        Imprisoned: { clean: "PLACEHOLDER: The court lets you go, with a fine to remember them by.", partial: "PLACEHOLDER: [n] seasons in prison.", setback: "PLACEHOLDER: [n] seasons in prison." },
+      },
+      // The outside (§43.10)
+      outsideMorale: "Your crew wait for you in port. Morale −5.",
+      crewSailed: "PLACEHOLDER: Your crew gave up waiting. The [Ship] has sailed without you.",
+      impounded: "PLACEHOLDER: The Admiralty has impounded the [Ship].",
+      // Release
+      released: "PLACEHOLDER: The door swings open. You're free.",
+      servedHeat: "Your debt to [Faction] is paid: Heat with them falls to 0.",
+      fined: "Fined [gold] gold.",
+      hanged: "PLACEHOLDER: The trapdoor opens.",
+      // The stranded-rescue loop (§21.8)
+      drift: "PLACEHOLDER: The days drag on. You watch the horizon for a sail.",
+      rescueSail: "PLACEHOLDER: A sail! An Avalon merchantman heaves to and puts a boat in the water.",
+      rescue: { clean: "PLACEHOLDER: They take you aboard, no questions asked.", partial: "PLACEHOLDER: They'll take you, for a price.", setback: "PLACEHOLDER: They take one look at you and sail on." },
+      towed: "PLACEHOLDER: They land you at [Place].",
+      barred: "PLACEHOLDER: They hand you straight to the harbor guard.",
+      // The shipless popup (§43.13)
+      shipless: "PLACEHOLDER: You're free, but you've no ship and precious little else.",
+      boughtCutter: "PLACEHOLDER: You count out the gold, and a battered little cutter is yours.",
+      steal: { clean: "PLACEHOLDER: Four grubby urchins lead you down to the docks after dark. By morning a cutter is yours.", partial: "PLACEHOLDER: You get the cutter out, but the harbor watch sees you go.", setback: "PLACEHOLDER: The watch catches you halfway up the gangplank." },
+      stocks: "PLACEHOLDER: You spend a night in the stocks.",
+      worked: "PLACEHOLDER: A season of hard work buys you a shabby little cutter.",
+      retired: "PLACEHOLDER: You hang up your cutlass.",
+    },
+  };
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -20434,13 +21190,89 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     expiryWarning();
     moraleBandNotice();
     var screen = state.current.screen;
+    if (screen !== jailScreen) { if (jailScreen === "jail" || jailScreen === "shipless") jailSay = null; jailScreen = screen; }
     if (screen === "end") return drawEnd();
     var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() :
-      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
+      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "jail" ? jailPanel() : screen === "shipless" ? shiplessPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
     wire();
+  }
+
+  // ---- Imprisonment (§43; Milestone 8, PR 6) ----
+  var jailSay = null; // the last step's lines and chips, shown above the choices
+  var jailScreen = null;
+
+  function jailPanel() {
+    var v = PC.prison.view(state);
+    if (!v) return "";
+    var J = PC.data.prison, html;
+    if (v.kind === "marooned") {
+      html = '<div class="where">' + esc(PC.state.seasonName(state) + " " + state.time.year) + '</div><h2 class="title">Marooned</h2>' +
+        '<div class="prose dropcap">' + prose(v.log.join("\n\n")) + "</div>" + jailResult();
+      if (v.stage === "drift") html += opts([opt({ act: "jdrift", label: "Wait for a sail", meta: J.MAROON_AP + " actions pass." })]);
+      else html += opts([opt({ act: "jrescue", label: "Hail her and ask to be taken aboard", check: PC.checks.assess(state, v.rescueCheck, { conditions: [] }),
+        meta: "Clean: taken aboard and landed at Norfolk. Partial: they want paying first. Setback: they sail on, and you wait again." })]);
+      return html;
+    }
+    html = '<div class="where">' + esc(v.name + " · " + PC.state.seasonName(state) + " " + state.time.year) + "</div>" + banner("a cell: straw, a barred window, a heavy door") +
+      '<h2 class="title">' + esc(v.name) + "</h2>" +
+      (v.standIn ? '<p class="note">St. Augustine isn\'t built yet: this cell stands in for its castle dungeon, and you\'ll be let go at Ocracoke.</p>' : "") +
+      '<table class="ledger" style="max-width:520px">' + lrow("The charge", esc(v.charge || "")) + lrow("Cell actions left this season", String(v.ap)) +
+      lrow("Your ship", { port: "waiting in port with your Quartermaster", lost: "lost", impounded: "impounded", sailed: "gone: your crew sailed without you" }[v.ship] || "") + "</table>" +
+      (jailSay ? jailResult() : '<div class="prose">' + prose(v.log.slice(-3).join("\n\n")) + "</div>");
+    var turn = opt({ act: "jseason", label: "Let the season turn", meta: "The world goes on without you." });
+    if (v.stage === "interrogate") {
+      html += '<div class="prose">' + prose(J.lines.interrogation) + "</div>";
+      if (!v.secrets.length) return html + opts([opt({ act: "jresist", label: "Tell them nothing", meta: "You have no secrets worth their trouble." })]);
+      var offer = J.lines.talkOffer[v.offer];
+      return html + '<p class="small">Your secrets: ' + v.secrets.map(function (x) { return esc(x.name) + " (" + x.size + ")"; }).join(", ") + " · " + plural(v.points, "point") + ".</p>" + opts([
+        opt({ act: "jresist", label: "Resist", check: PC.checks.assess(state, v.resist, { conditions: [] }),
+          meta: "Clean: nothing given up. Partial: you give up one small secret of your choosing. Setback: they take one at random." }),
+        opt({ act: "jtalk", label: "Talk freely", meta: inline(offer) + " Exposes every secret, with every cost, and earns the Snitch tag.", lock: v.offer === "laugh" ? "What you know isn't worth a lighter sentence" : null }),
+      ]);
+    }
+    if (v.stage === "givePick") return html + '<p>Give them one:</p>' + opts(v.pick.map(function (x) { return opt({ act: "jgive", attrs: 'data-id="' + esc(x.id) + '"', label: x.name, meta: "If exposed: " + esc(x.penalty) }); }));
+    var escape = opt({ act: "noop", label: "Plan an escape", lock: J.lines.escapeSoon });
+    if (v.stage === "held" || v.stage === "awaitTrial") {
+      var what = v.stage === "held" ? plural(v.left, "more action") + " here, then a fine of " + J.FINE_FEES + "× the port fee and you're out." : plural(v.left, "more action") + " until your trial.";
+      return html + '<p class="small">' + esc(what) + "</p>" + opts([v.ap > 0 ? opt({ act: "jwait", label: "Wait", meta: "One cell action." }) : turn, escape]);
+    }
+    if (v.stage === "trial") {
+      return html + (v.confidant ? '<p class="small">' + esc(v.confidant) + " will speak for you: +1.</p>" : "") +
+        (v.judgeShift ? '<p class="small">The judge is known to be ' + (v.judgeShift > 0 ? "harsh: a sentence runs a season longer." : "merciful: a sentence runs a season shorter.") + "</p>" : "") +
+        opts([opt({ act: "jtrial", label: "Petition the court", check: PC.checks.assess(state, v.trialCheck, { conditions: ["Official"] }),
+          meta: v.charge === "Condemned" ? "Clean: free. Partial: 4-8 seasons in prison. Setback: the gallows at the end of next season." :
+            "Clean: free, with a fine and a drop in " + esc(v.faction) + " Standing. Partial: 1-3 seasons. Setback: 2-5 seasons." })]);
+    }
+    if (v.stage === "serving") {
+      return html + '<p class="small">' + plural(v.sentence, "season") + " left to serve. Serving the whole sentence clears your Heat with " + esc(v.faction) + ".</p>" +
+        opts([opt({ act: "jserve", label: "Serve your time", meta: "The seasons pass. You'll see what happened outside when you're let out." }), turn, escape]);
+    }
+    if (v.stage === "gallows") {
+      return html + '<p class="notice warn">The gallows ' + (v.gallowsIn <= 1 ? "at the end of this season." : "at the end of next season.") + "</p>" + opts([turn, escape]);
+    }
+    return html;
+  }
+
+  function jailResult() {
+    if (!jailSay) return "";
+    var h = (jailSay.lines || []).length ? '<div class="say">' + (jailSay.lines || []).map(inline).join("<br>") + "</div>" : "";
+    return h + chips(jailSay.chips);
+  }
+
+  function shiplessPanel() {
+    var nd = N().nodeData(N().here(state)), O = PC.prison.shiplessOptions(state), L = PC.data.prison.lines;
+    var meta = { buy: "A used cutter with her minimum crew, today. " + gold(PC.data.prison.CUTTER_PRICE) + " gold from crew gold, then your purse.",
+      steal: "Four little cutthroat urchins know a cutter nobody's watching. Clean: she's yours. Partial: yours, and Heat +" + PC.data.prison.STEAL_HEAT + ". Setback: caught.",
+      work: "A season of hard work for a shabby cutter with a bare crew.", stash: "A friend here fetches your stash: a season.", retire: "Your story ends here." };
+    return '<div class="where">' + esc(nd.name + " · " + PC.state.seasonName(state) + " " + state.time.year) + '</div><h2 class="title">Without a Ship</h2>' +
+      '<div class="prose dropcap">' + prose(L.shipless) + "</div>" + jailResult() +
+      '<p class="small">' + gold(state.money.crew + state.money.purse) + " gold on hand · " + plural(state.crew.count, "hand") + " with you.</p>" +
+      opts(O.map(function (o) {
+        return opt({ act: "jship", attrs: 'data-id="' + o.id + '"', label: o.label, check: o.check ? PC.checks.assess(state, o.check, { conditions: ["Town"] }) : null, meta: meta[o.id], lock: o.ok ? null : o.why });
+      }));
   }
 
   // The morale band changed since the last screen (P7b): a one-line notice.
@@ -20582,8 +21414,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<div class="xpline" aria-hidden="true"></div>' +
       '<p class="capname">' + esc((c.first + " " + c.last).trim()) + '</p><p class="muted" style="margin:3px 0 0;font-size:17.5px;font-style:italic">Age ' + c.age + "</p>" +
       '<table class="ledger">' + lrow("Your purse", gold(state.money.purse)) + lrow("Crew gold", gold(state.money.crew)) +
-      lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
-      lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>') +
+      (state.shipless ? lrow("Ship", "<i>none</i>") : lrow(sh.type, "<i>" + esc(sh.name) + "</i>") +
+      lrow("Hull", Math.round(sh.hull) + " / " + sh.hullMax + '<div class="hbar" style="margin-left:auto;width:84px"><i style="width:' + Math.round(100 * sh.hull / sh.hullMax) + '%;background:#5e4528"></i></div>')) +
       // Crew with the wounded (A16, §38.5); provisions as lots under morale (P8).
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
@@ -20608,7 +21440,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function phoneStrip() {
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
-      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
+      '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(state.shipless ? "no ship" : sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
       "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " " + esc(PC.crew.band(state.crew.morale)) + " · Provisions " + PC.crew.food(state) + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
@@ -22244,6 +23076,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function gameOverPanel(v) {
     var go = v.hunt.gameOver || {};
+    if (go.how === "captured" && PC.prison) return '<div class="prose dropcap">' + prose(PC.data.prison.lines.capturedSea) + "</div>" +
+      '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Continue</button></div>';
     return '<div class="prose dropcap">' + prose(PC.data.huntLines.gameOver[go.how === "died" ? "died" : "captured"]) + "</div>" +
       '<div class="actions"><button class="primary" data-act="endgameover">See how it ended</button></div>';
   }
@@ -22328,6 +23162,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function lockAttr(lock) { return lock ? ' disabled title="' + esc(lock) + '"' : ""; }
   function menuShip() {
     if (!state.location) return "<h2>The Ship</h2><p class=\"note\">Only in port.</p>";
+    if (state.shipless || state.jail) return "<h2>The Ship</h2><p class=\"note\">" + (state.jail ? "You're in no position to give orders." : "You have no ship.") + "</p>";
     var lock = shipLock(false);
     return "<h2>The Ship</h2>" + '<p class="note" style="margin:0 0 8px"><i>' + esc(state.ship.name) + "</i>, your " + esc(state.ship.type.toLowerCase()) +
       (lock ? " · " + esc(lock) + ": you can look, but nothing changes." : state.current.screen !== "node" ? " · Away from port: what takes an action waits until you're back." : "") + "</p>" + shipMenu();
@@ -22640,6 +23475,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var html = "<h2>Rumors</h2>";
     var q = PC.quests.journal(state).filter(function (j) { return j.needed && j.status !== "done"; });
     if (q.length) html += '<div class="svc"><h4>Leads</h4>' + q.map(function (j) { return '<p class="small" style="margin:2px 0">' + esc(j.name) + ": " + j.leads + " of " + j.needed + "</p>"; }).join("") + "</div>";
+    // The Secrets tab (§30.12): what interrogators could take from you.
+    var sec = PC.prison ? PC.prison.secrets(state) : [];
+    html += '<div class="qcard"><h4>Secrets</h4>' + (sec.length ? '<ul style="padding-left:1.1em;font-size:18px">' + sec.map(function (x) {
+      return "<li>" + esc(x.name) + ' <span class="note">(' + esc(x.size) + ", " + plural(x.points, "point") + (x.exposed ? "; exposed" : "; if exposed: " + x.penalty) + ")</span></li>";
+    }).join("") + "</ul>" : '<p class="note">None yet. Some things you do become secrets: your fences, for one.</p>') + "</div>";
     var live = PC.rumors.liveRumors(state);
     var types = {};
     live.forEach(function (r) { (types[r.type] = types[r.type] || []).push(r); });
@@ -22795,7 +23635,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         '<p class="small">Jump to a scene: <select class="devscene">' + PC.devtools.jumpable().map(function (id) {
           return '<option value="' + esc(id) + '">' + esc(id) + "</option>";
         }).join("") + "</select> " + b("devjump", "Go") + "</p>" +
-        '<div class="actions">' + b("devnorfolk", "Arrive at Norfolk (first visit)") + "</div>") : "") +
+        '<div class="actions">' + b("devnorfolk", "Arrive at Norfolk (first visit)") + "</div>" +
+        // Milestone 8, PR 6: imprisonment.
+        '<p class="small">Jail at Norfolk, ship in port: ' + ["Held", "Imprisoned", "Condemned"].map(function (c) { return b("devjail", c, ' data-charge="' + c + '"'); }).join("") +
+        " · Taken at sea by: " + ["Avalon", "Frisia", "Pirate"].map(function (f) { return b("devcaptured", f, ' data-flag="' + f + '"'); }).join("") +
+        " · " + b("devsecret", "Make Bobby a secret") + "</p>") : "") +
       (state.location ? grp("The hunt", '<p class="small">Next sighting: ' + b("devforce", "Avalon hunter", ' data-kind="hunter" data-flag="Avalon"') + b("devforce", "Frisian hunter", ' data-kind="hunter" data-flag="Frisia"') +
         b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
         b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
@@ -23934,6 +24778,23 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (state.ap.left > 0 && confirmFirst(el, "End the prototype?", "You still have " + plural(state.ap.left, "action") + " this season. End the run here?")) return;
       menu = null; PC.summary.end(state, "stopped");
     },
+    "jdrift": function () { jailSay = PC.prison.drift(state); },
+    "jrescue": function () { jailSay = PC.prison.rescue(state); },
+    "jresist": function () { jailSay = PC.prison.interrogate(state, "resist"); },
+    "jtalk": function (el) {
+      if (confirmFirst(el, "Talk freely?", PC.data.prison.lines.talkWarning, "Tell them everything")) return;
+      jailSay = PC.prison.interrogate(state, "talk");
+    },
+    "jgive": function (el) { jailSay = PC.prison.giveUp(state, el.dataset.id); },
+    "jwait": function () { jailSay = PC.prison.wait(state); },
+    "jseason": function () { var t = PC.prison.seasonTurn(state); jailSay = { lines: (t.turn && t.turn.lines || []).concat(t.lines || []), chips: t.chips }; },
+    "jtrial": function () { jailSay = PC.prison.trial(state); },
+    "jserve": function () { jailSay = PC.prison.serve(state); },
+    "jship": function (el) {
+      if (el.dataset.id === "retire" && confirmFirst(el, "Retire?", "You hang up your cutlass, and your story ends here.", "Retire")) return;
+      jailSay = PC.prison.shiplessChoose(state, el.dataset.id);
+    },
+    "noop": function () {},
     "endgameover": function () { PC.minigames.leave(state); menu = null; PC.summary.end(state); },
     "keepplaying": function () { PC.summary.keepPlaying(state); },
     "export": function () { dialog = "export"; },
@@ -24010,6 +24871,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
     "devfleet": function (el) { var r = PC.hunt.devFleetShip(state, el.dataset.cls); toast("A " + r.ship + " joins your fleet under " + r.officer + "."); },
     "devheat": function (el) { state.meters.heat[el.dataset.f] = Number(el.dataset.v); },
+    "devjail": function (el) { PC.devtools.jail(state, el.dataset.charge); menu = null; },
+    "devcaptured": function (el) { PC.devtools.captured(state, el.dataset.flag); menu = null; },
+    "devsecret": function () { state.flags.fenceUsed_bobby = true; },
     "devpressure": function (el) { state.crew.pressure = Number(el.dataset.v); if (state.crew.pressure < 3) state.crew.qmWarned = false; },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {

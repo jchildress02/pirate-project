@@ -286,6 +286,9 @@
       // Milestone 7: the Norfolk cells (until §43, Milestone 8) and the sea (§44.7).
       jailed: "PLACEHOLDER: The cell door slams shut behind you. Imprisonment comes with Milestone 8; until then, your story ends here.",
       drowned: "PLACEHOLDER: The sea takes your ship, and then it takes you. Your story ends here.",
+      // Milestone 8, PR 6 (§43): the gallows and retiring (D4d: the end screen until inheritance).
+      hanged: "PLACEHOLDER: The crowd falls silent as the trapdoor opens. Your story ends here.",
+      retired: "PLACEHOLDER: You hang up your cutlass. Your story ends here.",
       shipwrecked: "PLACEHOLDER: You wash ashore with nothing but the clothes on your back. A captain with no ship comes in a later milestone; for now, your story ends here.",
     },
     // The Quartermaster's advice (§24.14): {qm} is his first name.

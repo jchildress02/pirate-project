@@ -110,7 +110,10 @@
   // "hub" means back to where the captain is: the node's menus (and any
   // scene queued to fire there next, §17.2), or the engine's test harbor.
   function goTo(state, exit) {
-    if (exit === "end") return PC.summary.end(state); // the story ends here (jail, until §43; Milestone 7)
+    if (exit === "end") {
+      if (PC.prison && PC.prison.fromScene(state)) return; // jail (§43, Milestone 8 PR 6)
+      return PC.summary.end(state);
+    }
     if (!exit || exit === "hub") {
       if (state.location && state.location.node) {
         var next = PC.node ? PC.node.nextQueued(state) : null;

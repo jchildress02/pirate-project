@@ -515,6 +515,8 @@
 
   function fenceOpen(state) {
     var f = nodeData(here(state)).fence;
+    // An exposed fence is shut for a season or two (§30.12, PR 6).
+    if (f && PC.prison && PC.prison.fenceShut(state, f.npc)) return false;
     return !!(f && flag(state, f.opensWith));
   }
 
@@ -548,6 +550,7 @@
     markDealt(state, who);
     noteSale(state, buyer, gold);
     if (dirty) s.fencePaid += gold; else s.provisionerPaid += gold;
+    if (dirty) state.flags["fenceUsed_" + nd.fence.npc] = true; // a secret from now on (§30.12)
     // Selling here slowly raises prosperity (§20.2; fence sales count, assumption).
     s.soldGold += gold;
     var gain = Math.min(E().PROSPERITY_SEASON_CAP, Math.floor(s.soldGold / E().PROSPERITY_PER_SOLD)) - s.prosperityGained;

@@ -88,5 +88,16 @@
     return Object.keys(PC.data.scenes).filter(function (id) { return /^(ocr_|nor_|fav_)/.test(id); }).sort();
   }
 
-  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace };
+  // Imprisonment (§43, M8 PR 6): jail the captain at Norfolk on a chosen
+  // charge with his ship in port, or have him taken at sea by a flag.
+  function jail(state, charge) {
+    state.minigame = null;
+    return PC.prison.enter(state, { node: "norfolk", faction: "avalon", how: "port", charge: charge });
+  }
+  function captured(state, flag) {
+    state.minigame = null;
+    return PC.prison.captureAtSea(state, { battle: { enemies: [{ id: "dev", flag: flag || "Avalon" }], target: "dev" } });
+  }
+
+  PC.devtools = { skipQuests: skipQuests, arriveNorfolkFirst: arriveNorfolkFirst, jumpTo: jumpTo, jumpable: jumpable, jumpPlace: jumpPlace, jail: jail, captured: captured };
 })();

@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -3018,14 +3018,15 @@ test("the bribes: 4 × the port fee before the search, half the goods' fence val
   eq(crew - s.money.crew, 600); eq(s.cargo.goods.Tobacco.dirty, 10, "the goods stay aboard");
 });
 
-test("a setback with goods found is jail, and the story ends on the end screen", function () {
+test("a setback with goods found is jail: the Norfolk cells, charged by Avalon Heat (§43, PR 6)", function () {
   var s = toNorfolk("nf4");
   PC.crew.addGood(s, "Tobacco", 10, true);
   popupGo(s); pick(s, /^My name/); pick(s, /^By all means/);
   pick(s, /^Ah, that must be a mistake/, [1, 1]);
   eq(s.current.sceneId, "nor_fv1_jail");
   pick(s, /^Continue/);
-  eq(s.current.screen, "end"); eq(s.gameOver.line, "jailed"); ok(s.flags.nor_jailed);
+  eq(s.current.screen, "jail"); ok(!s.gameOver); ok(s.flags.nor_jailed);
+  eq(s.jail.node, "norfolk"); eq(s.jail.charge, PC.prison.chargeFor(s, "avalon")); eq(s.jail.ship, "port");
   eq((s.cargo.goods.Tobacco || {}).dirty || 0, 0);
 });
 
@@ -3314,7 +3315,7 @@ test("Take it, then: confiscation and Heat +5, never jail; locked above 1,500 of
   eq(v.status, "locked", "locked above the threshold"); eq(v.reason, "Too much to walk away from");
 });
 
-test("a setback: confiscation, Heat +5 and the port fee again; above the threshold, jail (the end screen until §43)", function () {
+test("a setback: confiscation, Heat +5 and the port fee again; above the threshold, the cells (§43)", function () {
   var s = inspectAt("ip5", 45);
   s.cargo.treasure.dirty = 5;
   var crew = s.money.crew + s.money.purse, fee = PC.node.portFee(s, "norfolk");
@@ -3327,7 +3328,7 @@ test("a setback: confiscation, Heat +5 and the port fee again; above the thresho
   t.cargo.treasure.dirty = 400; t.money.purse = 20000;
   PC.scenes.enterScene(t, "insp_found");
   pick(t, /paperwork/, [1, 1]); pick(t, /^Continue/);
-  ok(t.gameOver && t.gameOver.line === "jailed"); eq(t.current.screen, "end");
+  ok(!t.gameOver); eq(t.current.screen, "jail"); eq(t.jail.charge, "Imprisoned", "Avalon Heat 45 + 5: Wanted");
 });
 
 test("a clean bribe before the search: they leave, the goods stay", function () {
@@ -3704,6 +3705,149 @@ test("P10: the hunt's summary and the voyage's arrival carry the provisions line
   var pop = PC.world.sail(s, "norfolk");
   var lines = (pop && pop.lines) || (s.location.popup && s.location.popup.lines) || [];
   ok(JSON.stringify(s.location.popup || pop).indexOf("Provisions: ") >= 0, "on the arrival");
+});
+
+// ---- Milestone 8, PR 6: imprisonment I (§43.1-§43.6, §43.10, §43.13, §21.8, §30.12) ----
+console.log("Milestone 8, PR 6: imprisonment I (capture, the charge, interrogation, the trial, release)");
+
+function seaGame(flag) { return { battle: { enemies: [{ id: "e1", flag: flag }], target: "e1" } }; }
+
+test("the charge is Heat with the jailing faction: Held at Cold or Noticed, Imprisoned at Wanted, Condemned at Hunted", function () {
+  var s = m7("pj1");
+  [[0, "Held"], [39, "Held"], [40, "Imprisoned"], [69, "Imprisoned"], [70, "Condemned"], [95, "Condemned"]].forEach(function (x) { s.meters.heat.avalon = x[0]; eq(PC.prison.chargeFor(s, "avalon"), x[1], "Heat " + x[0]); });
+});
+
+test("captured at sea by Avalon: Norfolk's cells with every officer and max(10, a quarter) of the crew; everything else lost", function () {
+  var s = m7("pj2"); s.money.purse = 500; s.meters.heat.avalon = 50;
+  var crew = s.crew.count, offs = s.officers.filter(function (o) { return !o.gone; }).length;
+  s.captain.items = ["Fancy Spyglass", "Lockpicks"];
+  PC.prison.captureAtSea(s, seaGame("Avalon"));
+  eq(s.current.screen, "jail"); eq(s.jail.node, "norfolk"); eq(s.jail.charge, "Imprisoned"); eq(s.jail.stage, "interrogate");
+  eq(s.jail.cell.officers.length, offs);
+  var cellCrew = Object.keys(s.jail.cell.tiers).reduce(function (a, t) { return a + s.jail.cell.tiers[t]; }, 0);
+  eq(cellCrew, Math.min(crew, Math.max(10, Math.ceil(crew * 0.25))));
+  eq(s.money.purse, 0); eq(s.money.crew, 0); eq(s.crew.count, 0); ok(s.shipless);
+  eq(s.captain.items.join(","), "Lockpicks", "the lockpicks stay hidden"); eq(s.jail.items.join(","), "Fancy Spyglass");
+});
+
+test("Frisian captors use St. Augustine's castle (a jail screen only); pirates and foreigners maroon him", function () {
+  var s = m7("pj3"); PC.prison.captureAtSea(s, seaGame("Frisia")); eq(s.jail.node, "staugustine"); eq(s.jail.releaseAt, "ocracoke");
+  var t = m7("pj3b"); PC.prison.captureAtSea(t, seaGame("Pirate")); eq(t.jail.kind, "marooned");
+  var u = m7("pj3c"); PC.prison.captureAtSea(u, seaGame("Spain")); eq(u.jail.kind, "marooned");
+});
+
+test("marooned: two actions drift by, then Persuade an Avalon ship; clean lands him at Norfolk without a ship", function () {
+  var s = m7("pj4"); PC.prison.captureAtSea(s, seaGame("Pirate"));
+  var ap = s.ap.left;
+  PC.prison.drift(s); eq(s.jail.stage, "rescue"); eq(s.ap.left, ap - 2);
+  withDice([1, 1], function () { PC.prison.rescue(s); }); eq(s.jail.stage, "drift", "a setback: they sail on");
+  PC.prison.drift(s);
+  withDice([6, 6], function () { PC.prison.rescue(s); });
+  ok(!s.jail); eq(s.location.node, "norfolk"); eq(s.current.screen, "shipless");
+});
+
+test("marooned, towed to a node his Standing bars: straight to the cells", function () {
+  var s = m7("pj5"); s.meters.standing.avalon = -80; PC.prison.captureAtSea(s, seaGame("Pirate"));
+  PC.prison.drift(s); withDice([6, 6], function () { PC.prison.rescue(s); });
+  eq(s.current.screen, "jail"); eq(s.jail.node, "norfolk");
+});
+
+test("Held: three actions in the cell, then out with a fine of 4× the port fee; a ship in port is still his", function () {
+  var s = atNorfolk("pj6"); s.meters.heat.avalon = 10; s.money.crew = 1000;
+  var fine = PC.node.portFee(s, "norfolk") * 4;
+  PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+  eq(s.jail.charge, "Held"); eq(s.jail.stage, "held");
+  PC.prison.wait(s); PC.prison.wait(s); PC.prison.wait(s);
+  ok(!s.jail); eq(s.money.crew, 1000 - fine); eq(s.current.screen, "node"); ok(!s.shipless);
+});
+
+test("interrogation: nothing to give; Talk Freely's offer by secret points; a setback gives one up and shuts Bobby's fence", function () {
+  var s = atNorfolk("pj7"); s.meters.heat.avalon = 50;
+  PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+  PC.prison.interrogate(s, "resist"); eq(s.jail.stage, "awaitTrial");
+  var t = atNorfolk("pj7b"); t.meters.heat.avalon = 50; t.flags.fenceUsed_bobby = true;
+  PC.prison.enter(t, { node: "norfolk", faction: "avalon", how: "port" });
+  eq(PC.prison.secretPoints(t), 1); eq(PC.prison.talkOffer(t), "laugh");
+  withDice([1, 1], function () { PC.prison.interrogate(t, "resist"); });
+  ok(t.secretsExposed.fence_bobby); ok(PC.prison.fenceShut(t, "bobby"));
+  var u = atNorfolk("pj7c"); u.meters.heat.avalon = 50; u.flags.fenceUsed_bobby = true;
+  PC.prison.enter(u, { node: "norfolk", faction: "avalon", how: "port" });
+  withDice([3, 4], function () { PC.prison.interrogate(u, "resist"); });
+  if (u.jail.stage === "givePick") { PC.prison.giveUp(u, "fence_bobby"); ok(u.secretsExposed.fence_bobby); }
+});
+
+test("Talk Freely: every secret exposed, the Snitch tag, and the offer by points (12+ walks free)", function () {
+  var s = atNorfolk("pj8"); s.meters.heat.avalon = 50; s.flags.fenceUsed_bobby = true;
+  PC.data.prison.SECRETS.big_test = { name: "Test", size: "Large", penalty: "None." };
+  PC.data.prison.SECRETS.big_test2 = { name: "Test 2", size: "Large", penalty: "None." };
+  try {
+    PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+    eq(PC.prison.talkOffer(s), "free");
+    PC.prison.interrogate(s, "talk");
+    ok(!s.jail); ok(s.captain.tags.indexOf("Snitch") >= 0); ok(s.secretsExposed.fence_bobby);
+  } finally { delete PC.data.prison.SECRETS.big_test; delete PC.data.prison.SECRETS.big_test2; }
+});
+
+test("the trial: Petition DR 3 Imprisoned; clean frees him with a fine and a Standing drop; a confidant gives +1", function () {
+  var s = atNorfolk("pj9"); s.meters.heat.avalon = 50; s.money.crew = 2000;
+  PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+  PC.prison.interrogate(s, "resist"); PC.prison.wait(s); PC.prison.wait(s); PC.prison.wait(s);
+  eq(s.jail.stage, "trial"); eq(PC.prison.trialCheck(s).dr, 3); eq(PC.prison.trialCheck(s).extra.length, 0);
+  PC.npcs.get(s, "horace"); s.npcs.horace.rung = PC.npcs.RUNG_VALUE.Friend;
+  eq(PC.prison.trialCheck(s).extra[0].value, 1);
+  var st = s.meters.standing.avalon;
+  withDice([6, 6], function () { PC.prison.trial(s); });
+  ok(!s.jail); eq(s.meters.standing.avalon, st - 5); eq(s.current.screen, "node");
+});
+
+test("a sentence, served: the seasons pass, Heat with the jailer clears, and a lost ship means the shipless popup", function () {
+  var s = m7("pj10"); s.meters.heat.avalon = 50; s.time.season = 0;
+  PC.prison.captureAtSea(s, seaGame("Avalon"));
+  PC.prison.interrogate(s, "resist"); PC.prison.wait(s); PC.prison.wait(s); PC.prison.wait(s);
+  withDice([1, 1], function () { PC.prison.trial(s); });
+  eq(s.jail.stage, "serving"); ok(s.jail.sentence >= 1);
+  var n = s.jail.sentence;
+  PC.prison.serve(s);
+  if (!s.ended) { ok(!s.jail); eq(s.meters.heat.avalon, 0); eq(s.current.screen, "shipless"); ok(s.crew.count > 0, "the cellmates come out with him"); }
+  else eq(s.ended.how, "year", "a sentence past Winter 1754 ends on the end-of-year screen (D4a)");
+});
+
+test("Condemned, a setback: the gallows at the end of next season (the end screen until PR 7's rescues)", function () {
+  var s = m7("pj11"); s.meters.heat.avalon = 80; s.time.season = 0;
+  PC.prison.captureAtSea(s, seaGame("Avalon"));
+  PC.prison.interrogate(s, "resist"); PC.prison.wait(s); PC.prison.wait(s); PC.prison.wait(s);
+  eq(PC.prison.trialCheck(s).dr, 4);
+  withDice([1, 1], function () { PC.prison.trial(s); });
+  eq(s.jail.stage, "gallows");
+  PC.prison.seasonTurn(s); ok(s.jail, "not yet");
+  PC.prison.seasonTurn(s); eq(s.current.screen, "end"); eq(s.gameOver.line, "hanged");
+});
+
+test("the outside: a ship waiting at an Admiralty port is impounded after a season; morale -5", function () {
+  var s = atNorfolk("pj12"); s.meters.heat.avalon = 50; s.crew.morale = 60; s.time.season = 0;
+  PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+  PC.prison.interrogate(s, "resist");
+  PC.prison.seasonTurn(s);
+  eq(s.jail.ship, "impounded"); ok(s.shipless); eq(s.crew.count, 0);
+});
+
+test("the shipless popup: buy a cutter at 1,000; steal one (a setback at Norfolk is jail); retire ends the story", function () {
+  var s = m7("pj13"); PC.prison.captureAtSea(s, seaGame("Pirate")); PC.prison.drift(s); withDice([6, 6], function () { PC.prison.rescue(s); });
+  var o = PC.prison.shiplessOptions(s);
+  eq(o.length, 5); ok(!o[0].ok); ok(!o[3].ok);
+  s.money.purse = 1200; PC.prison.shiplessChoose(s, "buy");
+  eq(s.ship.type, "Cutter"); eq(s.crew.count, s.ship.crewMin); eq(s.money.purse, 200); ok(!s.shipless); eq(s.current.screen, "node");
+  var t = m7("pj13b"); PC.prison.captureAtSea(t, seaGame("Pirate")); PC.prison.drift(t); withDice([6, 6], function () { PC.prison.rescue(t); });
+  withDice([1, 1], function () { PC.prison.shiplessChoose(t, "steal"); }); eq(t.current.screen, "jail");
+  var u = m7("pj13c"); PC.prison.captureAtSea(u, seaGame("Pirate")); PC.prison.drift(u); withDice([6, 6], function () { PC.prison.rescue(u); });
+  PC.prison.shiplessChoose(u, "retire"); eq(u.current.screen, "end"); eq(u.ended.how, "retired");
+});
+
+test("save v11: jail, shipless and the secrets come in through the migration", function () {
+  var s = m7("pj14"); var old = JSON.parse(PC.state.serialize(s));
+  ["jail", "shipless", "secretsExposed", "fenceShut"].forEach(function (k) { delete old[k]; }); old.saveVersion = 10;
+  var m = PC.state.deserialize(JSON.stringify(old));
+  eq(m.jail, null); eq(m.shipless, false); eq(m.saveVersion, PC.state.SAVE_VERSION);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");
