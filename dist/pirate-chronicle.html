@@ -89,7 +89,14 @@ button.link { background: none; border: 0; padding: 0; color: var(--oxblood); te
 .corner svg { width: 56px; height: 56px; }
 
 /* ---- Top bar (§38.5): line 1 title, season, actions, seal; line 2 the five buttons ---- */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 14px 74px 10px 78px; border-bottom: 1px solid #a88a58; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; padding: 10px 74px 8px 78px; border-bottom: 1px solid #a88a58; }
+/* The sticky top bar (Playtest Pins 0.9, #11): stays put while the page scrolls, desktop and phone. */
+.topbar { position: sticky; top: 0; z-index: 5; background-color: #ecdfc0; box-shadow: 0 2px 6px rgba(60,40,10,.12); }
+.barstats { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: 16px; }
+.bstat { white-space: nowrap; }
+.bstat .bl { font-family: var(--sc); font-size: 14px; color: var(--faded); letter-spacing: .03em; margin-right: 3px; }
+.bstat .bs { display: none; }
+.bfeeds { font-size: 13.5px; color: var(--faded); }
 .brand { font-family: var(--gp); font-size: 27px; line-height: 1; }
 .wt { font-size: 15px; font-style: italic; color: var(--faded); margin-left: 8px; }
 .when { font-family: var(--sc); font-size: 21px; color: var(--oxblood); }
@@ -268,7 +275,6 @@ h2.title { font-family: var(--gp); font-size: 42px; margin: 0 0 6px; line-height
 .devgroup .sc { color: var(--faded); font-size: 16px; }
 .devgroup .actions { margin-top: 6px; }
 .devgroup button { font-size: 16px; }
-.pgold { display: none; }
 .haggled { border: 1px solid var(--rule); background: rgba(255,251,238,.7); padding: 6px 12px 10px; margin: 6px 0 12px; max-width: 680px; }
 .haggled .badge { margin: 4px 0 6px; }
 .toast { position: fixed; bottom: 1.2em; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--parchment); padding: .6em 1.2em; border-radius: 3px; z-index: 40; font-size: 18px; }
@@ -408,7 +414,10 @@ button.big { font-size: 22px; padding: 12px 30px; }
   .topbar .brand, .topbar .wt, .topbar .line2, .topbar .seal { display: none; }
   .topbar .when { font-size: 17px; }
   .toast { bottom: 76px; }
-  .topbar .pgold { display: inline; font-size: 15px; white-space: nowrap; }
+  .barstats { flex-basis: 100%; gap: 2px 10px; font-size: 14.5px; }
+  .bstat .bl { display: none; }
+  .bstat .bs { display: inline; font-family: var(--sc); font-size: 12.5px; color: var(--faded); margin-right: 2px; }
+  .bfeeds { font-size: 12.5px; }
   .pip { width: 12px; height: 12px; }
   .cols { display: block; }
   .strip { display: none; }
@@ -21817,69 +21826,113 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return [c.screen, c.sceneId, c.phase, l.place, l.tab, state.minigame ? state.minigame.kind + (state.minigame.over ? "!" : "") : ""].join("|");
   }
 
-  // Where the screen lands after an action (G1-G3 of the M5 playtest):
-  //  1. a result the action just produced (anything marked data-result
-  //     that wasn't on the screen before) scrolls into view, in a menu too;
-  //  2. a button marked data-top (the end of a scene) goes to the top;
-  //  3. opening a place lands below its banner, on its heading (G2);
-  //  4. back to the town menu returns to where the town menu was left;
-  //  5. any other new screen starts at the top; otherwise nothing moves.
+  // Where the screen lands after an action: ONE rule, built once and used
+  // by every screen (Playtest Pins (Build 0.9), PR B: items 8-10, 23, 40, 44,
+  // 48). To be refined in play.
+  //  1. Entering something new (a location, a scene, a battle, a minigame,
+  //     a creator step; a button marked data-top, the end of a scene) goes to
+  //     the top, woodcut included. A screen can name a better landing spot
+  //     with data-land (the hunt's "Ocracoke · Hunting…" line on a new
+  //     sighting, the two ships' header in battle and on each new round, the
+  //     after-battle report): the last one on the screen wins.
+  //  2. Any other choice scrolls so the FIRST NEW LINE sits just under the
+  //     sticky bar. If nothing new appears, the screen stays put.
+  //  3. Menus: opening or closing one leaves the page where it was; inside a
+  //     menu, a new line scrolls into view within the menu.
+  //  4. Back to the town menu returns to where the town menu was left (G2,
+  //     kept from the M5 playtest).
   var townScroll = 0;
-  function resultKeys() {
+
+  // What counts as "something new": the screen, the scene, the place, the
+  // minigame, and inside a hunt the sighting, the battle round and the
+  // after-battle step. A scene's own choice-and-result is NOT new.
+  function landKey() {
+    if (prologue) return "prologue";
+    if (!state) return creating ? "creator|" + stepIndex : "title";
+    var c = state.current || {}, l = state.location || {}, g = state.minigame, sub = "";
+    if (g && g.kind === "hunt") {
+      var a = g.after;
+      sub = [g.phase === "battle" || g.phase === "after" ? g.phase : "look", g.batch ? g.batch.n + "." + g.batch.next : "", g.battle ? g.battle.round : "",
+        a ? (a.repairDone ? 1 : 0) + ":" + (a.current ? a.current.id || "prize" : "") + ":" + (a.queue ? a.queue.length : "") : ""].join(",");
+    }
+    return [c.screen, c.screen === "scene" ? c.sceneId : "", c.screen === "node" ? l.place : "", g ? g.kind : "", sub].join("|");
+  }
+
+  // The lines on the screen, for spotting the first new one. Leaf blocks
+  // only, so a long passage that gained a line doesn't count as all new.
+  var LINE_SEL = "p, li, .say, h2, h3, h4, h5, .chips, .chip, table, .scout, .hotmenu, blockquote, .note, .where";
+  function lineEls(scope) {
+    if (!scope) return [];
+    // Buttons and choices aren't "lines": the choice you just picked comes
+    // back as a line of text, and that line is new.
+    return Array.prototype.filter.call(scope.querySelectorAll(LINE_SEL), function (el) { return !el.querySelector(LINE_SEL) && !el.closest("button, .choice, .choices, .opts, .actions"); });
+  }
+  function lineText(el) { return (el.textContent || "").replace(/\s+/g, " ").trim(); }
+  function snapLines(scope) {
     var m = {};
-    if (root) root.querySelectorAll("[data-result]").forEach(function (el) { m[el.dataset.result] = true; });
+    lineEls(scope).forEach(function (el) { var t = lineText(el); if (t) m[t] = (m[t] || 0) + 1; });
     return m;
   }
+  function firstNewLine(scope, before) {
+    var seen = {}, els = lineEls(scope);
+    for (var i = 0; i < els.length; i++) {
+      var t = lineText(els[i]);
+      if (!t) continue;
+      seen[t] = (seen[t] || 0) + 1;
+      if (seen[t] > (before[t] || 0)) return els[i];
+    }
+    return null;
+  }
+
   function stickyOffset() {
     var tb = root && root.querySelector(".topbar");
     if (!tb || typeof getComputedStyle === "undefined" || getComputedStyle(tb).position !== "sticky") return 8;
     return tb.getBoundingClientRect().height + 8;
   }
-  function scrollToEl(el) {
-    var modal = el.closest(".modal");
-    if (modal) {
-      var dt = el.getBoundingClientRect().top - modal.getBoundingClientRect().top;
-      if (dt < 12 || dt > modal.clientHeight * 0.55) modal.scrollTop += dt - 16;
+  function scrollToY(y) { try { globalThis.scrollTo(0, Math.max(0, Math.round(y))); } catch (e) { /* ignore */ } }
+  // Put an element just under the sticky bar (inside a menu: at the menu's top).
+  function scrollToAnchor(a) {
+    var modal = a.closest(".modal");
+    if (modal) { modal.scrollTop += a.getBoundingClientRect().top - modal.getBoundingClientRect().top - 16; return; }
+    var y = a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset();
+    // Never above the woodcut in the middle of a scene (#9).
+    var wood = root.querySelector('.stage [data-anchor="scene"]');
+    if (wood) y = Math.max(y, wood.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset());
+    scrollToY(y);
+  }
+  function scrollTop() { scrollToY(0); }
+
+  function land(snap, el) {
+    var modal = root.querySelector(".modal:not(.popup)");
+    // 3. Menus.
+    if (menu && menu !== snap.menu) return;                       // a menu opened over the page
+    if (!menu && snap.menu) return;                               // a menu closed
+    if (modal && menu) {
+      modal.scrollTop = snap.panelTop;
+      var mNew = firstNewLine(modal, snap.modalLines);
+      if (mNew) scrollToAnchor(mNew);
       return;
     }
-    var top = el.getBoundingClientRect().top, off = stickyOffset();
-    var vh = globalThis.innerHeight || 800;
-    if (top < off || top > vh * 0.5) { try { globalThis.scrollTo(0, Math.max(0, top + (globalThis.scrollY || 0) - off)); } catch (e) { /* ignore */ } }
-  }
-  // P6 and P7: put an anchor (the dive's breath gauge, a scene's woodcut)
-  // at the top of the screen, under the sticky bar.
-  function scrollToAnchor(a) {
-    try { globalThis.scrollTo(0, Math.max(0, a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset())); } catch (e) { /* ignore */ }
-  }
-  function land(before, keys, el, placeBefore, menuBefore, panelTop) {
-    var modal = root.querySelector(".modal:not(.popup)");
-    if (modal && menu && menu === menuBefore) modal.scrollTop = panelTop;
-    var fresh = null;
-    root.querySelectorAll("[data-result]").forEach(function (r) { if (!fresh && !keys[r.dataset.result]) fresh = r; });
-    if (el && el.dataset && el.dataset.top) return scrollTop();
-    // P6 (the dive) and P7 (scenes): these screens land on their anchor,
-    // never the very top, whenever something changed.
-    var anchor = !menu && root.querySelector("[data-anchor]");
-    if (anchor && !anchor.closest(".modal") && (fresh || screenKey() !== before)) return scrollToAnchor(anchor);
-    if (fresh && (!menu || fresh.closest(".modal"))) return scrollToEl(fresh);
-    if (screenKey() === before) return;
-    if (menu && menu !== menuBefore) return; // a menu opened over the screen: the page stays put
-    var placeNow = state && state.location && state.current && state.current.screen === "node" ? state.location.place : undefined;
-    if (state && state.current && state.current.screen === "node" && placeNow !== placeBefore) {
-      if (!placeNow) { try { globalThis.scrollTo(0, townScroll); } catch (e) { /* ignore */ } return; }
-      var h = root.querySelector(".stage h2.title");
-      if (h) { try { globalThis.scrollTo(0, Math.max(0, h.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset())); } catch (e) { /* ignore */ } return; }
+    // 1. Something new.
+    if ((el && el.dataset && el.dataset.top) || landKey() !== snap.land) {
+      var placeNow = state && state.current && state.current.screen === "node" && state.location ? state.location.place : undefined;
+      if (state && state.current && state.current.screen === "node" && !placeNow && snap.place) return scrollToY(townScroll); // 4.
+      var spots = root.querySelectorAll(".stage [data-land]");
+      return spots.length ? scrollToAnchor(spots[spots.length - 1]) : scrollTop();
     }
-    scrollTop();
+    // 2. The first new line, or stay put.
+    var fresh = firstNewLine(root.querySelector(".stage"), snap.lines);
+    if (fresh) scrollToAnchor(fresh);
   }
 
   function act(fn) {
     return function (el) {
-      var before = screenKey(), keys = resultKeys(), menuBefore = menu;
-      var modal = root.querySelector(".modal:not(.popup)"), panelTop = modal ? modal.scrollTop : 0;
+      var before = screenKey();
+      var modal = root.querySelector(".modal:not(.popup)");
       var onNode = state && state.current && state.current.screen === "node" && state.location;
-      var placeBefore = onNode ? state.location.place : undefined;
-      if (onNode && !state.location.place) townScroll = globalThis.scrollY || 0;
+      var snap = { land: landKey(), menu: menu, panelTop: modal ? modal.scrollTop : 0, place: onNode ? state.location.place : undefined,
+        lines: snapLines(root.querySelector(".stage")), modalLines: modal ? snapLines(modal) : {} };
+      if (onNode && !state.location.place && !menu) townScroll = globalThis.scrollY || 0;
       // The run log (Playtest Pins 0.9, PR A): the choice, then what changed.
       var RL = PC.runlog;
       if (RL && el && el.dataset) RL.choice(el.dataset.act || "?", el.dataset, before, (el.textContent || el.value || "").replace(/\s+/g, " ").trim().slice(0, 90));
@@ -21891,7 +21944,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       draw();
       stampFlash = false;
       if (RL) { var nowKey = screenKey(); if (nowKey !== before) RL.screen(nowKey); RL.after(state); RL.save(); }
-      land(before, keys, el, placeBefore, menuBefore, panelTop);
+      land(snap, el);
     };
   }
 
@@ -22165,6 +22218,23 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<span class="stamp' + (stampFlash ? " flash" : "") + '" title="Saved automatically after every action">Saved</span></span>';
   }
 
+  // Purse · Crew gold · Crew aboard / room · Provisions (and about how many
+  // actions at sea they feed). Compact on a phone.
+  function barStats() {
+    var c = state.crew, sh = state.ship;
+    var crew = c.count + (c.wounded || 0);
+    var food = PC.crew.food(state), feeds = state.location && PC.world && PC.world.apOfFood ? PC.world.apOfFood(state) : null;
+    var item = function (cls, label, short, val, title) {
+      return '<span class="bstat ' + cls + '" title="' + esc(title) + '"><span class="bl">' + label + '</span><span class="bs">' + short + "</span> " + val + "</span>";
+    };
+    return '<span class="barstats">' +
+      item("b-purse", "Purse", "Purse", gold(state.money.purse), "Your own gold") +
+      item("b-crewgold", "Crew gold", "Crew gold", gold(state.money.crew), "The crew's shared gold: wages, food, repairs") +
+      (state.shipless ? "" : item("b-crew", "Crew", "Hands", crew + " / " + sh.crewMax, "Hands aboard your flagship" + (c.wounded ? " (" + c.wounded + " wounded)" : "") + " / room for " + sh.crewMax + " (at least " + (sh.crewMin || 0) + " to sail)")) +
+      item("b-prov", "Provisions", "Food", food + (feeds != null ? ' <span class="bfeeds">(~' + (Math.floor(feeds) === 1 ? "1 action" : Math.floor(feeds) + " actions") + ")</span>" : ""), "Lots of provisions aboard, and about how many actions at sea they feed") +
+      "</span>";
+  }
+
   var stampFlash = false;
   function topBar() {
     var b = function (k, t, m) { return '<button class="menubtn' + (menu === m ? " on" : "") + '" data-act="openmenu" data-menu="' + m + '">' + ic(k) + t + (m === "journal" ? jdot() : "") + "</button>"; };
@@ -22172,8 +22242,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<span class="when">' + esc(PC.state.seasonName(state)) + " " + state.time.year + "</span>" +
       '<span class="pips" title="Actions left this season">' + apPips() + "</span>" +
       (state.location && PC.weather ? wxBadge(PC.weather.outlook(state, PC.weather.zoneHere(state)), "This season's weather here (" + PC.weather.zoneHere(state) + ")") : "") +
-      // On a phone the strip scrolls away, so the gold rides in the sticky bar (the author's phone notes).
-      '<span class="pgold">Purse · ' + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) + "</span>" +
+      // The sticky bar's numbers (Playtest Pins 0.9, items 17, 32, 50): what
+      // you have to spend and feed, on every screen, phone and desktop.
+      barStats() +
       '<span class="grow"></span>' + seal() +
       '<div class="line2">' + b("menu", "Menu", "menu") + b("journal", "Journal", "journal") + b("rumor", "Rumors", "rumors") + b("captain", "Captain", "captain") + b("ship", "Ship", "ship") + "</div></header>";
   }
@@ -23354,7 +23425,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<div class="actions"><button class="secondary" data-act="mgreroll">Reroll (' + esc(p.reroll) + ')</button><button class="primary" data-act="mgaccept">Accept it</button></div>';
   }
 
-  function mgHead(line, title) { return '<div class="where">' + esc(line) + '</div><h2 class="title">' + esc(title) + "</h2>"; }
+  function mgHead(line, title) { return '<div class="where" data-land="head">' + esc(line) + '</div><h2 class="title">' + esc(title) + "</h2>"; }
 
   function tavernWhere() {
     var nd = state.location ? N().nodeData(N().here(state)) : null;
@@ -23545,6 +23616,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // In a battle the result sits under the two ships' stats, right above
     // the next choice (G3); elsewhere it leads the screen.
     if (H.phase === "battle") html += battleShips(H.battle);
+    // After the battle, each step lands on its report (#48).
+    if (H.phase === "after") html += '<div data-land="after"></div>';
     html += mgLatest(v.log, v);
     if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
     var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
@@ -23677,7 +23750,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function battleShips(b) {
-    var html = '<div class="battle"><div class="bside"><div class="h4">Your side</div>' + b.mine.map(function (s) { return shipRow(s, false, false); }).join("") + "</div>" +
+    var html = '<div class="battle" data-land="battle"><div class="bside"><div class="h4">Your side</div>' + b.mine.map(function (s) { return shipRow(s, false, false); }).join("") + "</div>" +
       '<div class="bside"><div class="h4">Theirs' + (b.enemies[0] ? " · " + flagTag(b.enemies[0].flag, b.enemies[0].role) : "") + '</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
     if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
@@ -25472,7 +25545,6 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
   };
 
-  function scrollTop() { try { globalThis.scrollTo(0, 0); } catch (e) { /* ignore */ } }
 
   // Text boxes update the draft as you type, without redrawing (so the
   // cursor stays put). Age redraws on change: it moves the portrait band.
