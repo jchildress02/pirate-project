@@ -7779,7 +7779,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var R0 = H().ROLE[flag], adm = H().WATERS[waters].ports.filter(function (p) { return p.admiralty; }).length;
     var rw = { Trade: R0[0], Hybrid: R0[1], War: R0[2], Raider: R0[3] };
     if (flag === "Avalon") {
-      var shift = (H().ADMIRALTY_ROLE_SHIFT || 10) * adm, ah = (state.meters && state.meters.heat.avalon) || 0;
+      var shift = (H().ADMIRALTY_ROLE_SHIFT || 5) * adm, ah = (state.meters && state.meters.heat.avalon) || 0;
       (H().AVALON_HEAT_ROLE || []).forEach(function (x) { if (ah >= x[0]) shift += x[1]; });
       rw.Trade -= shift; rw.War += shift;
     }
@@ -18750,12 +18750,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
     // ---- Step 5: role by flag [Trade, Hybrid, War, Raider] ----
     // Avalon and France changed by the build 0.9 playtest pins (P5).
-    // Each Admiralty-held port in the waters moves Avalon points Trade →
-    // War; Avalon Heat moves 10 more at Wanted (40+) and 10 more at Hunted (70+).
-    // DEFAULT, flagged in the PR: P5 says "5 a port" but reads the north as
-    // 50/20/30 (and about 23% War), which takes 10 for Norfolk, the one
-    // Admiralty port; this keeps 10 so the north reads as P5 lays it out.
-    ADMIRALTY_ROLE_SHIFT: 10,
+    // Each Admiralty-held port in the waters moves 5 Avalon points Trade →
+    // War (ruled: P5, confirmed November 24 in the M9 chat), so the north,
+    // with Norfolk its one Admiralty port, reads 55/20/25 at low Heat.
+    // Avalon Heat moves 10 more at Wanted (40+) and 10 more at Hunted (70+):
+    // 45/20/35 at Wanted, 35/20/45 at Hunted.
+    ADMIRALTY_ROLE_SHIFT: 5,
     // Flags on enemy ships (P6 of the build 0.9 playtest pins): a swatch
     // color and the word for the nation, always shown together (§41.1).
     // PROPOSED colors, for the author's approval.

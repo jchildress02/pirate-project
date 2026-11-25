@@ -148,7 +148,7 @@
     var R0 = H().ROLE[flag], adm = H().WATERS[waters].ports.filter(function (p) { return p.admiralty; }).length;
     var rw = { Trade: R0[0], Hybrid: R0[1], War: R0[2], Raider: R0[3] };
     if (flag === "Avalon") {
-      var shift = (H().ADMIRALTY_ROLE_SHIFT || 10) * adm, ah = (state.meters && state.meters.heat.avalon) || 0;
+      var shift = (H().ADMIRALTY_ROLE_SHIFT || 5) * adm, ah = (state.meters && state.meters.heat.avalon) || 0;
       (H().AVALON_HEAT_ROLE || []).forEach(function (x) { if (ah >= x[0]) shift += x[1]; });
       rw.Trade -= shift; rw.War += shift;
     }
