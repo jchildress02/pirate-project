@@ -21903,6 +21903,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var modal = a.closest(".modal");
     if (modal) { modal.scrollTop += a.getBoundingClientRect().top - modal.getBoundingClientRect().top - 16; return; }
     var y = a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset();
+    // The line just above never peeks out under the bar (its y's and g's):
+    // land at least far enough down to hide it completely.
+    var bar = stickyOffset() - 8, prev = lineAbove(a);
+    if (prev) y = Math.max(y, prev.getBoundingClientRect().bottom + (globalThis.scrollY || 0) - bar + 12); // +12: a woodcut's frame shadow reaches past its box
+    y = Math.min(y, a.getBoundingClientRect().top + (globalThis.scrollY || 0) - bar); // never past the new line itself
     // A short page can't scroll far enough to bring the new line up: add
     // room at the bottom of the page so it can (gone at the next redraw).
     var doc = document.documentElement, short = y - (doc.scrollHeight - (globalThis.innerHeight || 0));
@@ -21911,6 +21916,17 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     scrollToY(y);
   }
   function scrollTop() { scrollToY(0); }
+  // The nearest line of text (or the woodcut) that ends above an element.
+  function lineAbove(a) {
+    var stage = root.querySelector(".stage"), top = a.getBoundingClientRect().top, best = null, bb = -Infinity;
+    if (!stage) return null;
+    stage.querySelectorAll(LINE_SEL + ", .ribbon, [data-anchor], .banner, .plate, .choice").forEach(function (x) {
+      if (x === a || x.contains(a) || a.contains(x)) return;
+      var r = x.getBoundingClientRect();
+      if (r.height && r.bottom <= top + 1 && r.bottom > bb) { bb = r.bottom; best = x; }
+    });
+    return best;
+  }
 
   function land(snap, el) {
     var modal = root.querySelector(".modal:not(.popup)");
@@ -21932,7 +21948,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     // 1. The story: the first new line of text, or stay put.
     var fresh = firstNewLine(root.querySelector(".stage"), snap.lines);
-    if (fresh) scrollToAnchor(fresh);
+    if (fresh) scrollToAnchor(withHeader(fresh));
+  }
+
+  // When the new text opens a scene step, its header comes with it: the
+  // quest ribbon and the scene's title ("Restless & Ruined · The Docks")
+  // sit just above it (the author's scrolling playtest, November 24).
+  function withHeader(el) {
+    var main = el.closest(".scene-main");
+    if (!main) return el;
+    var title = main.querySelector("h2.title");
+    if (!title || !(title.compareDocumentPosition(el) & 4)) return el; // the title comes before it
+    // Only the header and the woodcut stand between the title and the new text.
+    var before = lineEls(main).filter(function (x) { return x !== el && (x.compareDocumentPosition(el) & 4) && (title.compareDocumentPosition(x) & 4); });
+    if (before.length) return el;
+    return main.querySelector(".ribbon") || title;
   }
 
   function act(fn) {
