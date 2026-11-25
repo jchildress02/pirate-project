@@ -675,3 +675,7 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .foodline { max-width: 680px; margin: 4px 0 2px; padding: 6px 12px; border-left: 3px solid #8a6414; background: rgba(201,159,69,.12); font-size: 16.5px; }
 .foodline.low { border-left-color: #b0661a; background: rgba(176,102,26,.12); }
 .foodline.short { border-left-color: #8f2a1c; background: rgba(143,42,28,.10); }
+/* #2 of the build 0.9 pins: the old trades in one even grid. */
+.cards.profgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; }
+.cards.profgrid .card { height: 100%; justify-content: space-between; }
+@media (max-width: 760px) { .cards.profgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

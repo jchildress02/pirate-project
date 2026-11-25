@@ -30,6 +30,10 @@
     { band: "old", min: 36, max: 40, tags: 3, debuffs: 2 },
   ];
 
+  // The portrait's age (#1 of the build 0.9 pins): its own breaks, apart
+  // from the age bands' tags and debuffs. Young 15-23, middle 24-33, older 34+.
+  var PORTRAIT_AGES = [{ band: "young", max: 23 }, { band: "mid", max: 33 }, { band: "old", max: 999 }];
+
   // ---- Origin: Ash-Born (§12.5) ----------------------------------------
   // Card text as written in the Creator chat; no card says "rung" (§38.6).
   var ORIGINS = [
@@ -259,6 +263,7 @@
     ORIGINS: ORIGINS,
     GREYED: GREYED,
     AGE_BANDS: AGE_BANDS,
+    PORTRAIT_AGES: PORTRAIT_AGES,
     HOME_CITIES: HOME_CITIES,
     PROFESSIONS: PROFESSIONS,
     LOSSES: LOSSES,

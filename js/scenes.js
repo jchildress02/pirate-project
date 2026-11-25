@@ -299,7 +299,9 @@
     var p = state.current.pending;
     if (!p) return null;
     var o = outcomeFor(s.choices[p.choiceIndex], p.outcome);
-    return { to: resolveExit(state, o.exit), carry: !!o.carry, same: resolveExit(state, o.exit) === s.id };
+    // leaves: the outcome walks the captain somewhere or starts a minigame.
+    var leaves = (o.effects || []).some(function (e) { return ("goPlace" in e || "minigame" in e) && test(state, e.when); });
+    return { to: resolveExit(state, o.exit), carry: !!o.carry, same: resolveExit(state, o.exit) === s.id, leaves: leaves };
   }
 
   // Apply the outcome's effects and follow its exit. `pot` answers the

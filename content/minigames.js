@@ -96,6 +96,7 @@
         setback: "PLACEHOLDER (cryptid scene, §35): the shadow blots out the wreck, and the world goes dark.",
         relic: "You dive to the bottom in the creature's wake, and pick up what fell to the sea floor." },
       junkPrefix: "You surface with ",
+      junkGrab: "You pry it loose: {junk}. Useless.", // #14 of the build 0.9 pins (the author's wording)
       offered: "You spot a few ripe pickings.",
       frigate: "One of them is larger than the rest.",
       quick: "You gather what you can find and return to the beach.",

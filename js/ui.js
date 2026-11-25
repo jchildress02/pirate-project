@@ -1269,6 +1269,13 @@
     // "At the bar" sits above the patrons and officers (Playtest Pins 0.8, #21).
     html += nodeExtras("tavern");
     html += DIVIDER + '<div class="block"><div class="h4">Around the Tavern</div>' + sayFor("around");
+    // Gather Intelligence: pick what to hear about right in its result (#15 of the build 0.9 pins).
+    if (state.location.gatherPick) {
+      var gpl = state.location.gatherPick.left || 1;
+      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?' + (gpl > 1 ? " (" + gpl + " picks)" : "") + '</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
+        return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
+      }).join("") + "</div></div>";
+    }
     var list2 = [];
     if (N().oneArmedHere(state)) list2.push(opt({ act: "oneArmed", label: "Talk to the one-armed pirate", meta: "He sits with his mates, drinking." }));
     var dk = PC.drinking.canDrink(state);
@@ -1279,12 +1286,6 @@
     list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: two rumors, you pick both kinds. Partial: one, you pick the kind. Setback: one rumor, and people notice you asking.",
       check: gi.ok ? PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] }) : null, lock: gi.ok ? null : gi.why }));
     html += opts(list2);
-    if (state.location.gatherPick) {
-      var gpl = state.location.gatherPick.left || 1;
-      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?' + (gpl > 1 ? " (" + gpl + " picks)" : "") + '</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
-        return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
-      }).join("") + "</div></div>";
-    }
     return html + "</div>" + DIVIDER + officersBlock();
   }
 
@@ -2555,8 +2556,9 @@
       "<li>In port: " + (rep.pool === 1 ? "word of fair terms; crew pools as usual." : "crew pools " + (rep.pool > 1 ? "+" : "−") + Math.abs(Math.round((rep.pool - 1) * 100)) + "% at every port.") + "</li>" +
       "<li>You can always loosen a term. Harder terms wait for the Winter split.</li></ul>" + "</div></div>";
     if (!signed_) {
-      html += (check ? opts([opt({ act: "nop", label: "Reading the Articles to the crew", check: check, meta: "A Pirate Code check at signing" })]) : "") +
-        '<div class="actions"><button class="primary" data-act="artask"' + lockAttr(shipLock(false)) + '>Sign the Articles</button><button class="secondary" data-act="artreset">Reset to Standard</button></div>';
+      // The read-out is a note on Sign the Articles, not a button of its own (#18 of the build 0.9 pins).
+      html += '<div class="actions"><button class="primary" data-act="artask"' + lockAttr(shipLock(false)) + '>Sign the Articles</button><button class="secondary" data-act="artreset">Reset to Standard</button></div>' +
+        (check ? '<p class="note" style="margin:6px 0 0">A check follows: reading the Articles to the crew, Pirate Code (' + tierWord(check.tier) + ").</p>" : "");
     }
     return html;
   }
@@ -3626,7 +3628,7 @@
   function previewCard() {
     var C = PC.creator;
     var b = C.band(draft.age);
-    var pic = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, b.band, false) : null;
+    var pic = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, C.portraitBand(draft.age).band, false) : null;
     var name = (String(draft.first || "") + " " + String(draft.last || "")).trim() || "Your captain";
     var bits = [];
     if (b) bits.push("Age " + draft.age);
@@ -3730,7 +3732,7 @@
     html += '<h3>Ash-Born</h3><p class="note">' + esc(Dc.ORIGINS[0].text) + "</p>" +
       '<div class="cards">' + Dc.HOME_CITIES.map(function (c) { return card("pick", "homeCity", c.id, c.id, null, { extra: '<span class="small"><i>' + esc(c.burned) + "</i> " + esc(c.effect) + "</span>" }); }).join("") + "</div>";
     html += '<h3>Your old trade</h3><p class="note">What you did before the fire. Pick one of its two skills for a free point of training.</p>' +
-      '<div class="cards">' + Dc.PROFESSIONS.map(function (p) {
+      '<div class="cards profgrid">' + Dc.PROFESSIONS.map(function (p) {
         var on = draft.profession === p.id;
         return '<div class="card' + (on ? " on" : "") + '"><b>' + esc(p.id) + '</b><span class="actions" style="margin-top:6px">' + p.free.map(function (t) {
           var pick = on && draft.freePoint === t;
@@ -3816,7 +3818,8 @@
       }).join("") + "</div>";
     });
     html += "<h3>Flaw</h3>" + '<div class="cards small-cards">' + Dc.FLAWS.map(function (f) {
-      return card("pick", "flaw", f.id, f.id, f.text, { blocked: C.blockedBy(draft, f.id), extra: leanLine(f.id) });
+      // Once a flaw is picked the others grey out, as the traits do (#4); tap yours again to change it.
+      return card("pick", "flaw", f.id, f.id, f.text, { blocked: C.blockedBy(draft, f.id), full: !!draft.flaw && draft.flaw !== f.id, unpick: true, extra: leanLine(f.id) });
     }).join("") + "</div>";
     return html;
   }
@@ -3897,7 +3900,7 @@
       .map(function (t) { return esc(t) + " +" + C.trainingTotal(draft, t); }).join(", ");
     var m = draft.mentor;
     var b = C.band(draft.age);
-    var cap = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, b.band, false) : null;
+    var cap = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, C.portraitBand(draft.age).band, false) : null;
     var men = m.portraitSet ? C.portraitPath(m.portraitSet, "old", false) : null;
     var html = head("Review");
     if (errs.length) {
@@ -3919,8 +3922,8 @@
       sec("Tags", "tags", "<p>Ash-Born" + (loss ? ", " + esc(loss.tag) : "") + (draft.tags.length ? ", " + esc(draft.tags.join(", ")) : "") +
         (draft.debuffs.length ? '<br><span class="note">Old ailments:</span> ' + esc(draft.debuffs.join(", ")) : "") + "</p>") +
       sec("Your mentor", "mentor", "<p>" + esc((String(m.first) + " " + String(m.last)).trim() || "?") + (m.type ? ", " + esc(m.type) : "") +
-        (m.voice ? "<br>" + esc(m.voice) + (m.secondary ? ", " + esc(m.secondary) : "") + ", Mentor" : "") + "</p>") +
-      sec("Your ship", "ship", "<p><i>" + esc(PC.creator.shipName(draft.shipName) || "?") + "</i>, a battered sloop</p>") +
+        (m.voice ? "<br>" + esc(m.voice) + (m.secondary ? ", " + esc(m.secondary) : "") : "") + "</p>") +
+      sec("Your ship", "ship", "<p>" + (PC.creator.shipName(draft.shipName) ? "The <i>" + esc(PC.creator.shipName(draft.shipName)) + "</i>" : "?") + ", a battered sloop</p>") +
       '<p style="max-width:680px;margin-top:14px">You start with <b>' + gold(600 + (city && city.gold ? city.gold : 0)) + " gold in the ship's chest</b> (the crew's, until it's split) and <b>nothing in your own purse</b>, plus 10 lots of provisions, " + esc(PC.data.creator.START.startKit) + ". <b>No one knows your name yet.</b></p>" +
       '<div class="actions"><button class="primary big" data-act="begin"' + (errs.length ? " disabled" : "") + ">Set sail</button></div>";
     return html;
@@ -4146,11 +4149,14 @@
       var r = PC.scenes.viewScene(state).result;
       // A beat's "carry on" with nothing to show goes straight through.
       if (r && r.outcome === "result" && !r.text && !r.chips.length) { PC.scenes.commit(state); return; }
-      // A check result that leads to a choice shows the choices on the same
-      // screen (the M3 review: Davey's tab, Twopenny's pay-or-shove).
-      if (r && r.outcome !== "result" && !r.reroll && !r.needsPot) {
+      // A result that leads to more choices shows them on the same screen,
+      // with no Continue in between (the M3 review: Davey's tab, Twopenny's
+      // pay-or-shove; #12 of the build 0.9 pins: plain answers too, like
+      // Twopenny's "my business does not concern you"). A result that ends
+      // the scene keeps its Continue, so it can be read.
+      if (r && !r.reroll && !r.needsPot) {
         var ex = PC.scenes.peekExit(state);
-        if (ex && ex.to && ex.to !== "hub") {
+        if (ex && ex.to && PC.data.scenes[ex.to] && !ex.leaves) {
           var lead = { label: r.choiceLabel, outcome: r.outcome, roll: r.roll, strikeFirst: r.strikeFirst, text: ex.carry || ex.same ? null : r.text, chips: r.chips, approval: r.approval };
           PC.scenes.commit(state);
           if (state.current.screen === "scene") state.current.lead = lead;
