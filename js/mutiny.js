@@ -184,10 +184,7 @@
   function hookExtra(state, trait, label) {
     return present(state).some(function (o) { return hasTrait(o, trait); }) ? [{ label: label, value: 1 }] : [];
   }
-  function weaponType(state) {
-    var items = state.captain.items || [];
-    return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
-  }
+  function weaponType(state) { return PC.items.meleeType(state); }
   // The ringleader's duel DR: 2 + level, +1 for a Raider, Bloodthirsty,
   // Daredevil or Ironclad (§25.14, §25.10).
   function duelDR(o) {

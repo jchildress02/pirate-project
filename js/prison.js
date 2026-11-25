@@ -85,7 +85,8 @@
   // (§43.3), returned on release.
   function concealable(id) {
     var m = PC.data.modifiers[id] || {};
-    return !!m.concealable || /knife|dagger|stiletto|lockpick/i.test(id);
+    var d = PC.items && PC.items.def(id);
+    return !!m.concealable || !!(d && d.concealable) || /knife|dagger|stiletto|lockpick/i.test(id);
   }
   function takeItems(state) {
     var c = state.captain, keep = [], took = [];

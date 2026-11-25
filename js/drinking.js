@@ -48,7 +48,7 @@
     var node = PC.node.here(state);
     var opp = opponent(state, node, n);
     var hung = (state.captain.tags || []).indexOf("Hangover") >= 0;
-    var start = wits != null ? wits : D().WITS - (hung ? 1 : 0) + ((state.captain.items || []).indexOf("Kingly Goblet") >= 0 ? 1 : 0);
+    var start = wits != null ? wits : D().WITS - (hung ? 1 : 0) + (PC.items.has(state, "Kingly Goblet") ? 1 : 0);
     return {
       kind: "drink", key: "drink|" + node + "|" + n, node: node, n: 0, opp: opp,
       wits: start, witsMax: Math.max(start, D().WITS), poured: 0, round: 1,
@@ -315,8 +315,9 @@
       if (table) {
         var rare = table.rare.length && ir() < 0.1;
         var item = M().pick(ir, rare ? table.rare : table.uncommon);
-        state.captain.items.push(item);
+        var got = PC.items.gain(state, item);
         r.item = item;
+        r.itemChip = PC.items.chip(got, "Won");
         M().say(state, game, "He leaves something behind: " + item + ".");
       }
     }

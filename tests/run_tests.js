@@ -6,8 +6,8 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/devtools.js",
-  "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/items.js", "js/devtools.js",
+  "content/check_types.js", "content/modifiers.js", "content/items.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js", "content/wanted_man.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
@@ -1157,8 +1157,10 @@ test("A Dying Pirate's Wish: killing the shark gives the necklace, Dread +3 and 
   PC.scenes.enterScene(s, "ocr_dpw_1");
   play(s, ["spit", "natural", "paying", "who", "full", "no_promises", "like_him", "dive"], 9);
   forced("clean", function () { pickIn(s, "knife"); });
-  eq(s.meters.dread, 3);
+  // Dread +3, then the necklace is worn at once and its floor of 5 lifts it (§5.6, M9 PR 5).
+  eq(s.meters.dread, 5);
   ok(s.captain.items.indexOf("Shark-Tooth Necklace") >= 0);
+  eq(PC.items.worn(s).trinket, "Shark-Tooth Necklace");
   ok(PC.rumors.candidatesOf(s, "Reputation").some(function (c) { return c.line.id === "rep_shark_killed"; }));
 });
 
@@ -1561,8 +1563,8 @@ test("Quick Dive: clean brings up four finds, partial two, a setback nothing", f
 
 test("the Diver's Mask gives +1 breath; the Diving Barrel +2, and only the best counts", function () {
   var s = inTown();
-  s.captain.items.push("Diver's Mask"); eq(PC.salvage.breathMax(s), 7);
-  s.captain.items.push("Diving Barrel"); eq(PC.salvage.breathMax(s), 8);
+  PC.items.gain(s, "Diver's Mask"); eq(PC.salvage.breathMax(s), 7);
+  PC.items.gain(s, "Diving Barrel"); eq(PC.salvage.breathMax(s), 8);
 });
 
 test("the Miranda: the mermaid waits first in her Hull at DR 1; surfacing without it leaves Ollie waiting", function () {
@@ -1806,7 +1808,7 @@ test("Liar's Dice: caught cheating forfeits the pot and costs black Standing -5;
 });
 
 test("Liar's Dice: Loaded Dice reroll the Cheat once a sitting; no cap on games a sitting (B21)", function () {
-  var s = at(inTown(), "tavern"); s.money.purse = 500; s.captain.items.push("Loaded Dice");
+  var s = at(inTown(), "tavern"); s.money.purse = 500; PC.items.gain(s, "Loaded Dice");
   PC.liarsdice.start(s); PC.liarsdice.newGame(s, 25);
   forced("setback", function () { PC.liarsdice.cheat(s, 0); });
   ok(s.minigame.pending, "waiting on a reroll");
@@ -3512,7 +3514,7 @@ test("forging: precious goods weigh 2; the picker can't go over the papers; the 
   eq(p.Emeralds, 8, "the most valuable first"); eq(p.treasure, 4);
   var threw = false; try { PC.forgery.apply(s, { Emeralds: 8, treasure: 5 }); } catch (e) { threw = true; }
   ok(threw, "21 units won't fit 20");
-  s.captain.items.push("Forger's Kit", "Engraver's Seal Matrices");
+  PC.items.gain(s, "Forger's Kit"); PC.items.gain(s, "Engraver's Seal Matrices");
   eq(PC.forgery.budget(s, "clean"), 35);
   ok(PC.checks.assess(s, PC.forgery.check()).parts.some(function (x) { return /Matrices/.test(x.label) && x.value === 1; }));
 });
@@ -4342,7 +4344,7 @@ test("season Pressure: +1 for each mutinous officer and a Schemer at Wary or bel
 test("save 13 loads as 14 with the mutiny fields", function () {
   var s = m7("sv14"); var old = JSON.parse(PC.state.serialize(s)); old.saveVersion = 13; delete old.mutiny;
   var t = PC.state.deserialize(JSON.stringify(old));
-  eq(t.saveVersion, 16); eq(t.mutiny, null); eq(t.prisoners.length, 0);
+  eq(t.saveVersion, PC.state.SAVE_VERSION); eq(t.mutiny, null); eq(t.prisoners.length, 0);
 });
 
 // ---- M9 PR 3: Admiralty Bounties and French stragglers (§17.4.8, §17.4.4, §22.5) ----
@@ -4586,6 +4588,178 @@ test("Key's Spyglass at Trusted: given once; +1 Keep Watch and her captain's rat
 test("the build label reads Build 0.9 · Milestone 8", function () {
   var src = require("fs").readFileSync(require("path").join(__dirname, "..", "js", "ui.js"), "utf8");
   ok(/Build 0\.9 · Milestone 8/.test(src));
+});
+
+
+// ---- M9 PR 5: items and the equipment screen (§32) -------------------------
+console.log("Milestone 9, PR 5: items and the equipment screen (§32)");
+function boardWith(s, seed) {
+  var g = PC.hunt.start(s);
+  g.sighting = { ships: [aShip(s, "Sloop", "War", "Avalon", { resolve: 5 })], shape: "single" }; g.phase = "scout";
+  withDice([1, 1], function () { PC.hunt.engage(s, g); });
+  forced("clean", function () { withDice([1, 1], function () {
+    for (var i = 0; i < 40 && g.battle && !g.battle.over && g.battle.step !== "clash" && g.battle.step !== "grenade"; i++) {
+      if (g.pending) { PC.minigames.settle(s); continue; }
+      var st = g.battle.step;
+      if (st === "setup") PC.hunt.battle(s, g, "engage");
+      else if (st === "showOfForce") PC.hunt.battle(s, g, "showOfForce", false);
+      else if (st === "position") PC.hunt.battle(s, g, "doPosition");
+      else if (st === "posChoice") PC.hunt.battle(s, g, "choosePosition", "close");
+      else if (st === "exchange") PC.hunt.battle(s, g, "doExchange", "grape");
+      else if (st === "decision") PC.hunt.battle(s, g, "decide", "board");
+      else if (st === "grapple") PC.hunt.battle(s, g, "doGrapple");
+      else if (st === "chase") PC.hunt.battle(s, g, "doChase");
+      else break;
+    }
+  }); });
+  return g;
+}
+
+test("the slots: the starting kit is worn; trinkets fill two slots, a third waits in the inventory and does nothing", function () {
+  var s = huntReady("it1");
+  var w = PC.items.worn(s);
+  eq(w.melee, "Buccaneer's Cutlass"); eq(w.ranged, "Simple Flintlock Pistol");
+  eq(PC.items.meleeType(s), "Swordsmanship");
+  eq(PC.items.gain(s, "Shark-Tooth Necklace").key, "trinket");
+  eq(PC.items.gain(s, "Obsidian Amulet").key, "trinket2");
+  var third = PC.items.gain(s, "Cat-o'-Nine-Tails");
+  eq(third.key, null, "no free slot");
+  eq(PC.meters.dreadFloor(s), 10, "the worn necklace and amulet; not the whip in the inventory");
+  PC.items.equip(s, "Cat-o'-Nine-Tails", "trinket");
+  eq(PC.items.worn(s).trinket, "Cat-o'-Nine-Tails"); eq(PC.meters.dreadFloor(s), 10);
+  var inv = PC.items.view(s).inventory.map(function (i) { return i.name; });
+  ok(inv.indexOf("Shark-Tooth Necklace") >= 0, "the swapped-out necklace is in the inventory");
+  // Bare fists are Brawling (§32.3).
+  PC.items.unequip(s, "melee"); eq(PC.items.meleeType(s), "Brawling");
+  PC.items.gain(s, "Brass Knuckles"); PC.items.equip(s, "Brass Knuckles", "melee"); eq(PC.items.meleeType(s), "Brawling");
+});
+
+test("swaps cost no AP but are locked in a scene or a minigame", function () {
+  var s = huntReady("it2"), ap = s.ap.left;
+  PC.items.unequip(s, "ranged"); eq(s.ap.left, ap);
+  s.current = { screen: "scene", sceneId: "x" };
+  var threw = false; try { PC.items.equip(s, "Simple Flintlock Pistol", "ranged"); } catch (e) { threw = true; }
+  ok(threw, "locked in a scene");
+  ok(PC.items.view(s).lock);
+  s.current = { screen: "node" }; PC.hunt.start(s);
+  threw = false; try { PC.items.equip(s, "Simple Flintlock Pistol", "ranged"); } catch (e) { threw = true; }
+  ok(threw, "locked at sea in the hunt");
+});
+
+test("the second pet slot needs Beastmaster; the second ranged slot needs the Pistol Brace and takes a pistol only", function () {
+  var s = huntReady("it3");
+  PC.items.gain(s, "Tabby Cat"); eq(PC.items.gain(s, "Black Cat").key, null);
+  s.captain.tags.push("Beastmaster");
+  PC.items.equip(s, "Black Cat", "pet2"); eq(PC.items.worn(s).pet2, "Black Cat");
+  PC.items.gain(s, "Sea-Service Pistol");
+  var threw = false; try { PC.items.equip(s, "Sea-Service Pistol", "ranged2"); } catch (e) { threw = true; }
+  ok(threw, "no Brace yet");
+  PC.items.gain(s, "Pistol Brace");
+  PC.items.equip(s, "Sea-Service Pistol", "ranged2");
+  eq(PC.items.guns(s).length, 2);
+  PC.items.gain(s, "Soldier's Musket");
+  threw = false; try { PC.items.equip(s, "Soldier's Musket", "ranged2"); } catch (e) { threw = true; }
+  ok(threw, "a musket can't be braced");
+});
+
+test("item edge sits inside the ±3 cap and needs the item worn; rerolls once a season", function () {
+  var s = huntReady("it4");
+  var duel = { type: "Swordsmanship", dr: 2 };
+  PC.items.gain(s, "Parisian Rapier");
+  var parts = function () { return PC.checks.assess(s, duel, { conditions: ["Duel"] }).parts.map(function (p) { return p.label; }); };
+  ok(parts().indexOf("Parisian Rapier") < 0, "in the inventory it does nothing");
+  PC.items.equip(s, "Parisian Rapier", "melee");
+  ok(parts().indexOf("Parisian Rapier") >= 0);
+  PC.items.gain(s, "Classic Tricorne");
+  var rr = PC.checks.availableReroll(s, { type: "Rally Crew", dr: 2 }, "setback", {});
+  eq(rr && rr.name, "Classic Tricorne");
+  s.rerollsUsed[rr.id] = 1;
+  ok(!PC.checks.availableReroll(s, { type: "Rally Crew", dr: 2 }, "setback", {}), "once a season");
+});
+
+test("floors and the purse of the hold: the best instrument plus other floors; burn cuts capped at 30%", function () {
+  var s = huntReady("it5");
+  PC.items.gain(s, "Tin Whistle"); PC.items.gain(s, "Hurdy-Gurdy");
+  eq(PC.items.moraleFloor(s), 10, "only the best instrument");
+  PC.items.gain(s, "Tabby Cat"); eq(PC.items.moraleFloor(s), 15, "a pet stacks with it");
+  s.crew.morale = 5; PC.crew.addMorale(s, -10); eq(s.crew.morale, 15);
+  PC.items.gain(s, "Orange Cat");
+  eq(PC.items.burnCut(s), 0, "the second pet waits in the inventory");
+  PC.items.equip(s, "Orange Cat", "pet"); eq(PC.items.burnCut(s), 0.05);
+});
+
+test("consumables: the elixir ends Wounded; the cordial makes the next arrival 60%; three of each at most", function () {
+  var s = huntReady("it6");
+  PC.items.gain(s, "Rejuvenating Elixir");
+  ok(PC.items.usable(s, "Rejuvenating Elixir"), "not while healthy");
+  PC.scenes.applyEffect(s, { tag: "Wounded", untilSeasonEnd: true });
+  PC.items.use(s, "Rejuvenating Elixir");
+  ok(s.captain.tags.indexOf("Wounded") < 0); eq(PC.items.count(s, "Rejuvenating Elixir"), 0);
+  for (var i = 0; i < 3; i++) PC.items.gain(s, "Surgeon's Cordial");
+  ok(PC.items.gain(s, "Surgeon's Cordial").full);
+  s.crew.wounded = 10; PC.items.use(s, "Surgeon's Cordial"); ok(s.crew.cordial);
+  forcedDraw(0.5, function () { PC.node.arrive(s); });
+  eq(s.crew.wounded, 0, "all ten back at 60% (each draw 0.5)"); ok(!s.crew.cordial);
+});
+
+test("hidden items: the pools by flag; Rare only at Rich+, Very Rare only at Superior; Sicily's Uncommon from the Others", function () {
+  var lo = function () { return 0.99; }, vr = function () { return 0.01; };
+  var it = PC.items.hiddenItem({ role: "Trade", flag: "Pirate" }, lo, 0);
+  eq(PC.items.def(it).tier, "Uncommon"); ok(PC.data.items.POOLS.Pirate.indexOf(it) >= 0);
+  eq(PC.items.def(PC.items.hiddenItem({ role: "War", flag: "Frisia" }, vr, 4)).tier, "Very Rare");
+  eq(PC.items.def(PC.items.hiddenItem({ role: "War", flag: "Frisia" }, vr, 3)).tier, "Rare", "Very Rare only at Superior");
+  var sic = PC.items.hiddenItem({ role: "Trade", flag: "Sicily" }, lo, 1);
+  eq(PC.items.def(sic).tier, "Uncommon"); ok(PC.data.items.POOLS.Other.indexOf(sic) >= 0);
+  ok(PC.validate().errors.every(function (e) { return !/item/.test(e); }));
+});
+
+test("the boarding shot: a braced second pistol fires too; two hits kill two; a musket kills two a hit", function () {
+  var s = huntReady("it7");
+  PC.items.gain(s, "Pistol Brace"); PC.items.gain(s, "Sea-Service Pistol"); PC.items.equip(s, "Sea-Service Pistol", "ranged2");
+  var g = boardWith(s);
+  eq(g.battle.step, "clash");
+  var e = g.battle.enemies[0], before = e.crew;
+  forced("clean", function () { withDice([6, 6], function () { PC.hunt.battle(s, g, "doAction", "lead"); for (var i = 0; i < 6 && g.pending; i++) PC.minigames.settle(s); }); });
+  ok(g.log.filter(function (l) { return /pistol/i.test(l); }).length >= 2, "two shots");
+  ok(before - e.crew >= 2, "two hits, two extra dead (" + (before - e.crew) + ")");
+});
+
+test("a Blackpowder Grenade offers itself at Strike First: thrown, Strike First is won and one falls", function () {
+  var s = huntReady("it8");
+  PC.items.gain(s, "Blackpowder Grenade");
+  var g = boardWith(s);
+  eq(g.battle.step, "grenade");
+  var e = g.battle.enemies[0], before = e.crew;
+  PC.hunt.battle(s, g, "grenade", true);
+  eq(g.battle.step, "clash"); eq(g.battle.board.sf, 1); eq(before - e.crew, 1);
+  eq(PC.items.count(s, "Blackpowder Grenade"), 0);
+});
+
+test("a heavy weapon: a clean Lead the Charge kills one extra, and -1 Strike First", function () {
+  var s = huntReady("it9");
+  PC.items.gain(s, "Steel Greatsword"); PC.items.equip(s, "Steel Greatsword", "melee"); PC.items.unequip(s, "ranged");
+  eq(PC.items.extraKill(s), 1);
+  ok(PC.checks.assess(s, { type: "Strike First", dr: 2 }).parts.some(function (p) { return p.label === "Steel Greatsword" && p.value === -1; }));
+});
+
+test("the arms locker: a captain with no weapons takes a ship's cutlass and pistol at departure; not one who just took his off", function () {
+  var s = huntReady("it10");
+  PC.items.unequip(s, "melee"); PC.items.armsLocker(s);
+  ok(!PC.items.owns(s, "Ship's Cutlass"), "he still owns his cutlass");
+  s.captain.items = []; s.captain.equip = PC.items.emptyEquip();
+  PC.hunt.start(s);
+  var w = PC.items.worn(s);
+  eq(w.melee, "Ship's Cutlass"); eq(w.ranged, "Ship's Pistol");
+  eq(PC.items.meleeType(s), "Swordsmanship");
+});
+
+test("save 16 loads as 17: what he carries is worn where a slot is free; the stand-in names become the catalog's", function () {
+  var s = huntReady("it11");
+  var data = JSON.parse(PC.state.serialize(s));
+  data.saveVersion = 16; delete data.captain.equip; data.captain.items = ["Simple Flintlock Pistol", "Buccaneer's Cutlass", "Spyglass", "Octant", "Gold Tooth"];
+  var t = PC.state.deserialize(JSON.stringify(data));
+  eq(t.saveVersion, 17);
+  eq(t.captain.equip.trinket, "Fancy Spyglass"); eq(t.captain.equip.trinket2, "Navigator's Octant"); eq(t.captain.equip.face, "Gold Tooth");
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

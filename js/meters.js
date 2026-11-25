@@ -104,13 +104,14 @@
   }
 
   // ---- The Dread floor (§5.6, §28.8) ----------------------------------------
-  // Tags and carried items (dreadFloor in content/modifiers.js) and officers
-  // aboard with a floor trait (Bloodthirsty). Nets out, clamps at 0, capped
-  // at 40. Displays wait for the equipment screen (§32.6).
+  // Tags and worn items (dreadFloor in content/modifiers.js; js/items.js) and
+  // officers aboard with a floor trait (Bloodthirsty). Nets out, clamps at 0,
+  // capped at 40. Displays come with the cabin (§32.6, PR 6).
   function dreadFloor(state) {
     var c = state.captain, sum = 0;
     ["traits", "flaws", "tags", "items"].forEach(function (k) {
-      (c[k] || []).forEach(function (id) { var m = PC.data.modifiers[id]; if (m && m.dreadFloor) sum += m.dreadFloor; });
+      var list = k === "items" && PC.items ? PC.items.activeOf(c) : (c[k] || []);
+      list.forEach(function (id) { var m = PC.data.modifiers[id]; if (m && m.dreadFloor) sum += m.dreadFloor; });
     });
     (state.officers || []).forEach(function (o) {
       if (o.gone || o.captured) return;

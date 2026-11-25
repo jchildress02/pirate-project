@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 16;
+  var SAVE_VERSION = 17;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -52,11 +52,22 @@
     addMilestone4Fields(state);
     addMilestone5Fields(state);
     addMilestone7Fields(state);
+    addItemFields(state);
     if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
   }
 
   // Milestone 7: the map, voyages and the season loop (§4, §26.9, §27.7).
+  // M9 PR 5: the equipment slots (§32.3). What's carried goes into its
+  // slots; the M5 stand-in pool's short names become the catalog's.
+  var ITEM_RENAMES = { Spyglass: "Fancy Spyglass", Octant: "Navigator's Octant" };
+  function addItemFields(state) {
+    var c = state.captain;
+    if (!c) return;
+    c.items = (c.items || []).map(function (n) { return ITEM_RENAMES[n] || n; });
+    if (!c.equip && PC.items) PC.items.autoEquip(c);
+  }
+
   function addMilestone7Fields(state) {
     if (state.tradeShip === undefined) state.tradeShip = null;   // §27.7
     if (state.split === undefined) state.split = null;           // the Winter split in progress (§26.9)
@@ -293,6 +304,12 @@
       // M9 PR 4: A Wanted Man at sea (the rumor's guarantee).
       data.wanted = data.wanted || null;
       data.saveVersion = 16;
+    }
+    if (data.saveVersion === 16) {
+      // M9 PR 5: items and the equipment screen. What he carries is worn
+      // where a slot is free; the rest waits in the inventory.
+      addItemFields(data);
+      data.saveVersion = 17;
     }
     return data;
   }

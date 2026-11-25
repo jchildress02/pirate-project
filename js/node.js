@@ -1144,6 +1144,8 @@
     if (c.wounded > 0) {
       var surgeon = (state.officers || []).some(function (o) { return !o.gone && o.type === "Surgeon" && o.aboard === "flagship"; });
       var rate = surgeon ? 0.45 : 0.30;
+      // The Surgeon's Cordial: 60% at this arrival (§32.12, §24.9).
+      if (c.cordial) { rate = PC.data.items.CORDIAL_RECOVERY; c.cordial = false; }
       var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), id, "arrival", state.rolls.arrival = (state.rolls.arrival || 0) + 1].join("|"));
       var back = 0;
       for (var i = 0; i < c.wounded; i++) if (r() < rate) back++;

@@ -87,6 +87,9 @@
       out.chips.push({ icon: "prov", text: "On rations: burn −25%" + (rc.first ? " · Ration Stores " + rc.outcome : "") + (cost ? " · morale −" + cost : ""), ink: cost ? "bad" : null });
       if (rc.first && rc.outcome === "setback") out.chips.push({ icon: "pressure", text: "The crew resent the short rations", ink: "bad" });
     }
+    // The Orange Cat and Catch of the Day (§32.12), capped at 30% (§25.2).
+    var cut = PC.items ? PC.items.burnCut(state) : 0;
+    if (cut) mult *= 1 - cut;
     mult = Math.max(0.5, mult);
     var need = Math.ceil(heads / 5 * ap * mult);
     out.need = need;
@@ -175,6 +178,8 @@
     // Departing a port (§24.10, §24.13): desertion, then the mutiny at
     // Pressure 4 or more (M9 PR 2). The voyage resumes after a quelled one.
     var dep = { lines: [], chips: [] };
+    // The arms locker: a captain who lost his weapons takes the ship's (3-30).
+    if (!opts.departed && PC.items) PC.items.armsLocker(state);
     if (!opts.departed && !opts.from && PC.mutiny) {
       dep = PC.mutiny.depart(state, { kind: "sail", to: to, opts: opts });
       if (dep.mutiny || dep.blocked) return null;
@@ -410,7 +415,7 @@
     // below 50 still resets to 50), plus the floor; Pressure to 0;
     // officers' approval (§26.9).
     var m0 = state.crew.morale;
-    state.crew.morale = clamp((m0 > 50 ? Math.round((m0 + 50) / 2) : 50) + (state.crew.floor || 0), 0, 100);
+    state.crew.morale = clamp((m0 > 50 ? Math.round((m0 + 50) / 2) : 50) + PC.crew.floor(state), 0, 100);
     state.crew.pressure = 0;
     (state.officers || []).forEach(function (o) { if (!o.gone) o.approval = (o.approval || 0) + W().SPLIT_APPROVAL; });
     sp.payout = { sold: sold, pool: pool, carry: carry, one: Math.round(one), captain: capGold, officers: offGold, hands: handGold, handsN: handsN };

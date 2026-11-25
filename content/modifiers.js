@@ -116,30 +116,14 @@
   add("Failing Eyes", { edge: plus(["Keep Watch", "Appraise"], -1) });
   // Temporary physical tags (§14.5) and items the opening can give (§32).
   add("Wounded", { edge: [{ group: "Combat", value: -1 }].concat(plus(["Endure"], -1)) });
-  // Forging (§32.8): the kit rerolls Forge and adds 5 units on a clean or
-  // partial; the matrices add +1 Forge and 10 units. They stack.
-  add("Forger's Kit", { reroll: reroll(["Forge"]), forgeUnits: 5 });
-  add("Engraver's Seal Matrices", { edge: plus(["Forge"], 1), forgeUnits: 10 });
-  add("Shark-Tooth Necklace", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
+  // Items live in content/items.js (§32; M9 PR 5), which adds each one's
+  // modifier here.
   // The minigames' tags and items (§14.5, §14.4, §32.12).
   // Careening over a split Winter (§26.10): +1 Outrun for the Spring season.
   add("Careened", { edge: plus(["Outrun"], 1) });
   add("Hangover", { edge: plus(["Keep Watch", "Notice Danger", "Read People"], -1) });
   add("Waterlogged", { edge: plus(["Endure"], -1) }); // placeholder (§14.5)
   add("Card Sharp", { reroll: reroll(["Cards & Dice"]) });
-  add("Hip Flask", { reroll: reroll(["Cast-Iron Stomach"]) });
-  add("Loaded Dice", { note: "One reroll of the Cheat roll per Liar's Dice session (§18.3)." });
-  add("Diver's Mask", { note: "+1 breath on a dive (§18.2)." });
-  add("Diving Barrel", { note: "+2 breath on a dive (§18.2)." });
-  add("Velvet Buccaneer Coat", { dreadFloor: 5, edge: plus(["Rally Crew"], 1), note: "Dread floor +5 (§32)" });
-  add("Tin Whistle", { note: "Morale floor +5 (§32.12)." });
-  add("Silver Pocket Watch", { note: "§32: its effect comes with the items work." });
-  add("Fancy Spyglass", { reroll: reroll(["Keep Watch"]), note: "One extra detail per prize on the scouting screen." });
-  add("Navigator's Octant", { reroll: reroll(["Navigate"]) });
-  add("Obsidian Amulet", { dreadFloor: 5, note: "Dread floor +5 (§32)" });
-  add("Parisian Rapier", { edge: plus(["Swordsmanship"], 1, { condition: "Duel" }) }); // §32.8
-  add("Abyssinian Scimitar", { edge: plus(["Swordsmanship"], 1, { condition: "Lead the Charge" }) }); // §32.8
-  add("Giant Tooth", { note: "A relic: Dread floor +10 while displayed (§32.12). Displays aren't built yet." });
   // Old ailments, rebalanced in the Creator chat (§12.4): one often-rolled
   // skill and one rarer one each.
   add("Weak Chest", { edge: plus(["Endure"], -2).concat(plus(["Dive"], -1)).concat([{ any: true, value: -1, when: { condition: "Cold" } }]) });
@@ -150,9 +134,7 @@
 
   // ---- Earned physical tags the prototype can already reach (§14.5) ----
   // Key's Spyglass (§17.4.7, §32.8; M9 PR 4): +1 Keep Watch; the scouting card shows her captain's rating.
-  add("Key's Spyglass", { edge: plus(["Keep Watch"], 1), note: "The scouting card shows the enemy captain's rating." });
   // Freddy's Cutlass (§32.8): a clean Lead the Charge kills one extra enemy (js/combat.js).
-  add("Freddy's Cutlass", { note: "A clean Lead the Charge kills one extra enemy." });
   // Prize Taker's top rung (3-24): Dread floor +10, inside the cap of 40 (§28.8).
   add("Terror of the Seas", { dreadFloor: 10, note: "Dread floor +10 (3-24)." });
   add("One Eye", { dreadFloor: 10, edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });

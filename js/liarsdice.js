@@ -66,7 +66,7 @@
       kind: "dice", key: "dice|" + node + "|" + state.minigames.diceSessions, node: node,
       opp: { name: rec.full, traits: rec.traits || [] },
       games: 0, won: 0, lost: 0, net: 0, sized: null, marks: 0, round: null, over: false, log: [],
-      sessionRerolls: (state.captain.items || []).indexOf("Loaded Dice") >= 0 ? [{ name: "Loaded Dice", types: ["Cards & Dice"], op: "cheat" }] : [],
+      sessionRerolls: PC.items.has(state, "Loaded Dice") ? [{ name: "Loaded Dice", types: ["Cards & Dice"], op: "cheat" }] : [],
     };
     M().start(state, game, "node");
     M().say(state, game, LN(game.node).sit);

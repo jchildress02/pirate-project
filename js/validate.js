@@ -142,6 +142,17 @@
       if (n.kind !== "ocean" && !d.economy.TIERS[n.tier]) err(w, "unknown prosperity tier " + n.tier);
     });
 
+    // Items (§32; M9 PR 5): every name a pool, table or scene hands out is in
+    // the catalog, so it has a slot and an effect.
+    if (d.items) {
+      var cat = d.items.catalog, known = function (n, w) { if (!cat[n]) err(w, "unknown item '" + n + "'"); };
+      Object.keys(d.items.POOLS).forEach(function (f) { d.items.POOLS[f].forEach(function (n) { known(n, "item pool " + f); }); });
+      var mg = d.minigames || {};
+      if (mg.salvage) ["uncommon", "rare"].forEach(function (t) { (mg.salvage.ITEMS[t] || []).forEach(function (n) { known(n, "salvage items"); }); });
+      if (mg.drinking) Object.keys(mg.drinking.ITEMS || {}).forEach(function (r) { ["uncommon", "rare"].forEach(function (t) { (mg.drinking.ITEMS[r][t] || []).forEach(function (n) { known(n, "drinking items " + r); }); }); });
+      Object.keys(cat).forEach(function (n) { if (d.items.SLOTS.indexOf(cat[n].slot) < 0 && cat[n].slot !== "inventory" && cat[n].slot !== "display") err("item " + n, "unknown slot " + cat[n].slot); });
+    }
+
     return { errors: errors, warnings: warnings };
   }
 

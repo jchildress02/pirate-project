@@ -479,7 +479,7 @@
     else if ("dies" in e) { var dn = (state.npcs[e.dies] = state.npcs[e.dies] || {}); dn.dead = true; return null; }
     else if ("meet" in e) { var mn = (state.npcs[e.meet] = state.npcs[e.meet] || {}); mn.met = true; return null; }
     else if ("seasonFlag" in e) { state.flags[e.seasonFlag] = seasonStamp(state); return null; }
-    else if ("item" in e) { state.captain.items.push(e.item); }
+    else if ("item" in e) { if (PC.items) PC.items.gain(state, e.item); else state.captain.items.push(e.item); }
     else if ("ap" in e) { state.ap.left = Math.max(0, state.ap.left + e.ap); }
     else if ("flag" in e) { state.flags[e.flag] = e.value !== false; return null; }
     else return "[engine note: this effect isn't built yet: " + JSON.stringify(e) + "]";

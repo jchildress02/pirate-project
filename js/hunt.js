@@ -37,6 +37,7 @@
     if (!c.ok) throw new Error(c.why);
     // Departing a port: desertion, then the mutiny (§24.10, §24.13; M9 PR 2).
     var dep = null;
+    if (!opts.departed && PC.items) PC.items.armsLocker(state); // the arms locker (3-30)
     if (!opts.departed && PC.mutiny && !PC.node.isOcean(state.location.node)) {
       dep = PC.mutiny.depart(state, { kind: "hunt", opts: opts });
       if (dep.mutiny || dep.blocked) return null;
@@ -419,8 +420,8 @@
       var e = game.battle.enemies.filter(function (x) { return x.id === id; })[0];
       var loot = G().rollLoot(state, e, M().rand(state, game, "loot"));
       // A bounty target: Poor loot, and a 10% chance of an Uncommon item (§17.4.8).
-      if (e.bounty) { var bn = PC.bounties.notice(state, e.bounty); loot.item = bn && bn.item ? "Shark-Tooth Necklace" : null; }
-      if (e.wanted) loot.item = null; // his own item comes with the surrender scene (§3) // DEFAULT: a stand-in Uncommon until the item catalog (PR 5)
+      if (e.bounty) { var bn = PC.bounties.notice(state, e.bounty); loot.item = bn && bn.item ? PC.items.bountyItem(M().rand(state, game, "bountyitem")) : null; }
+      if (e.wanted) loot.item = null; // his own item comes with the surrender scene (§3)
       // Porcelain broke on her heavy hits (§21.11).
       if (loot.goods["Ming porcelain"]) loot.goods["Ming porcelain"] = Math.round(loot.goods["Ming porcelain"] * Math.pow(1 - H().PORCELAIN_BREAK, e.heavyHits || 0));
       var vr = M().rand(state, game, "volunteers");
@@ -551,7 +552,7 @@
     // Goods leave the chip list (they were picked on the screen); provisions stay (A10).
     taken.forEach(function (t) { if (t.prov) chips.push(mchip("prov", "prov", t.prov, "+{n} provisions")); });
     game.after.taken = (game.after.taken || []).concat(taken.filter(function (t) { return !t.prov && t.n; }));
-    if (loot.item) { state.captain.items.push(loot.item); chips.push({ icon: "item", text: "Found aboard: " + loot.item, ink: "oxblood" }); }
+    if (loot.item) chips.push(PC.items.chip(PC.items.gain(state, loot.item), "Found aboard"));
     // Captives (§22.7).
     if (loot.captives) {
       var cc = ch.captives || "free";
@@ -841,7 +842,7 @@
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
           draft: s.draft, cue: s.cue, bounty: s.bounty ? (PC.bounties.notice(state, s.bounty) || {}).name || null : null, wanted: s.wanted ? s.captain : null,
-          rating: (state.captain.items || []).indexOf("Key's Spyglass") >= 0 ? s.rating : null, french: !!s.french, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
+          rating: PC.items.has(state, "Key's Spyglass") ? s.rating : null, french: !!s.french, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
           legit: legitLine(state, s) };
       }),
     };

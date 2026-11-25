@@ -104,7 +104,7 @@
       if (e.wanted === "freddy") chips.push({ icon: "standing", text: "Pirate Standing " + D.KILL_STANDING + " (one of Jack's men executed)", ink: "pirates" });
     }
     // His item, on every path where his ship is taken (§3).
-    if (t.item) { state.captain.items.push(t.item); chips.push({ icon: "item", text: "Found aboard: " + t.item, ink: "oxblood" }); }
+    if (t.item) chips.push(PC.items.chip(PC.items.gain(state, t.item), "Found aboard"));
     PC.state.addLog(state, "A Wanted Man: " + t.name + " " + ({ bring: "taken alive", release: "let go" }[choice] || "killed") + ".");
     return chips;
   }
