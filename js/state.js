@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 17;
+  var SAVE_VERSION = 18;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -310,6 +310,21 @@
       // where a slot is free; the rest waits in the inventory.
       addItemFields(data);
       data.saveVersion = 17;
+    }
+    if (data.saveVersion === 17) {
+      // M9 PR 6: the shop and the cabin. Displays he carried (the Giant
+      // Tooth and the Kingly Goblet counted while carried) hang in the cabin
+      // where there's a spot, so nothing he had stops working.
+      data.shops = data.shops || {};
+      if (data.crew) data.crew.itemSpend = data.crew.itemSpend || 0;
+      if (data.ship && !data.shipless && PC.items) {
+        data.ship.cabin = data.ship.cabin || [];
+        ["Giant Tooth", "Kingly Goblet"].forEach(function (n) {
+          var i = (data.captain.items || []).indexOf(n);
+          if (i >= 0 && data.ship.cabin.length < PC.items.cabinSpots(data)) { data.captain.items.splice(i, 1); data.ship.cabin.push(n); }
+        });
+      }
+      data.saveVersion = 18;
     }
     return data;
   }

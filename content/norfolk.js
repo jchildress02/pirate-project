@@ -65,6 +65,8 @@
       { key: "shipwright", id: "christoph", fixed: true, role: "Craftsman", label: "the Master Shipwright", place: "docks", node: "norfolk" },
       { key: "provisioner", id: "nor_provisioner", role: "Merchant", label: "the provisioner", place: "merchant", node: "norfolk" },
       { key: "trademaster", id: "nor_trademaster", role: "Merchant", label: "the Trade Master", place: "merchant", node: "norfolk" },
+      // Top of the Barrel's keeper (§17.4.4; M9 PR 6): a persistent Minor.
+      { key: "itemshop", id: "nor_itemshop", role: "Merchant", label: "the shopkeeper", place: "merchant", node: "norfolk" },
     ],
 
     placeOrder: ["admiralty", "tavern", "docks", "merchant", "ship"],
@@ -188,6 +190,19 @@
         paidOff: "You put [number] hands ashore with their due. Most of them head straight for Horace's.",
       },
       provisioner: null, // filled below from Ocracoke's role lines plus Norfolk's own
+      // Top of the Barrel General Store (Norfolk Scene Records Part 4, §9).
+      itemshop: {
+        name: "Top of the Barrel General Store",
+        blurb: "A narrow shop lined with glass cases of brass instruments, pistols, and polished swords.",
+        greet: { "-1": "\"Look, don't touch.\"", "0": "\"Good day. Anything catch your eye?\"", "1": "\"Captain! I've got just what you need, I'm sure.\"", "2": "\"Captain! I've got just what you need, I'm sure.\"", "3": "\"For you, the locked case.\"" },
+        refuse: "\"I'll have to ask you to leave.\"",
+        bought: "\"A fine choice. It'll serve you well.\"",
+        boughtRare: "\"I wondered who'd be the one to take that home.\"",
+        newStock: "\"New stock this season, fresh off the boat.\"",
+        soldOut: "\"I'm cleaned out, I'm afraid. Come back next season.\"",
+        broke: "\"I'm afraid that's beyond your purse, Captain.\"",
+        sold: "PLACEHOLDER: \"I'll give you a fair price for it.\"",
+      },
       trademaster: {
         greet: "\"Captain. Here about putting a ship to work?\"",
         offer: "\"For a fee, I'll put one of your ships on the merchant rolls. She'll earn while you're busy elsewhere.\"",

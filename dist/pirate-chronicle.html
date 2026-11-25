@@ -922,11 +922,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   // Every modifier source the captain carries. Each id points at an entry
   // in PC.data.modifiers. Unknown ids are skipped (content may lag code).
-  function captainSources(captain) {
+  function captainSources(captain, state) {
     var out = [];
     ["traits", "flaws", "tags", "items"].forEach(function (kind) {
       // Items: only what's worn works (and the Brace, §32.3; js/items.js).
-      var list = kind === "items" && PC.items ? PC.items.activeOf(captain) : (captain[kind] || []);
+      var list = kind === "items" && PC.items ? PC.items.activeOf(captain, state) : (captain[kind] || []);
       list.forEach(function (id) {
         var m = PC.data.modifiers[id];
         if (m) out.push({ id: id, kind: kind, mod: m });
@@ -959,9 +959,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // Captain modifiers for one check. A modifier that names a type follows
   // the type; one that names a stat follows the stats actually used (§11.2).
   // A modifier with the same name never applies twice.
-  function captainModifiers(captain, check, stats, ctx) {
+  function captainModifiers(captain, check, stats, ctx, state) {
     var seen = {}, parts = [], capped = 0, outside = 0;
-    captainSources(captain).forEach(function (src) {
+    captainSources(captain, state).forEach(function (src) {
       (src.mod.edge || []).forEach(function (e) {
         if (!targets(e, check, stats) || !whenMatches(e.when, ctx)) return;
         var name = src.mod.name || src.id;
@@ -1008,7 +1008,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     parts.push({ label: stats.join(" + ") + (stats.length > 1 ? " (average)" : ""), value: sv });
     var tr = (cap.training && cap.training[check.type]) || 0;
     if (tr) parts.push({ label: check.type + " training", value: tr });
-    var mods = captainModifiers(cap, check, stats, ctx);
+    var mods = captainModifiers(cap, check, stats, ctx, state);
     mods.parts.forEach(function (p) { parts.push(p); });
     var mm = meterModifier(state, check, ctx);
     var meter = mm.value;
@@ -1063,7 +1063,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     ctx = withSeason(state, ctx);
     var used = state.rerollsUsed || {};
     var found = null;
-    var sources = captainSources(state.captain);
+    var sources = captainSources(state.captain, state);
     var ms = mentorSource(state);
     if (ms) sources.push(ms);
     sources.forEach(function (src) {
@@ -1360,11 +1360,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // ---- The Dread floor (§5.6, §28.8) ----------------------------------------
   // Tags and worn items (dreadFloor in content/modifiers.js; js/items.js) and
   // officers aboard with a floor trait (Bloodthirsty). Nets out, clamps at 0,
-  // capped at 40. Displays come with the cabin (§32.6, PR 6).
+  // capped at 40. The cabin's displays count (§32.6).
   function dreadFloor(state) {
     var c = state.captain, sum = 0;
     ["traits", "flaws", "tags", "items"].forEach(function (k) {
-      var list = k === "items" && PC.items ? PC.items.activeOf(c) : (c[k] || []);
+      var list = k === "items" && PC.items ? PC.items.activeOf(c, state) : (c[k] || []);
       list.forEach(function (id) { var m = PC.data.modifiers[id]; if (m && m.dreadFloor) sum += m.dreadFloor; });
     });
     (state.officers || []).forEach(function (o) {
@@ -1777,7 +1777,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 17;
+  var SAVE_VERSION = 18;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -2079,6 +2079,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // where a slot is free; the rest waits in the inventory.
       addItemFields(data);
       data.saveVersion = 17;
+    }
+    if (data.saveVersion === 17) {
+      // M9 PR 6: the shop and the cabin. Displays he carried (the Giant
+      // Tooth and the Kingly Goblet counted while carried) hang in the cabin
+      // where there's a spot, so nothing he had stops working.
+      data.shops = data.shops || {};
+      if (data.crew) data.crew.itemSpend = data.crew.itemSpend || 0;
+      if (data.ship && !data.shipless && PC.items) {
+        data.ship.cabin = data.ship.cabin || [];
+        ["Giant Tooth", "Kingly Goblet"].forEach(function (n) {
+          var i = (data.captain.items || []).indexOf(n);
+          if (i >= 0 && data.ship.cabin.length < PC.items.cabinSpots(data)) { data.captain.items.splice(i, 1); data.ship.cabin.push(n); }
+        });
+      }
+      data.saveVersion = 18;
     }
     return data;
   }
@@ -7103,7 +7118,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function cryptidReward(state, game) {
     var site = D().sites[game.site];
     var r = M().rand(state, game, "relic");
-    var held = (state.captain.items || []).indexOf(site.relic) >= 0;
+    var held = PC.items.held(state, site.relic); // carried or in the cabin (§35.4)
     if (!held && r() < D().RELIC_CHANCE) {
       M().say(state, game, D().lines.cryptid.relic);
       game.haul.push({ tier: "item", item: site.relic, relic: true });
@@ -10391,6 +10406,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       cargo: c.cargo, size: c.size, crewMin: c.crewMin, crewMax: c.crewMax, speed: c.speed, speedMax: c.speed, handling: c.handling,
       rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: !PC.letters.legitimate(state, e.flag), prizeOf: e.flag,
     };
+    if (PC.items) PC.items.moveCabin(state, old); // the displays move with him (§32.6)
   }
 
   // ---- Ending the hunt -----------------------------------------------------------
@@ -11190,6 +11206,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function doSplit(state) {
     var sp = state.split;
     if (!sp || sp.step !== "ask") throw new Error("No split to make.");
+    state.crew.itemSpend = 0; // crew gold spent on items since the split (§32.5)
     var sold = [];
     (state.fleet || []).filter(function (f) { return f.kind === "prize"; }).forEach(function (f) {
       var g = splitHullValue(state, f);
@@ -13413,6 +13430,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     state.money.purse = 0; state.money.crew = 0;
     state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } };
     state.provisions = 0;
+    if (PC.items) PC.items.loseCabin(state); // the cabin goes with the ship (§32.6)
     state.fleet = [];
     var c = state.crew;
     PC.data.economy.TIER_ORDER.forEach(function (t) { c.tiers[t] = 0; });
@@ -14848,6 +14866,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (state.ended) return null;
     if (ending === "marooned") { PC.prison.maroon(state, { officers: m.loyalIds || [], by: "mutineers'" }); return null; }
     if (ending === "pickedUp") { state.current = { screen: "node" }; return null; }
+    if (PC.items) PC.items.loseCabin(state); // the cabin sails with the mutineers (§32.6, leaning yes)
     state.shipless = true;
     state.current = { screen: "shipless" };
     return null;
@@ -15436,10 +15455,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
  * The captain owns items (state.captain.items, a list of names; consumables
  * appear once per unit) and wears some of them (state.captain.equip, a slot
  * map). Only equipped items work, except: the Pistol Brace works from the
- * inventory, consumables offer themselves on their check, and until the
- * cabin is built the Giant Tooth and the Kingly Goblet count while carried
- * (§32.3, ruled). Items with no catalog entry (quest pieces) keep working
- * while carried, as before.
+ * inventory, consumables offer themselves on their check, and display items
+ * work while they hang in the flagship's cabin (state.ship.cabin, §32.6;
+ * PR 6 retired the carried-display stand-in). Items with no catalog entry
+ * (quest pieces) keep working while carried, as before.
  *
  * Swaps cost 0 AP, but never in a battle, a minigame or a scene (§32.3).
  * Engine file: no DOM.
@@ -15489,11 +15508,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return out;
   }
 
-  // Display items that count while carried until the cabin exists (ruled, §32.3).
-  var CARRIED_DISPLAYS = { "Giant Tooth": true, "Kingly Goblet": true };
-
-  // Every item name whose effects are live, once each.
-  function activeOf(captain) {
+  // Every item name whose effects are live, once each. `state`, when given,
+  // adds what hangs in the flagship's cabin (§32.6).
+  function activeOf(captain, state) {
     var w = wornOf(captain), seen = {}, out = [];
     function add(n) { if (!seen[n]) { seen[n] = true; out.push(n); } }
     Object.keys(w).forEach(function (k) { add(w[k]); });
@@ -15501,14 +15518,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var d = def(n);
       if (!d) add(n);                                // quest pieces work while carried
       else if (d.brace) add(n);                      // the Pistol Brace, from inventory
-      else if (CARRIED_DISPLAYS[n] && displayCarried()) add(n);
     });
+    if (state) cabin(state).forEach(add);
     return out;
   }
-  // The cabin (PR 6) retires the carried-display stand-in.
-  function displayCarried() { return !(PC.data.items.CABIN_BUILT); }
 
-  function active(state) { return activeOf(state.captain); }
+  function active(state) { return activeOf(state.captain, state); }
   function has(state, name) { return active(state).indexOf(name) >= 0; }
   function worn(state) { return wornOf(state.captain); }
 
@@ -15627,6 +15642,63 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     });
     return out;
   }
+
+  // ---- The flagship's cabin (§32.6; PR 6) -----------------------------------
+  // Display items hang in the cabin and work wherever the captain is, while
+  // he has his flagship. They're out of the inventory while they hang; they
+  // go down with her if she's sunk, struck or taken (a new ship object has
+  // an empty cabin), and move with the displays on a flagship switch.
+  function cabin(state) {
+    if (!state.ship || state.shipless) return [];
+    return state.ship.cabin || [];
+  }
+  function cabinSpots(state) {
+    if (!state.ship) return 0;
+    var S = D().CABIN_SPOTS;
+    return S[state.ship.type] != null ? S[state.ship.type] : 1;
+  }
+  function hang(state, name) {
+    var why = swapLock(state);
+    if (why) throw new Error(why);
+    if (!state.ship || state.shipless) throw new Error("You have no ship to hang it in.");
+    var d = def(name);
+    if (!d || d.slot !== "display") throw new Error("That isn't for display.");
+    if (!owns(state.captain, name)) throw new Error("You don't have that.");
+    state.ship.cabin = state.ship.cabin || [];
+    if (state.ship.cabin.indexOf(name) >= 0) throw new Error("It already hangs there.");
+    if (state.ship.cabin.length >= cabinSpots(state)) throw new Error("The cabin has no free spot.");
+    lose(state, name);
+    state.ship.cabin.push(name);
+    after(state);
+  }
+  function takeDown(state, name) {
+    var why = swapLock(state);
+    if (why) throw new Error(why);
+    var c = (state.ship && state.ship.cabin) || [], i = c.indexOf(name);
+    if (i < 0) throw new Error("That isn't in the cabin.");
+    c.splice(i, 1);
+    state.captain.items.push(name);
+  }
+  // A flagship switch (0 AP) moves the displays, up to the new ship's spots;
+  // the rest go to the inventory (§32.6, assumption).
+  function moveCabin(state, oldShip) {
+    var c = (oldShip && oldShip.cabin) || [];
+    if (oldShip) oldShip.cabin = [];
+    var n = cabinSpots(state);
+    state.ship.cabin = c.slice(0, n);
+    c.slice(n).forEach(function (x) { state.captain.items.push(x); });
+    return c.slice(n);
+  }
+  // Losing the ship with her cabin (a mutiny's loss, the ship taken): its
+  // displays are gone. A relic's find chance reopens by itself (§35.4).
+  function loseCabin(state) {
+    var c = (state.ship && state.ship.cabin) || [];
+    if (state.ship) state.ship.cabin = [];
+    if (c.length) PC.state.addLog(state, "Lost with the cabin: " + c.join(", ") + ".");
+    return c;
+  }
+  // Held anywhere: carried, worn or in the cabin (a relic is one of each, §32.1).
+  function held(state, name) { return owns(state.captain, name) || cabin(state).indexOf(name) >= 0 || ((state.ship && state.ship.cabin) || []).indexOf(name) >= 0; }
 
   // ---- What the worn items do ------------------------------------------------
 
@@ -15776,11 +15848,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var d = def(n);
       inv.push({ name: n, count: left, tier: d ? d.tier : null, effect: d ? d.effect : null, inert: d ? d.inert || null : null,
         slot: d ? d.slot : null, consumable: !!(d && d.consumable),
-        works: !d || !!d.brace || (CARRIED_DISPLAYS[n] && displayCarried()),
+        works: !d || !!d.brace,
+        hang: d && d.slot === "display" ? { why: !state.ship || state.shipless ? "No ship" : cabin(state).length >= cabinSpots(state) ? "The cabin's full" : null } : null,
         keys: d ? keysFor(cap, n).map(function (k) { return { key: k, name: D().SLOT_NAMES[baseSlot(k)] + (/2$/.test(k) ? " II" : ""), holds: w[k] || null }; }) : [],
         use: d && d.consumable ? { why: usable(state, n) } : null });
     });
-    return { slots: slots, inventory: inv, lock: lock, melee: meleeType(state), guns: guns(state).map(function (g) { return g.name + " (gun +" + g.bonus + ")"; }) };
+    var cab = cabin(state).map(function (n) { var d = def(n) || {}; return { name: n, tier: d.tier, effect: d.effect, inert: d.inert || null }; });
+    return { slots: slots, inventory: inv, lock: lock, melee: meleeType(state), guns: guns(state).map(function (g) { return g.name + " (gun +" + g.bonus + ")"; }),
+      cabin: cab, cabinSpots: state.ship && !state.shipless ? cabinSpots(state) : 0, shipName: state.ship ? state.ship.name : null };
   }
 
   PC.items = {
@@ -15791,7 +15866,168 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     gain: gain, lose: lose, chip: chip, autoEquip: autoEquip, armsLocker: armsLocker,
     meleeType: meleeType, guns: guns, extraKill: extraKill, moraleFloor: moraleFloor, breath: breath, burnCut: burnCut,
     usable: usable, use: use, hiddenItem: hiddenItem, bountyItem: bountyItem, view: view,
+    cabin: cabin, cabinSpots: cabinSpots, hang: hang, takeDown: takeDown, moveCabin: moveCabin, loseCabin: loseCabin, held: held,
   };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — item merchants, selling and buying from crew gold
+ * (§32.5, §32.7; M9 PR 6). Norfolk's Top of the Barrel General Store is the
+ * only item merchant built (§17.4.4).
+ *
+ * The shelves restock once a season, seeded so reloading never changes them;
+ * a sold slot stays empty until the next restock. Buying from the purse costs
+ * nothing more; from crew gold, −1 morale per 200 gold and +1 Pressure per
+ * 3,000 spent since the last split (§32.5). Selling pays 40% into the purse.
+ * Engine file: no DOM.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function D() { return PC.data.items; }
+  function def(n) { return PC.items.def(n); }
+  function here(state) { return state.location && state.location.node; }
+  function shopData(id) { return D().SHOPS[id] || null; }
+  function lines(id) { return PC.data.nodes[id].lines[shopData(id).npcKey]; }
+
+  function keeper(state, id) {
+    var sd = shopData(id);
+    if (!sd) return null;
+    var who = PC.node.slotNpc(id, sd.npcKey);
+    if (!who) { PC.node.initNode(state, id); who = PC.node.slotNpc(id, sd.npcKey); }
+    return who;
+  }
+
+  // What a shelf can hold, by kind (content/items.js SHOPS.weights).
+  function kind(d) {
+    if (d.unique || d.notSold || d.relic || d.stock || d.talanee) return null;
+    if (d.slot === "pet" || d.art || d.slot === "display") return null;
+    if (d.slot === "melee" || d.slot === "ranged" || d.brace) return "weapon";
+    if (d.consumable) return "consumable";
+    if (d.slot === "hat" || d.slot === "face" || d.slot === "top" || d.slot === "bottom") return "clothing";
+    if (d.curio) return "curio";
+    if (/Rutter|Guide|Prayer Book|Codex/.test(d.name)) return "book";
+    if (d.slot === "trinket") return "gear";
+    return null;
+  }
+
+  function weighted(r, list, weights) {
+    var tot = 0;
+    list.forEach(function (n) { tot += weights[kind(def(n))] || 0; });
+    var x = r() * tot;
+    for (var i = 0; i < list.length; i++) { x -= weights[kind(def(list[i]))] || 0; if (x < 0) return list[i]; }
+    return list[list.length - 1];
+  }
+
+  // The price here (§32.2): Uncommon × the port's goods multiplier, Rare and
+  // up flat (Very Rare ×1.25 at Nassau, not built).
+  function price(state, id, name) {
+    var d = def(name), t = PC.data.economy.TIERS[PC.data.nodes[id].tier] || { goods: 1 };
+    return Math.round(d.tier === "Uncommon" ? d.price * t.goods : d.price);
+  }
+
+  // This season's shelves, seeded (§32.7).
+  function stock(state, id) {
+    id = id || here(state);
+    var sd = shopData(id);
+    if (!sd) return null;
+    state.shops = state.shops || {};
+    var st = PC.state.stamp(state), cur = state.shops[id];
+    if (cur && cur.stamp === st) return cur;
+    var r = PC.rng.fromKey([state.world.seed, st, id, "itemshop"].join("|"));
+    var cat = D().catalog, pick = function (tier, n) {
+      var pool = Object.keys(cat).filter(function (k) { var d = cat[k]; return d.tier === tier && kind(d) && (sd.weights[kind(d)] || 0) > 0; });
+      var out = [];
+      for (var i = 0; i < n && pool.length; i++) { var x = weighted(r, pool, sd.weights); out.push(x); pool.splice(pool.indexOf(x), 1); }
+      return out;
+    };
+    var items = pick("Uncommon", sd.uncommon).concat(pick("Rare", sd.rare));
+    state.shops[id] = { stamp: st, fresh: !!cur, seen: false, items: items.map(function (n) { return { name: n, price: price(state, id, n), sold: false }; }) };
+    return state.shops[id];
+  }
+
+  // What buying from crew gold would cost the crew (§32.5), shown beforehand.
+  function crewCost(state, gold) {
+    var spent = state.crew.itemSpend || 0, per = D().CREW_PRESSURE_PER;
+    return { morale: Math.round(gold / D().CREW_MORALE_PER), pressure: Math.floor((spent + gold) / per) - Math.floor(spent / per) };
+  }
+
+  function refuses(state, id) { var who = keeper(state, id); return !who || PC.npcs.serviceLevel(state, who) == null; }
+
+  function buy(state, i, from) {
+    var id = here(state), L = lines(id), s = stock(state, id), it = s.items[i];
+    if (refuses(state, id)) return { line: L.refuse, failed: true };
+    if (!it || it.sold) throw new Error("That's already gone.");
+    var d = def(it.name);
+    if (d.consumable && PC.items.count(state, it.name) >= D().STACK) throw new Error("You carry three already.");
+    var chips = [];
+    if (from === "crew") {
+      if (state.money.crew < it.price) return { line: L.broke, failed: true };
+      var cc = crewCost(state, it.price);
+      state.money.crew -= it.price;
+      state.crew.itemSpend = (state.crew.itemSpend || 0) + it.price;
+      if (cc.morale) { PC.crew.addMorale(state, -cc.morale); chips.push({ icon: "morale", text: "Morale −" + cc.morale + " (the crew's gold)", ink: "bad" }); }
+      if (cc.pressure) { state.crew.pressure = Math.min(5, (state.crew.pressure || 0) + cc.pressure); chips.push({ icon: "pressure", text: "Pressure +" + cc.pressure, ink: "bad" }); }
+      chips.unshift({ icon: "gold", text: "−" + it.price + " crew gold" });
+    } else {
+      if (state.money.purse < it.price) return { line: L.broke, failed: true };
+      state.money.purse -= it.price;
+      chips.push({ icon: "gold", text: "−" + it.price + " from your purse" });
+    }
+    it.sold = true;
+    var got = PC.items.gain(state, it.name);
+    chips.push(PC.items.chip(got, "Bought"));
+    PC.state.addLog(state, "Bought the " + it.name + " for " + it.price + " " + (from === "crew" ? "crew gold" : "from the purse") + ".");
+    return { line: d.tier === "Rare" && L.boughtRare ? L.boughtRare : L.bought, chips: chips, item: it.name };
+  }
+
+  // Selling (§32.5): 40% of the item's base price, into the purse. Only
+  // what's in the inventory (take it off first); never relics (Cael, Maelis
+  // and the Sicilian buy those), ship's stock or quest pieces.
+  function sellInfo(state, name) {
+    var d = def(name), id = here(state);
+    if (!d || !shopData(id) || state.jail) return null;
+    if (d.stock) return { why: "Ship's stock" };
+    if (d.relic) return { why: "Only a collector buys relics" };
+    if (refuses(state, id)) return { why: "The shopkeeper won't deal with you" };
+    return { gold: Math.max(1, Math.round(d.price * D().SELL_RATE)), why: null };
+  }
+
+  function sell(state, name) {
+    var id = here(state), L = lines(id), info = sellInfo(state, name);
+    if (!info) throw new Error("There's nobody here to buy it.");
+    if (info.why) throw new Error(info.why);
+    var w = PC.items.worn(state), worn = Object.keys(w).filter(function (k) { return w[k] === name; }).length;
+    if (PC.items.count(state, name) - worn < 1) throw new Error("Take it off first.");
+    PC.items.lose(state, name);
+    state.money.purse += info.gold;
+    PC.state.addLog(state, "Sold the " + name + " for " + info.gold + " into the purse.");
+    return { line: L.sold, chips: [{ icon: "gold", text: "+" + info.gold + " into your purse" }] };
+  }
+
+  // The shop card's view.
+  function view(state) {
+    var id = here(state), sd = shopData(id);
+    if (!sd) return null;
+    var who = keeper(state, id), L = lines(id), s = stock(state, id);
+    var sl = PC.npcs.serviceLevel(state, who);
+    var greet = sl == null ? L.refuse : (L.greet[String(sl)] || L.greet["0"]);
+    var opening = !s.seen && s.fresh ? L.newStock : null;
+    s.seen = true;
+    var left = s.items.filter(function (x) { return !x.sold; }).length;
+    return {
+      who: who, name: L.name, blurb: L.blurb, greet: greet, opening: opening, refuse: sl == null, soldOut: left === 0 ? L.soldOut : null,
+      items: s.items.map(function (x, i) {
+        var d = def(x.name), cc = crewCost(state, x.price);
+        return { i: i, name: x.name, tier: d.tier, effect: d.effect, inert: d.inert || null, slot: d.slot, price: x.price, sold: x.sold,
+          crew: cc, purseOk: state.money.purse >= x.price, crewOk: state.money.crew >= x.price,
+          full: !!(d.consumable && PC.items.count(state, x.name) >= D().STACK) };
+      }),
+    };
+  }
+
+  PC.shop = { stock: stock, price: price, crewCost: crewCost, buy: buy, sell: sell, sellInfo: sellInfo, view: view, kind: kind, keeper: keeper };
 })();
 </script>
   <script>
@@ -16335,6 +16571,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     STACK: 3,                  // consumables, up to 3 of each
     CORDIAL_RECOVERY: 0.60,    // the Surgeon's Cordial (§24.9)
     BURN_CAP: 0.30,            // combined burn cuts (§25.2)
+    // The flagship's cabin display spots (§32.6). Classes not named get 1.
+    CABIN_SPOTS: { Cutter: 1, Sloop: 1, Schooner: 1, "Royal Sloop": 1, Barque: 2, Brigantine: 2, Brig: 2, Merchantman: 2, "West Indiaman": 2, Frigate: 2,
+      Galleon: 3, "4th Rate": 3, "3rd Rate": 3, "2nd Rate": 3, "1st Rate": 3 },
     // §32.16's hidden-item pools by flag (proposal rows), and the tiers.
     POOLS: {
       Sicily: ["Van Huyt's Island Landscape", "Tapestry of the Breton Kings", "Portrait of Poppo von Rackel", "Gilded Icon", "Jeweled Pocket Watch"],
@@ -16347,6 +16586,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       Other: ["Silver Pocket Watch", "Navigator's Octant", "Fancy Spyglass", "Sea-Service Pistol", "Ruffled Shirt", "Ivory Compass", "Havana Cigars", "Classic Tricorne"],
     },
     POOL_TIERS: { Uncommon: 75, Rare: 22, "Very Rare": 3 }, // Rare only at Rich+, Very Rare only at Superior
+    // Item merchants (§32.7): what each shows a season, and the weights
+    // for what the shelves hold. Norfolk's is weapons and gear (§17.4.4):
+    // DEFAULT weights by kind. Never on a shelf: Uniques, relics, ship's
+    // stock, Talanee pieces, pets (the pet merchants) and art (the luxury
+    // traders, §32.7); 1 a slot for clothing, books and curios.
+    SHOPS: {
+      norfolk: { npcKey: "itemshop", uncommon: 4, rare: 1,
+        weights: { weapon: 4, gear: 3, consumable: 3, clothing: 1, book: 1, curio: 1 } },
+    },
+    SELL_RATE: 0.40,           // item merchants buy at 40% (§32.5)
+    CREW_MORALE_PER: 200,      // −1 morale per 200 crew gold (§32.5)
+    CREW_PRESSURE_PER: 3000,   // +1 Pressure per 3,000 since the split
     // The Uncommon a bounty target may carry (§17.4.8): drawn from the Pirate pool's Uncommons.
     lines: {
       equipLocked: "Not now: equipment can't be changed in a battle or a scene.",
@@ -21620,6 +21871,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       { key: "shipwright", id: "christoph", fixed: true, role: "Craftsman", label: "the Master Shipwright", place: "docks", node: "norfolk" },
       { key: "provisioner", id: "nor_provisioner", role: "Merchant", label: "the provisioner", place: "merchant", node: "norfolk" },
       { key: "trademaster", id: "nor_trademaster", role: "Merchant", label: "the Trade Master", place: "merchant", node: "norfolk" },
+      // Top of the Barrel's keeper (§17.4.4; M9 PR 6): a persistent Minor.
+      { key: "itemshop", id: "nor_itemshop", role: "Merchant", label: "the shopkeeper", place: "merchant", node: "norfolk" },
     ],
 
     placeOrder: ["admiralty", "tavern", "docks", "merchant", "ship"],
@@ -21743,6 +21996,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         paidOff: "You put [number] hands ashore with their due. Most of them head straight for Horace's.",
       },
       provisioner: null, // filled below from Ocracoke's role lines plus Norfolk's own
+      // Top of the Barrel General Store (Norfolk Scene Records Part 4, §9).
+      itemshop: {
+        name: "Top of the Barrel General Store",
+        blurb: "A narrow shop lined with glass cases of brass instruments, pistols, and polished swords.",
+        greet: { "-1": "\"Look, don't touch.\"", "0": "\"Good day. Anything catch your eye?\"", "1": "\"Captain! I've got just what you need, I'm sure.\"", "2": "\"Captain! I've got just what you need, I'm sure.\"", "3": "\"For you, the locked case.\"" },
+        refuse: "\"I'll have to ask you to leave.\"",
+        bought: "\"A fine choice. It'll serve you well.\"",
+        boughtRare: "\"I wondered who'd be the one to take that home.\"",
+        newStock: "\"New stock this season, fresh off the boat.\"",
+        soldOut: "\"I'm cleaned out, I'm afraid. Come back next season.\"",
+        broke: "\"I'm afraid that's beyond your purse, Captain.\"",
+        sold: "PLACEHOLDER: \"I'll give you a fair price for it.\"",
+      },
       trademaster: {
         greet: "\"Captain. Here about putting a ship to work?\"",
         offer: "\"For a fee, I'll put one of your ships on the merchant rolls. She'll earn while you're busy elsewhere.\"",
@@ -25585,6 +25851,33 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return html;
   }
 
+  // ---- Top of the Barrel, Norfolk's item merchant (§32.5, §32.7; M9 PR 6) ------------
+  function itemShopCard() {
+    var v = PC.shop.view(state);
+    if (!v) return "";
+    var who = v.who, html = mcard("m:items", who, v.name);
+    html += '<p class="note" style="margin:0 0 6px">' + esc(v.blurb) + "</p>";
+    var said = state.location.say && state.location.say.to === who;
+    html += said ? sayFor(who) : '<div class="say">' + inline(v.opening && !v.refuse ? joinQuotes(v.greet, v.opening) : v.greet) + "</div>";
+    if (v.refuse) return html + "</div></details>";
+    if (v.soldOut && !said) html += '<p class="small">' + inline(v.soldOut) + "</p>";
+    html += v.items.map(function (it) {
+      if (it.sold) return '<div class="buyrow"><span class="note">' + esc(it.name) + " · sold</span></div>";
+      var crewNote = "From crew gold: morale −" + it.crew.morale + (it.crew.pressure ? ", Pressure +" + it.crew.pressure : "");
+      var lock = it.full ? "You carry three already" : null;
+      return '<div class="buyrow" style="flex-wrap:wrap;align-items:baseline"><span style="flex:1 1 320px"><b style="font-weight:normal">' + esc(it.name) + '</b> <span class="note">' + esc(it.tier) + " · " + esc(PC.data.items.SLOT_NAMES[it.slot] || (it.slot === "inventory" ? "Kept in the inventory" : it.slot)) + "</span>" +
+        '<br><span class="small">' + esc(it.effect) + (it.inert ? ' <span class="note">(' + esc(it.inert) + ")</span>" : "") + "</span></span> " +
+        '<button class="secondary" data-act="shopbuy" data-i="' + it.i + '" data-from="purse"' + (lock || !it.purseOk ? " disabled" : "") + ">" + gold(it.price) + " from your purse</button> " +
+        '<button class="secondary" data-act="shopbuy" data-i="' + it.i + '" data-from="crew"' + (lock || !it.crewOk ? " disabled" : "") + ' title="' + esc(crewNote) + '">' + gold(it.price) + " crew gold</button>" +
+        '<span class="note" style="flex-basis:100%;margin:0 0 6px">' + esc(lock || crewNote) + "</span></div>";
+    }).join("");
+    // Selling (§32.5): what's in the inventory, at 40%, into the purse.
+    var inv = PC.items.view(state).inventory.map(function (it) { return { it: it, info: PC.shop.sellInfo(state, it.name) }; }).filter(function (x) { return x.info && !x.info.why; });
+    if (inv.length) html += '<div class="h4" style="margin-top:10px">Sell to the shop</div><p class="note" style="margin:0 0 4px">Forty percent of its price, into your purse. Take off what you\'re wearing first.</p>' +
+      inv.map(function (x) { return '<div class="buyrow"><span>' + esc(x.it.name) + (x.it.count > 1 ? " ×" + x.it.count : "") + '</span> <button class="secondary" data-act="shopsell" data-item="' + esc(x.it.name) + '">Sell · ' + gold(x.info.gold) + "</button></div>"; }).join("");
+    return html + '<p class="note">The shelves restock every season. Buying from crew gold costs the crew\'s goodwill: −1 morale per 200 gold, and Pressure +1 for every 3,000 spent on yourself since the last split.</p></div></details>';
+  }
+
   // ---- The Trade Master (§27.7) ------------------------------------------------------
   function tradeMasterCard() {
     var id = N().here(state), who = N().slotNpc(id, "trademaster");
@@ -26092,6 +26385,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (hasCargo("dirty") && !said.offerdirty) html += opts([opt({ act: "offerdirty", label: "Offer dirty goods", meta: "No action" })]);
     }
     html += "</div></details>";
+    html += itemShopCard();
     html += tradeMasterCard();
     if (N().fenceOpen(state)) {
       var f = N().nodeData(id).fence;
@@ -27172,9 +27466,29 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return html + "</div>";
   }
 
+  // The cabin's display spots (§32.6; M9 PR 6): what hangs there works
+  // wherever you are; it goes down with the ship.
+  function cabinBlock() {
+    var v = PC.items.view(state), lk = v.lock;
+    if (!v.cabinSpots) return '<p class="note">You have no ship, so no cabin.</p>';
+    var rows = [];
+    for (var i = 0; i < v.cabinSpots; i++) {
+      var c = v.cabin[i];
+      rows.push(lrow("Spot " + (i + 1), c ? "<b style=\"font-weight:normal\">" + esc(c.name) + '</b> <span class="note">' + esc(c.tier || "") + '</span><br><span class="small">' + esc(c.effect || "") + (c.inert ? ' <span class="note">(' + esc(c.inert) + ")</span>" : "") + "</span>" +
+        (lk ? "" : ' <button class="link" data-act="takedown" data-item="' + esc(c.name) + '">Take down</button>') : '<span class="note">Empty</span>'));
+    }
+    var can = v.inventory.filter(function (it) { return it.hang; });
+    return '<div class="h4">Display spots · ' + v.cabin.length + " of " + v.cabinSpots + "</div>" + (lk ? '<p class="notice">' + esc(lk) + "</p>" : "") +
+      '<table class="ledger wide">' + rows.join("") + "</table>" +
+      (can.length ? '<p class="small">' + can.map(function (it) {
+        return esc(it.name) + (lk ? "" : it.hang.why ? ' <span class="note">(' + esc(it.hang.why) + ")</span>" : ' <button class="link" data-act="hang" data-item="' + esc(it.name) + '">Hang it here</button>');
+      }).join(" · ") + "</p>" : '<p class="note">Art, display curios and relics hang here. Buy or find one, and hang it from the cabin or your captain sheet.</p>') +
+      '<p class="note">What hangs here works wherever you go, as long as you have your flagship. If she\'s sunk, struck or taken, it\'s lost with her. A bigger ship has more spots (a sloop 1, a brig 2, a galleon 3).</p>';
+  }
+
   function cabinTab() {
     return '<div class="hotframe" style="display:flex;align-items:center;justify-content:center"><p class="note" style="text-align:center;background:rgba(239,227,198,.85);padding:6px 14px">Woodcut · your cabin (simple)<br>16 : 10 · 1600 × 1000</p></div>' +
-      '<p class="note">Your cabin and its display spots come with the items work. Not in the prototype.</p>';
+      cabinBlock();
   }
 
   // ---- The always-available menus (§38.5, §41.12) ---------------------------
@@ -27374,9 +27688,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         btns = it.keys.map(function (k) {
           return '<button class="link" data-act="equip" data-item="' + esc(it.name) + '" data-key="' + k.key + '">' + (k.holds ? "Wear as " + esc(k.name) + " (for the " + esc(k.holds) + ")" : "Wear" + (it.keys.length > 1 ? " as " + esc(k.name) : "")) + "</button>";
         }).join(" ");
+        if (it.hang) btns += it.hang.why ? ' <span class="note">' + esc(it.hang.why) + "</span>" : ' <button class="link" data-act="hang" data-item="' + esc(it.name) + '">Hang it in the cabin</button>';
         if (it.use) btns += it.use.why ? ' <span class="note">' + esc(it.use.why) + "</span>" : ' <button class="primary" data-act="useitem" data-item="' + esc(it.name) + '">Use</button>';
       }
-      var how = it.slot === "display" ? (it.works ? "counts while carried, until the cabin" : "for display: the cabin comes later") : it.works && it.tier ? "works from the inventory" : "";
+      var how = it.slot === "display" ? "works while it hangs in your cabin" : it.works && it.tier ? "works from the inventory" : "";
       return '<li><b style="font-weight:normal">' + esc(it.name) + (it.count > 1 ? " ×" + it.count : "") + "</b>" + tierNote(it.tier) +
         (it.effect ? '<br><span class="small">' + esc(it.effect) + (it.inert ? ' <span class="note">(' + esc(it.inert) + ")</span>" : "") + "</span>" : "") +
         (how ? ' <span class="note">· ' + esc(how) + "</span>" : "") + (btns ? '<div class="small" style="margin:2px 0 8px;display:flex;gap:14px;flex-wrap:wrap">' + btns + "</div>" : "") + "</li>";
@@ -27385,7 +27700,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<p class="small" style="margin:2px 0">In a boarding you fight with <b style="font-weight:normal">' + esc(v.melee) + "</b>" + (v.guns.length ? " and fire the " + esc(v.guns.join(" and the ")) : ", with no gun for the boarding shot") + ".</p>" +
       '<table class="ledger wide">' + slots + "</table>" +
       '<div class="h4">Inventory</div>' + (inv ? '<ul style="padding-left:1.1em;font-size:18px">' + inv + "</ul>" : '<p class="small">Nothing else.</p>') +
-      '<p class="note">Only what you wear works, except the Pistol Brace and what you use. Changing costs no actions.</p>';
+      (v.cabin.length ? '<p class="small">In your cabin: ' + esc(v.cabin.map(function (c) { return c.name; }).join(", ")) + ".</p>" : "") +
+      '<p class="note">Only what you wear works, except the Pistol Brace, what you use, and what hangs in your cabin. Changing costs no actions.</p>';
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -27947,6 +28263,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       PC.world.finishSplit(state);
       if (gaming && PC.liarsdice.canPlay(state, { free: true }).ok) { mgMark = 0; PC.liarsdice.start(state, { free: true }); }
     },
+    "shopbuy": function (el) {
+      var who_ = PC.shop.keeper(state, N().here(state));
+      var r = PC.shop.buy(state, Number(el.dataset.i), el.dataset.from);
+      say(who_, firstName(who_), r.line, null, null, r.chips ? { chips: r.chips } : null);
+    },
+    "shopsell": function (el) {
+      var who_ = PC.shop.keeper(state, N().here(state));
+      var r = PC.shop.sell(state, el.dataset.item);
+      say(who_, firstName(who_), r.line, null, null, { chips: r.chips });
+    },
+    "hang": function (el) { PC.items.hang(state, el.dataset.item); },
+    "takedown": function (el) { PC.items.takeDown(state, el.dataset.item); },
     "enroll": function (el) {
       var who_ = N().slotNpc(N().here(state), "trademaster");
       var r = PC.world.enroll(state, el.dataset.ship);

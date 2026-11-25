@@ -3,10 +3,10 @@
  * The captain owns items (state.captain.items, a list of names; consumables
  * appear once per unit) and wears some of them (state.captain.equip, a slot
  * map). Only equipped items work, except: the Pistol Brace works from the
- * inventory, consumables offer themselves on their check, and until the
- * cabin is built the Giant Tooth and the Kingly Goblet count while carried
- * (§32.3, ruled). Items with no catalog entry (quest pieces) keep working
- * while carried, as before.
+ * inventory, consumables offer themselves on their check, and display items
+ * work while they hang in the flagship's cabin (state.ship.cabin, §32.6;
+ * PR 6 retired the carried-display stand-in). Items with no catalog entry
+ * (quest pieces) keep working while carried, as before.
  *
  * Swaps cost 0 AP, but never in a battle, a minigame or a scene (§32.3).
  * Engine file: no DOM.
@@ -56,11 +56,9 @@
     return out;
   }
 
-  // Display items that count while carried until the cabin exists (ruled, §32.3).
-  var CARRIED_DISPLAYS = { "Giant Tooth": true, "Kingly Goblet": true };
-
-  // Every item name whose effects are live, once each.
-  function activeOf(captain) {
+  // Every item name whose effects are live, once each. `state`, when given,
+  // adds what hangs in the flagship's cabin (§32.6).
+  function activeOf(captain, state) {
     var w = wornOf(captain), seen = {}, out = [];
     function add(n) { if (!seen[n]) { seen[n] = true; out.push(n); } }
     Object.keys(w).forEach(function (k) { add(w[k]); });
@@ -68,14 +66,12 @@
       var d = def(n);
       if (!d) add(n);                                // quest pieces work while carried
       else if (d.brace) add(n);                      // the Pistol Brace, from inventory
-      else if (CARRIED_DISPLAYS[n] && displayCarried()) add(n);
     });
+    if (state) cabin(state).forEach(add);
     return out;
   }
-  // The cabin (PR 6) retires the carried-display stand-in.
-  function displayCarried() { return !(PC.data.items.CABIN_BUILT); }
 
-  function active(state) { return activeOf(state.captain); }
+  function active(state) { return activeOf(state.captain, state); }
   function has(state, name) { return active(state).indexOf(name) >= 0; }
   function worn(state) { return wornOf(state.captain); }
 
@@ -194,6 +190,63 @@
     });
     return out;
   }
+
+  // ---- The flagship's cabin (§32.6; PR 6) -----------------------------------
+  // Display items hang in the cabin and work wherever the captain is, while
+  // he has his flagship. They're out of the inventory while they hang; they
+  // go down with her if she's sunk, struck or taken (a new ship object has
+  // an empty cabin), and move with the displays on a flagship switch.
+  function cabin(state) {
+    if (!state.ship || state.shipless) return [];
+    return state.ship.cabin || [];
+  }
+  function cabinSpots(state) {
+    if (!state.ship) return 0;
+    var S = D().CABIN_SPOTS;
+    return S[state.ship.type] != null ? S[state.ship.type] : 1;
+  }
+  function hang(state, name) {
+    var why = swapLock(state);
+    if (why) throw new Error(why);
+    if (!state.ship || state.shipless) throw new Error("You have no ship to hang it in.");
+    var d = def(name);
+    if (!d || d.slot !== "display") throw new Error("That isn't for display.");
+    if (!owns(state.captain, name)) throw new Error("You don't have that.");
+    state.ship.cabin = state.ship.cabin || [];
+    if (state.ship.cabin.indexOf(name) >= 0) throw new Error("It already hangs there.");
+    if (state.ship.cabin.length >= cabinSpots(state)) throw new Error("The cabin has no free spot.");
+    lose(state, name);
+    state.ship.cabin.push(name);
+    after(state);
+  }
+  function takeDown(state, name) {
+    var why = swapLock(state);
+    if (why) throw new Error(why);
+    var c = (state.ship && state.ship.cabin) || [], i = c.indexOf(name);
+    if (i < 0) throw new Error("That isn't in the cabin.");
+    c.splice(i, 1);
+    state.captain.items.push(name);
+  }
+  // A flagship switch (0 AP) moves the displays, up to the new ship's spots;
+  // the rest go to the inventory (§32.6, assumption).
+  function moveCabin(state, oldShip) {
+    var c = (oldShip && oldShip.cabin) || [];
+    if (oldShip) oldShip.cabin = [];
+    var n = cabinSpots(state);
+    state.ship.cabin = c.slice(0, n);
+    c.slice(n).forEach(function (x) { state.captain.items.push(x); });
+    return c.slice(n);
+  }
+  // Losing the ship with her cabin (a mutiny's loss, the ship taken): its
+  // displays are gone. A relic's find chance reopens by itself (§35.4).
+  function loseCabin(state) {
+    var c = (state.ship && state.ship.cabin) || [];
+    if (state.ship) state.ship.cabin = [];
+    if (c.length) PC.state.addLog(state, "Lost with the cabin: " + c.join(", ") + ".");
+    return c;
+  }
+  // Held anywhere: carried, worn or in the cabin (a relic is one of each, §32.1).
+  function held(state, name) { return owns(state.captain, name) || cabin(state).indexOf(name) >= 0 || ((state.ship && state.ship.cabin) || []).indexOf(name) >= 0; }
 
   // ---- What the worn items do ------------------------------------------------
 
@@ -343,11 +396,14 @@
       var d = def(n);
       inv.push({ name: n, count: left, tier: d ? d.tier : null, effect: d ? d.effect : null, inert: d ? d.inert || null : null,
         slot: d ? d.slot : null, consumable: !!(d && d.consumable),
-        works: !d || !!d.brace || (CARRIED_DISPLAYS[n] && displayCarried()),
+        works: !d || !!d.brace,
+        hang: d && d.slot === "display" ? { why: !state.ship || state.shipless ? "No ship" : cabin(state).length >= cabinSpots(state) ? "The cabin's full" : null } : null,
         keys: d ? keysFor(cap, n).map(function (k) { return { key: k, name: D().SLOT_NAMES[baseSlot(k)] + (/2$/.test(k) ? " II" : ""), holds: w[k] || null }; }) : [],
         use: d && d.consumable ? { why: usable(state, n) } : null });
     });
-    return { slots: slots, inventory: inv, lock: lock, melee: meleeType(state), guns: guns(state).map(function (g) { return g.name + " (gun +" + g.bonus + ")"; }) };
+    var cab = cabin(state).map(function (n) { var d = def(n) || {}; return { name: n, tier: d.tier, effect: d.effect, inert: d.inert || null }; });
+    return { slots: slots, inventory: inv, lock: lock, melee: meleeType(state), guns: guns(state).map(function (g) { return g.name + " (gun +" + g.bonus + ")"; }),
+      cabin: cab, cabinSpots: state.ship && !state.shipless ? cabinSpots(state) : 0, shipName: state.ship ? state.ship.name : null };
   }
 
   PC.items = {
@@ -358,5 +414,6 @@
     gain: gain, lose: lose, chip: chip, autoEquip: autoEquip, armsLocker: armsLocker,
     meleeType: meleeType, guns: guns, extraKill: extraKill, moraleFloor: moraleFloor, breath: breath, burnCut: burnCut,
     usable: usable, use: use, hiddenItem: hiddenItem, bountyItem: bountyItem, view: view,
+    cabin: cabin, cabinSpots: cabinSpots, hang: hang, takeDown: takeDown, moveCabin: moveCabin, loseCabin: loseCabin, held: held,
   };
 })();

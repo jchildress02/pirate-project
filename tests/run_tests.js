@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/items.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/items.js", "js/shop.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/items.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js", "content/wanted_man.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -4758,8 +4758,93 @@ test("save 16 loads as 17: what he carries is worn where a slot is free; the sta
   var data = JSON.parse(PC.state.serialize(s));
   data.saveVersion = 16; delete data.captain.equip; data.captain.items = ["Simple Flintlock Pistol", "Buccaneer's Cutlass", "Spyglass", "Octant", "Gold Tooth"];
   var t = PC.state.deserialize(JSON.stringify(data));
-  eq(t.saveVersion, 17);
+  eq(t.saveVersion, PC.state.SAVE_VERSION);
   eq(t.captain.equip.trinket, "Fancy Spyglass"); eq(t.captain.equip.trinket2, "Navigator's Octant"); eq(t.captain.equip.face, "Gold Tooth");
+});
+
+
+console.log("Milestone 9, PR 6: the shop and the cabin (§32.5-§32.7)");
+test("Top of the Barrel: 4 Uncommon and 1 Rare a season, seeded; nothing Unique, relic, pet or art; Uncommon at the goods multiplier", function () {
+  var s = atNorfolk("sh1");
+  var st = PC.shop.stock(s, "norfolk");
+  eq(st.items.length, 5);
+  eq(st.items.filter(function (x) { return PC.items.def(x.name).tier === "Uncommon"; }).length, 4);
+  eq(PC.items.def(st.items[4].name).tier, "Rare");
+  st.items.forEach(function (x) { var d = PC.items.def(x.name); ok(!d.unique && !d.relic && d.slot !== "pet" && d.slot !== "display", x.name); });
+  var again = JSON.parse(JSON.stringify(st.items));
+  s.shops = {}; eq(JSON.stringify(PC.shop.stock(s, "norfolk").items), JSON.stringify(again), "reloading never changes it");
+  eq(PC.shop.price(s, "norfolk", "Hip Flask"), 400, "Norfolk is Modest: ×1.0");
+  ok(PC.shop.view(s).greet.indexOf("catch your eye") >= 0, "the Neutral greeting");
+});
+
+test("buying: from the purse costs nothing more; from crew gold, morale −1 per 200 and Pressure +1 per 3,000 since the split", function () {
+  var s = atNorfolk("sh2");
+  var st = PC.shop.stock(s, "norfolk"), it = st.items[0];
+  s.money.purse = 10000; s.money.crew = 20000; s.crew.morale = 80; s.crew.pressure = 0;
+  var r = PC.shop.buy(s, 0, "purse");
+  eq(s.money.purse, 10000 - it.price); eq(s.crew.morale, 80); ok(PC.items.owns(s, it.name)); ok(st.items[0].sold);
+  ok(/fine choice/.test(r.line));
+  var rare = st.items[4], cc = PC.shop.crewCost(s, rare.price);
+  eq(cc.morale, Math.round(rare.price / 200));
+  s.crew.itemSpend = 2900;
+  r = PC.shop.buy(s, 4, "crew");
+  eq(s.crew.morale, 80 - cc.morale); eq(s.crew.pressure, Math.floor((2900 + rare.price) / 3000), "each 3,000 crossed");
+  ok(/take that home/.test(r.line), "the Rare line");
+  var threw = false; try { PC.shop.buy(s, 4, "crew"); } catch (e) { threw = true; } ok(threw, "a sold slot stays empty");
+  s.split = { step: "ask" }; try { PC.world.doSplit(s); } catch (e) {} eq(s.crew.itemSpend, 0, "the split resets it");
+});
+
+test("refusal at Enemy or Rival; can't afford it says so", function () {
+  var s = atNorfolk("sh3");
+  var who = PC.shop.keeper(s, "norfolk");
+  s.money.purse = 0;
+  ok(/beyond your purse/.test(PC.shop.buy(s, 0, "purse").line));
+  PC.npcs.moveRung(s, who, -2);
+  ok(PC.shop.view(s).refuse);
+  ok(/ask you to leave/.test(PC.shop.buy(s, 0, "purse").line));
+});
+
+test("selling: 40% into the purse from the inventory; not what's worn, not ship's stock, not relics", function () {
+  var s = atNorfolk("sh4"); s.money.purse = 0; var m0 = s.crew.morale;
+  PC.items.gain(s, "Sea-Service Pistol"); // the ranged slot is full: it waits in the inventory
+  PC.shop.sell(s, "Sea-Service Pistol"); eq(s.money.purse, 480);
+  var threw = false; try { PC.shop.sell(s, "Buccaneer's Cutlass"); } catch (e) { threw = /Take it off/.test(e.message); } ok(threw, "worn");
+  eq(PC.shop.sellInfo(s, "Ship's Cutlass").why, "Ship's stock");
+  ok(/collector/.test(PC.shop.sellInfo(s, "Giant Tooth").why));
+  eq(s.crew.morale, m0, "selling never costs morale");
+});
+
+test("the cabin: a sloop has 1 spot; a hung display works, carried it doesn't; it moves on a flagship switch and is lost with the ship", function () {
+  var s = huntReady("cab1");
+  eq(PC.items.cabinSpots(s), 1);
+  PC.items.gain(s, "Giant Tooth");
+  eq(PC.meters.dreadFloor(s), 0, "carried, a display does nothing now (the stand-in is retired)");
+  PC.items.hang(s, "Giant Tooth");
+  eq(PC.meters.dreadFloor(s), 10); ok(!PC.items.owns(s, "Giant Tooth")); ok(PC.items.held(s, "Giant Tooth"));
+  PC.items.gain(s, "Inca Crown");
+  var threw = false; try { PC.items.hang(s, "Inca Crown"); } catch (e) { threw = true; } ok(threw, "one spot on a sloop");
+  // A flagship switch to a Brig: 2 spots, both displays fit.
+  var old = s.ship; s.ship = Object.assign({}, old, { type: "Brig", cabin: [] });
+  PC.items.moveCabin(s, old); eq(s.ship.cabin.join(), "Giant Tooth");
+  PC.items.hang(s, "Inca Crown"); eq(PC.meters.dreadFloor(s), 15);
+  // Back to a sloop: one goes to the inventory.
+  old = s.ship; s.ship = Object.assign({}, old, { type: "Sloop", cabin: [] });
+  PC.items.moveCabin(s, old); eq(s.ship.cabin.length, 1); ok(PC.items.owns(s, "Inca Crown"));
+  PC.prison.loseEverything(s); eq(PC.items.cabin(s).length, 0, "lost with the ship");
+});
+
+test("the Kingly Goblet's +1 Wits needs it displayed", function () {
+  var s = huntReady("cab2");
+  PC.items.gain(s, "Kingly Goblet"); ok(!PC.items.has(s, "Kingly Goblet"));
+  PC.items.hang(s, "Kingly Goblet"); ok(PC.items.has(s, "Kingly Goblet"));
+});
+
+test("save 17 loads as 18: a carried Giant Tooth hangs in the cabin", function () {
+  var s = huntReady("cab3");
+  var data = JSON.parse(PC.state.serialize(s));
+  data.saveVersion = 17; data.captain.items.push("Giant Tooth"); delete data.shops;
+  var t = PC.state.deserialize(JSON.stringify(data));
+  eq(t.saveVersion, PC.state.SAVE_VERSION); eq(t.ship.cabin.join(), "Giant Tooth"); ok(t.captain.items.indexOf("Giant Tooth") < 0);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

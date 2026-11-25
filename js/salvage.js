@@ -256,7 +256,7 @@
   function cryptidReward(state, game) {
     var site = D().sites[game.site];
     var r = M().rand(state, game, "relic");
-    var held = (state.captain.items || []).indexOf(site.relic) >= 0;
+    var held = PC.items.held(state, site.relic); // carried or in the cabin (§35.4)
     if (!held && r() < D().RELIC_CHANCE) {
       M().say(state, game, D().lines.cryptid.relic);
       game.haul.push({ tier: "item", item: site.relic, relic: true });
