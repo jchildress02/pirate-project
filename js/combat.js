@@ -381,6 +381,8 @@
     };
     fleet(state).forEach(function (f) { b.startCrew[f.id] = f.crew; b.startHull[f.id] = f.hull; });
     game.battle = b;
+    // Pirates fly a black flag, and the battle opens saying so (P6).
+    if (enemies[0] && enemies[0].flag === "Pirate" && PC.minigames) PC.minigames.say(state, game, (PC.data.huntLines.blackFlag || "PLACEHOLDER: She runs up the black flag."));
     // Default pairings: the flagship takes the escort or the first ship.
     var first = enemies.filter(function (e) { return e.escort; })[0] || enemies[0];
     autoPair(state, b, first.id);

@@ -459,6 +459,25 @@
     return { cost: cost, line: noteTrade(state, who, cost, L) || L.provisions };
   }
 
+  // Hardtack (P11 of the build 0.9 playtest pins): half the lot price,
+  // always in stock, sold by every provisioner.
+  function hardtackPrice(state) { return money(provisionsPrice(state) * (E().HARDTACK_SHARE || 0.5)); }
+
+  function buyHardtack(state, n) {
+    n = Math.floor(n);
+    if (n <= 0) throw new Error("Buy at least one lot.");
+    var id = here(state), who = slotNpc(id, "provisioner");
+    var L = nodeData(id).lines.provisioner;
+    if (PC.npcs.serviceLevel(state, who) == null) return { line: L.refuse };
+    if (n > PC.crew.slotsFree(state)) throw new Error("Not enough room in the hold.");
+    var cost = Math.round(hardtackPrice(state) * n);
+    if (state.money.crew < cost) return { line: L.broke, failed: true };
+    state.money.crew -= cost;
+    state.hardtack = (state.hardtack || 0) + n;
+    PC.state.addLog(state, "Bought " + n + " hardtack lot" + (n > 1 ? "s" : "") + " for " + cost + " crew gold.");
+    return { cost: cost, line: noteTrade(state, who, cost, L) || L.provisions };
+  }
+
   function buyGood(state, good, n) {
     n = Math.floor(n);
     if (n <= 0) throw new Error("Buy at least one.");
@@ -580,6 +599,26 @@
     season(state).provisionerPaid += gold;
     noteSale(state, "provisioner", gold);
     PC.state.addLog(state, "Sold " + units + " provisions lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
+    return { units: units, gold: gold, line: noteTrade(state, who, gold, L) || (units < n ? L.capReached : L.goodsSold), partial: units < n };
+  }
+
+  // Hardtack sells back at half its price, out of the same cap (P11 default).
+  function hardtackSellPrice(state) { return money(hardtackPrice(state) * E().PROVISIONS_SELL_SHARE); }
+
+  function sellHardtack(state, n) {
+    n = Math.floor(n);
+    var id = here(state), who = slotNpc(id, "provisioner"), L = nodeData(id).lines.provisioner;
+    if (PC.npcs.serviceLevel(state, who) == null) return { line: L.refuse, units: 0, gold: 0 };
+    if (n <= 0 || (state.hardtack || 0) < n) throw new Error("You don't have that many.");
+    var each = hardtackSellPrice(state);
+    var units = Math.min(n, each > 0 ? Math.floor(provisionerCapLeft(state) / each + 1e-9) : 0);
+    if (units <= 0) return { line: L.capReached, units: 0, gold: 0 };
+    var gold = Math.round(each * units);
+    state.hardtack -= units;
+    state.money.crew += takeCut(state, "provisioner", gold).net;
+    season(state).provisionerPaid += gold;
+    noteSale(state, "provisioner", gold);
+    PC.state.addLog(state, "Sold " + units + " hardtack lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
     return { units: units, gold: gold, line: noteTrade(state, who, gold, L) || (units < n ? L.capReached : L.goodsSold), partial: units < n };
   }
 
@@ -1130,11 +1169,14 @@
         } else {
           var part = PC.crew.payFrom(state, cost, true);
           PC.crew.addMorale(state, -20);
-          c.pressure += 2;
+          c.pressure = Math.min(5, (c.pressure || 0) + 2); // §24.13: a breach of the Articles
           lines.push(L.maimed.replace(/\[number\]/i, maimed) + " (" + (part.crew + part.purse ? paidFrom(part) + " of " + cost : "nothing paid of " + cost) + ")" + " There isn't enough crew gold to pay them their due: the crew call it a breach of the Articles.");
         }
       }
     }
+    // The Quartermaster's mutiny warning (P7c), when Pressure has reached 3.
+    var warn = PC.crew.mutinyWarning(state);
+    if (warn) lines.push(warn.line);
     // Captives are freed at a free port, for a reward (§20.9, §22.7).
     if (state.captives && nd.freePort) {
       var reward = state.captives * PC.data.hunt.CAPTIVE_REWARD;
@@ -1183,6 +1225,7 @@
   PC.node = {
     sellProvisions: sellProvisions,
     provisionsSellPrice: provisionsSellPrice,
+    hardtackPrice: hardtackPrice, buyHardtack: buyHardtack, hardtackSellPrice: hardtackSellPrice, sellHardtack: sellHardtack,
     sellAll: sellAll,
     visitSales: visitSales,
     FLAGS: F,

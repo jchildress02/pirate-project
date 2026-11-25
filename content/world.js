@@ -89,8 +89,20 @@
       reachOcean: "You reach [Place].",
       hungry: "PLACEHOLDER: The provisions run out at sea. The hands go hungry, and they grumble about it.",
       sick: "PLACEHOLDER: Hunger turns to sickness. [number] hands take to their hammocks.",
-      upkeep: "The crew eat through [lots] lots of provisions as the season turns.",
-      upkeepShort: "PLACEHOLDER: There isn't enough food aboard to see the season out. The crew go hungry.",
+      // The Quartermaster's mutiny warning at Pressure 3 or more (§24.14, the
+      // S25 appendix's lines); the Acting Quartermaster uses the neutral one (P7c).
+      mutinyWarning: {
+        warm: "\"Captain, the crew are preparing to move against you. I've got your back, whatever you decide.\"",
+        neutral: "\"A mutiny is afoot. Thought you should know.\"",
+        cold: "\"The crew are planning to slit your throat in your sleep. Better do something about it.\"",
+      },
+      // The season's end at a low band (P7d, PH31 for the author).
+      seasonCrew: {
+        Sullen: "PLACEHOLDER: The crew go about their work in sullen silence as the season turns.",
+        Mutinous: "PLACEHOLDER: As the season turns, the crew stop talking whenever you come near.",
+      },
+      // The morale band changed (P7b): one line, as the meters do.
+      moraleBand: "The crew's mood is now {band}.",
       seasonTurns: "[Season] [Year] begins.",
       stayPut: "You stay where you are as the season turns.",
     },

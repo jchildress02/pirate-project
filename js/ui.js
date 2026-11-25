@@ -297,6 +297,7 @@
     if (!state) return drawTitle();
     liveTotals = []; liveMax = {};
     expiryWarning();
+    moraleBandNotice();
     var screen = state.current.screen;
     if (screen === "end") return drawEnd();
     var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() :
@@ -305,6 +306,17 @@
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
     wire();
+  }
+
+  // The morale band changed since the last screen (P7b): a one-line notice.
+  function moraleBandNotice() {
+    if (!state.crew) return;
+    var b = PC.crew.band(state.crew.morale);
+    if (state.crew.bandSeen && state.crew.bandSeen !== b) {
+      var msg = PC.data.world.lines.moraleBand.replace("{band}", b), t = document.querySelector(".toast");
+      if (t) t.textContent += " · " + msg; else toast(msg); // don't wipe the action's own toast
+    }
+    state.crew.bandSeen = b;
   }
 
   // ---- The end of the prototype (§37.1; the M6 chat's R5) ----
@@ -441,7 +453,7 @@
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
       // P8: provisions as lots, with time at sea in the tooltip.
-      lrow("Provisions", '<span title="' + esc(state.provisions + " lots: " + timeAtSea(state.provisions)) + '">' + esc(String(state.provisions)) + "</span>") + "</table>" +
+      lrow("Provisions", '<span title="' + esc(foodWords() + ": " + timeAtSea(PC.crew.food(state))) + '">' + esc(String(PC.crew.food(state))) + (state.hardtack ? ' <span class="note">(' + state.hardtack + " hardtack)</span>" : "") + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
       meters(false) +
       '<div class="h4">Officers</div>' + offs.map(function (o) {
@@ -462,7 +474,7 @@
     var c = state.captain, sh = state.ship, pic = PC.creator.captainPortrait(c);
     return '<button class="pstrip" data-act="openmenu" data-menu="captain">' + (pic ? '<img src="' + assetUrl(pic) + '" alt="">' : "") +
       '<span class="ptext"><b>' + esc((c.first + " " + c.last).trim()) + "</b> · <i>" + esc(sh.name) + "</i><br>Purse · " + gold(state.money.purse) + " gold · Crew gold · " + gold(state.money.crew) +
-      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " · Provisions " + state.provisions + '</span><span class="go">›</span></button>' +
+      "<br>Hull " + Math.round(sh.hull) + "/" + sh.hullMax + " · " + plural(state.crew.count, "hand") + (state.crew.wounded ? " (+" + state.crew.wounded + " wounded)" : "") + " · Morale " + state.crew.morale + " " + esc(PC.crew.band(state.crew.morale)) + " · Provisions " + PC.crew.food(state) + '</span><span class="go">›</span></button>' +
       (aboard().length ? '<div class="pfaces">' + aboard().map(function (o) {
         return '<button class="link" data-act="openmenu" data-menu="officer:' + esc(o.id) + '" aria-label="' + esc(o.first) + '">' + officerFace(o, 30, 45) + "</button>";
       }).join("") + '<span class="note">Officers · tap for cards</span></div>' : "");
@@ -820,7 +832,7 @@
   function seasonFooter() {
     if (!state.ap.left) return "";
     return '<div class="h4" style="max-width:680px">The season</div>' + opts([opt({ act: "endseason", label: endSeasonLabel(),
-      meta: "You have " + plural(state.ap.left, "action") + " left. Idle upkeep is eaten as the season turns." })]);
+      meta: "You have " + plural(state.ap.left, "action") + " left." })]);
   }
   // ---- The chart (§41.4, §38.8; Milestone 7) -----------------------------------
   // A PLACEHOLDER map drawn in code from the author's layout guide: north to
@@ -1238,6 +1250,11 @@
     var avail = N().poolAvailable(state);
     var berths = PC.crew.berths(state);
     html += '<div class="block"><div class="h4">Hands on the Docks</div>' + sayFor("hands") + docksRollBlock();
+    // Crew and room (P9 of the build 0.9 playtest pins): each ship's crew
+    // against her berths, and the room left on the flagship.
+    html += '<p class="small">' + ["<i>" + esc(sh.name) + "</i>: crew " + (state.crew.count + (state.crew.wounded || 0)) + " / max " + sh.crewMax + " (minimum " + (sh.crewMin || 0) + ")" + (state.crew.wounded ? ", " + state.crew.wounded + " of them wounded" : "")]
+      .concat((state.fleet || []).filter(function (f) { return !f.out; }).map(function (f) { return esc(f.name || f.cls) + ": crew " + (f.crew || 0) + " / max " + (f.crewMax || f.crew || 0) + " (minimum " + (f.crewMin || 0) + ")"; })).join(" · ") +
+      " · <b>Room for " + berths + " more</b>.</p>";
     var tiers = PC.data.economy.TIER_ORDER.filter(function (t) { return avail[t] || (N().season(state).pool[t]); });
     if (!tiers.length) html += '<p class="note">Nobody is looking for a berth.</p>';
     else {
@@ -1264,7 +1281,16 @@
           var cut = asked - n;
           return "Sign " + plural(n, "hand") + " · " + gold(cost) + " crew gold · " + (state.crew.count + n) + " of " + sh.crewMax + " berths" +
             (cut ? " (" + cut + " fewer: " + Object.keys(p.left).map(function (t) { return p.left[t] + " " + t; }).join(", ") + " stay on the docks)" : "");
-        }, "") + "</button></div>";
+        }, "") + "</button></div>" +
+        // P9: what the food aboard feeds at the new crew size.
+        '<p class="small">' + totalSlot(function () {
+          var n = 0, ask = {};
+          tiers.forEach(function (t) { ask[t] = val("q-hire-" + t); });
+          var p = N().trimPlan(state, ask);
+          tiers.forEach(function (t) { n += p[t]; });
+          var heads = PC.world.headsAtSea(state) + n, ap = PC.world.apOfFood(state, heads);
+          return "Provisions aboard: " + foodWords() + ", about " + (ap === 1 ? "1 action" : ap + " actions") + " at sea with " + heads + " aboard.";
+        }) + "</p>";
     }
     // Put hands ashore (§24.7)
     var each = PC.crew.payOffEach(state);
@@ -1334,15 +1360,37 @@
       "<span>Hold " + used + " of " + cap + " · " + (over > 0 ? '<i class="over">' + over + " over</i>" : Math.max(0, cap - used) + " free") + "</span></div>";
   }
   function holdNow() {
-    return { cap: PC.crew.holdCapacity(state), prov: state.provisions, goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), treasureDirty: state.cargo.treasure.dirty || 0 };
+    return { cap: PC.crew.holdCapacity(state), prov: PC.crew.food(state), goods: PC.crew.goodsUnits(state), treasure: PC.crew.treasureUnits(state), treasureDirty: state.cargo.treasure.dirty || 0 };
   }
   function holdBar() {
-    var manifest = [esc("Provisions: " + state.provisions + " lots")].concat(Object.keys(state.cargo.goods).map(function (g) {
+    var manifest = [esc("Provisions: " + foodWords())].concat(Object.keys(state.cargo.goods).map(function (g) {
       var e = state.cargo.goods[g];
       return [e.clean ? esc(g) + ": " + e.clean : null, e.dirty ? dirtyName(g, true) + ": " + e.dirty : null].filter(Boolean).join(" · ");
     }).filter(Boolean), state.cargo.treasure.clean ? ["Treasure: " + state.cargo.treasure.clean] : [], state.cargo.treasure.dirty ? [dirtyName("Treasure", true) + ": " + state.cargo.treasure.dirty] : []);
     return '<details class="svc"><summary style="cursor:pointer;list-style:none">' + holdBarHtml(holdNow()) +
       ' <span class="note">tap for the manifest</span></summary><ul class="small">' + manifest.map(function (m) { return "<li>" + m + "</li>"; }).join("") + "</ul></details>";
+  }
+
+  // "12 lots" or "12 lots (4 of them hardtack)".
+  function foodWords() { return PC.crew.food(state) + " lots" + (state.hardtack ? " (" + state.hardtack + " of them hardtack)" : ""); }
+
+  // Hardtack (P11 of the build 0.9 playtest pins): its own row under the
+  // provisions, always in stock, with its cost to morale said plainly.
+  function hardtackBlock(free, onHand) {
+    var hp = N().hardtackPrice(state), max = Math.min(free, afford(hp)), have = state.hardtack || 0;
+    var html = '<div class="svc"><h4>Hardtack</h4><p class="small">Cheap and grim: −' + (PC.data.economy.HARDTACK_MORALE || 2) + " morale for each action the crew eats it. It feeds the same as a lot, and the crew eat it only once the ordinary lots run out. Aboard: " + have + " lots.</p>" +
+      '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(hp) + " gold each. Always in stock.</p>" +
+      (free <= 0 ? '<p class="note">The hold is full.</p>' : max > 0 ? '<div class="buyrow">' + qstep("q-hard", Math.min(max, 10), max) + '<button class="primary" data-act="buyhard" data-for="q-hard">' +
+        totalSlot(function () { return "Buy · " + gold(val("q-hard") * hp); }, "") + "</button></div>" +
+        '<p class="small">' + totalSlot(function () { var n = val("q-hard"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * hp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>');
+    if (have > 0) {
+      var sp = N().hardtackSellPrice(state), cl = N().provisionerCapLeft(state);
+      var smax = Math.max(1, Math.min(have, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
+      html += '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
+        '<div class="buyrow">' + qstep("q-sellhard", 1, smax) + '<button class="secondary outline" data-act="sellhard" data-for="q-sellhard"' + (cl < sp ? " disabled" : "") + ">" +
+        totalSlot(function () { return "Sell · " + gold(val("q-sellhard") * sp); }, "") + "</button></div>";
+    }
+    return html + "</div>";
   }
 
   // Provisions as time at sea, short form for the strip: "4½ actions".
@@ -1390,11 +1438,11 @@
       // Buy filled and Sell outlined, "You pay" / "They pay", and what you'd
       // have after the trade.
       var onHand = function () { return state.money.crew + state.money.purse; };
-      html += '<div class="svc"><h4>Provisions</h4><p class="small">One lot feeds 5 hands for an action at sea. Aboard: ' + state.provisions + " lots, " + timeAtSea(state.provisions) + ".</p>" +
+      html += '<div class="svc"><h4>Provisions</h4><p class="small">One lot feeds 5 hands for an action at sea. Aboard: ' + esc(foodWords()) + ", " + timeAtSea(PC.crew.food(state)) + ".</p>" +
         '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(pp) + " gold each.</p>" +
         (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="primary" data-act="buyprov" data-for="q-prov">' +
           totalSlot(function () { return "Buy · " + gold(val("q-prov") * pp); }, "") + "</button></div>" +
-          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (state.provisions + n) + " lots aboard (" + timeAtSea(state.provisions + n) + ") · " + gold(onHand() - n * pp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
+          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * pp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
         // R7: provisions sell back at half his price, out of his coffers.
         (state.provisions > 0 ? (function () {
           var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
@@ -1402,8 +1450,8 @@
           return '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
             '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary outline" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
             totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>" +
-            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, state.provisions - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
-        })() : "") + "</div>";
+            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, PC.crew.food(state) - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
+        })() : "") + "</div>" + hardtackBlock(free, onHand);
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
         Object.keys(stock).map(function (gname) {
@@ -1635,6 +1683,7 @@
   // provisions, then treasure) to change as he likes.
   function beachPicker(bch) {
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
+    if (state.hardtack) rows.push({ what: "hardtack", label: "Hardtack lots", n: state.hardtack, dirty: false });
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
@@ -1747,9 +1796,9 @@
       return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">A ' + esc(s.cls) + ' <span class="note">· half-seen in the fog</span></h4>' +
         '<p class="small" style="margin:4px 0"><i>The lookout: PLACEHOLDER: "Can\'t make out her colors in this murk, Captain."</i></p></div></div>';
     }
-    var rows = [["Flag", s.flag], ["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
+    var rows = [["Guns", s.guns + " (" + s.gunsRange + ")"], ["Crew", s.crewRange], ["Hull", s.hull],
       ["Speed", s.speed + " · " + s.handling], ["Draft", s.draft], ["Carries", s.lootTypes.join(", ")], ["Loot", s.loot]];
-    return '<div class="scout">' + shipArtHtml(s.cls) + '<div><h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + dirtyName("A " + s.cls + (s.name ? ", the " + s.name : ""), s.flag !== "Pirate") + ' <span class="note">· ' + esc(s.role === "War" ? "warship" : s.role === "Raider" ? "raider" : s.role === "Hybrid" ? "armed trader" : "merchant") + "</span></h4>" +
+    return '<div class="scout">' + shipArtHtml(s.cls) + '<div>' + flagTag(s.flag, s.role, true) + '<h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + dirtyName("A " + s.cls + (s.name ? ", the " + s.name : ""), s.flag !== "Pirate") + "</h4>" +
       '<table class="ledger">' + rows.map(function (r) { return lrow(r[0], esc(r[1])); }).join("") + "</table>" +
       '<p class="small" style="margin:4px 0"><i>The lookout: ' + esc(PC.text.render(s.cue, state).replace(/^PLACEHOLDER: /, "")) + "</i></p>" +
       '<p class="small" style="margin:0">' + esc(s.legit) + "</p></div></div>";
@@ -1873,11 +1922,21 @@
       opts(Object.keys(R).map(function (k) { return opt({ act: "hvotereact", attrs: 'data-react="' + k + '"', label: R[k][0] }); }));
   }
 
+  // The flag (P6): a swatch, the nation in bold and the role in plain
+  // words ("Pirate raider", "Avalon navy"). Never the color alone (§41.1).
+  function flagTag(flag, role, big) {
+    var H = PC.data.hunt, look = (H.FLAG_LOOK || {})[flag] || { color: "#5e4528", adj: flag || "Unknown" };
+    var word = flag === "Pirate" ? "raider" : (H.ROLE_WORD || {})[role] || "";
+    return '<span class="flagtag' + (big ? " big" : "") + '"><svg class="flag" viewBox="0 0 22 15" aria-hidden="true"><rect width="22" height="15" fill="' + look.color + '"/>' +
+      (flag === "Pirate" ? '<circle cx="11" cy="6.5" r="2.6" fill="#efe3c6"/><path d="M6.5 11.5l9-3M6.5 8.5l9 3" stroke="#efe3c6" stroke-width="1.1"/>' : "") +
+      "</svg><b>" + esc(look.adj) + "</b>" + (word ? " " + esc(word) : "") + "</span>";
+  }
+
   function shipRow(s, enemy, target) {
     var hp = s.hullMax ? Math.max(0, Math.round(100 * s.hull / s.hullMax)) : 0;
     var outWord = { struck: "struck", captured: "taken", sunk: "sunk", escaped: "escaped", taken: "taken", left: "left behind" }[s.out] || "";
     return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + '">' + shipArtHtml(s.cls, !!s.out) +
-      '<div><b>' + dirtyName(s.name ? s.name : "A " + s.cls, enemy && s.flag && s.flag !== "Pirate") + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
+      '<div>' + (enemy ? flagTag(s.flag, s.role) + " " : "") + '<b>' + dirtyName(s.name ? s.name : "A " + s.cls, enemy && s.flag && s.flag !== "Pirate") + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
       (outWord ? ' <span class="badge-out">' + esc(outWord) + "</span>" : "") +
       '<div class="hbar" style="height:9px;max-width:200px;margin:3px 0"><i style="width:' + hp + "%;background:" + (hp < 50 ? "#8f2a1c" : "#5e4528") + '"></i></div>' +
       // Her full stats sit in a drop-down (A12); hull and her state stay in view.
@@ -1888,7 +1947,7 @@
 
   function battleShips(b) {
     var html = '<div class="battle"><div class="bside"><div class="h4">Your side</div>' + b.mine.map(function (s) { return shipRow(s, false, false); }).join("") + "</div>" +
-      '<div class="bside"><div class="h4">Theirs</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
+      '<div class="bside"><div class="h4">Theirs' + (b.enemies[0] ? " · " + flagTag(b.enemies[0].flag, b.enemies[0].role) : "") + '</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
     if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
   }
@@ -2309,6 +2368,7 @@
   function cargoTab() {
     var html = holdBar() + '<p class="small">Treasure packs five units to a slot. Every ship\'s hold adds to one total (see Fleet).</p>';
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
+    if (state.hardtack) rows.push({ what: "hardtack", label: "Hardtack lots", n: state.hardtack, dirty: false });
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
@@ -2534,7 +2594,7 @@
       '<div class="h4">Ship and stores</div><table class="ledger wide">' +
       lrow("Ship", esc(state.ship.type) + " <i>" + esc(state.ship.name) + "</i>") + lrow("Hull · Speed", Math.round(state.ship.hull) + " / " + state.ship.hullMax + " · " + state.ship.speed) +
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
-      lrow("Provisions", state.provisions + " lots · " + esc(seaTime(state.provisions))) +
+      lrow("Provisions", esc(foodWords()) + " · " + esc(seaTime(PC.crew.food(state)))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
       meters(true) + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
@@ -2605,6 +2665,9 @@
         b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
         b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
         '<p class="small">Add a fleet ship (generated officer-captain): ' + ["Sloop", "Schooner", "Brigantine", "Brig"].map(function (c) { return b("devfleet", c, ' data-cls="' + c + '"'); }).join("") + "</p>" +
+        // P8: the crew's hidden numbers.
+        '<p class="small">Crew: morale ' + state.crew.morale + " (" + esc(PC.crew.band(state.crew.morale)) + ") · Pressure " + (state.crew.pressure || 0) + " of 5 (mutiny fires at 4 on departure, 5 at season end; not built yet) · set Pressure: " +
+          [0, 2, 3, 4].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
@@ -2775,7 +2838,7 @@
       // A sale that leaves cargo with no room forces a jettison: warn first (A9, G7).
       var hh = N().hullSaleHold(state, el.dataset.ship);
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Selling her takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
-        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what === "hardtack" ? "hardtack lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
       var r = N().sellHull(state, el.dataset.ship);
       say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths" + (r.paidFromPurse ? " (" + gold(r.paidFromPurse) + " from your purse)" : "")) : null]
           .concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) } : null);
@@ -2785,7 +2848,7 @@
     "layup": function (el) {
       var id = who("shipwright"), hh = N().hullSaleHold(state, el.dataset.ship);
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
-        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what === "hardtack" ? "hardtack lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
       var r = N().layUp(state, el.dataset.ship);
       say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Plus " + gold(r.season) + " gold a season, paid when you take her back"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
         r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
@@ -2951,6 +3014,12 @@
       say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
         { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", html: "Sold " + r.units + " " + dirtyName(el.dataset.what === "treasure" ? "treasure" : el.dataset.what, el.dataset.buyer === "fence") }, goldChip(r.gold)] : null });
     },
+    "buyhard": function (el) { var id = who("provisioner"); var n = qty(el); var r = N().buyHardtack(state, n); say(id, firstName(id), r.line, null, null, r.cost ? { chips: [textChip("prov", "+" + n + " hardtack", "good"), goldChip(-r.cost)] } : null); bought(r, "Bought " + n + " hardtack"); },
+    "sellhard": function (el) {
+      var r = N().sellHardtack(state, qty(el)), id = who("provisioner");
+      if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
+      say(id, firstName(id), r.line, null, null, { chips: r.units ? [{ icon: "treasure", text: "Sold " + plural(r.units, "hardtack lot") }, goldChip(r.gold)] : [] });
+    },
     "sellprov": function (el) {
       var r = N().sellProvisions(state, qty(el)), id = who("provisioner");
       if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
@@ -2997,7 +3066,7 @@
     "jettison": function (el) {
       var n = qty(el);
       if ((el.dataset.big === "1" || n > 3) && !jettisonOk) { jettisonOk = { what: el.dataset.what, n: n, dirty: el.dataset.dirty === "1" };
-        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
+        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what === "hardtack" ? "lots of hardtack" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
         return; }
       PC.crew.jettison(state, el.dataset.what, n, el.dataset.dirty === "1");
     },
@@ -3806,6 +3875,7 @@
     },
     "devfleet": function (el) { var r = PC.hunt.devFleetShip(state, el.dataset.cls); toast("A " + r.ship + " joins your fleet under " + r.officer + "."); },
     "devheat": function (el) { state.meters.heat[el.dataset.f] = Number(el.dataset.v); },
+    "devpressure": function (el) { state.crew.pressure = Number(el.dataset.v); if (state.crew.pressure < 3) state.crew.qmWarned = false; },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {
       PC.devtools.jumpTo(state, document.querySelector(".devscene").value);

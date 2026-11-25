@@ -117,11 +117,15 @@
   }
 
   // Talk at the Mess Tables (§44.9): high at Eager/Devoted (Steady at half
-  // weight), low at Sullen or below; ×3 while sore, ×2 at Sullen or below.
+  // weight), low at Sullen or below. The build 0.9 playtest pins (P7a):
+  // Sullen ×3, Mutinous ×5, then ×(1 + 0.5 a Pressure point); the sore
+  // flag's ×3 still stacks.
   function grumbleWeight(state, e) {
     var b = band(state), w = e.weight;
     if (b === "Steady") w *= 0.5;
-    if (b === "Sullen" || b === "Mutinous") w *= 2;
+    if (b === "Sullen") w *= 3;
+    if (b === "Mutinous") w *= 5;
+    w *= 1 + 0.5 * (state.crew.pressure || 0);
     if (state.flags.soreFlag) w *= 3;
     return w;
   }
@@ -631,9 +635,9 @@
       var legs = f.prov * (f.fisherman && (state.captain.tags || []).indexOf("Fisherman") >= 0 ? 1.5 : 1);
       var n = legLots(state, Math.abs(legs));
       if (legs > 0) { n = Math.min(n, PC.crew.slotsFree(state)); state.provisions += n; if (n) chips.push({ icon: "prov", text: "+" + plural(n, "provisions lot"), ink: "good" }); }
-      else { n = Math.min(n, state.provisions); state.provisions -= n; if (n) chips.push({ icon: "prov", text: "−" + plural(n, "provisions lot"), ink: "mid" }); }
+      else { n = PC.crew.takeFood(state, n).total; if (n) chips.push({ icon: "prov", text: "−" + plural(n, "provisions lot"), ink: "mid" }); }
     }
-    if ("provPct" in f) { var p = Math.ceil(state.provisions * Math.abs(f.provPct)); state.provisions -= p; if (p) chips.push({ icon: "prov", text: "−" + plural(p, "provisions lot"), ink: "bad" }); }
+    if ("provPct" in f) { var p = PC.crew.takeFood(state, Math.ceil(PC.crew.food(state) * Math.abs(f.provPct))).total; if (p) chips.push({ icon: "prov", text: "−" + plural(p, "provisions lot"), ink: "bad" }); }
     if ("morale" in f) {
       var m = f.morale;
       if (ctx.low && f.low != null) m = f.low;
@@ -701,7 +705,7 @@
       applyOne(state, v, { crewLost: n }, res, {}, r);
     } else if (d === 3) {
       var plan = PC.crew.jettisonPlan(state, Math.max(1, Math.ceil(PC.crew.slotsUsed(state) * 0.15)));
-      (plan || []).forEach(function (x) { if (x.what === "provisions") state.provisions -= x.n; else if (x.what === "treasure") state.cargo.treasure[x.dirty ? "dirty" : "clean"] -= x.n; else PC.crew.removeGood(state, x.what, x.n, x.dirty); });
+      (plan || []).forEach(function (x) { if (x.what === "provisions") state.provisions -= x.n; else if (x.what === "hardtack") state.hardtack -= x.n; else if (x.what === "treasure") state.cargo.treasure[x.dirty ? "dirty" : "clean"] -= x.n; else PC.crew.removeGood(state, x.what, x.n, x.dirty); });
       res.text += "\n\n" + L.cargo;
       res.chips.push({ icon: "treasure", text: (plan || []).length ? "Over the side: " + plan.map(function (x) { return x.n + " " + x.what; }).join(", ") : "Nothing worth throwing over", ink: "bad" });
     } else {

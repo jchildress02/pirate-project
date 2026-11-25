@@ -20,7 +20,11 @@
     },
     TREASURE_UNIT: 100,       // gold a unit at a Modest port (§20.1)
     TREASURE_PER_SLOT: 5,     // treasure packs 5 units to a cargo slot (§22.6)
-    PROVISIONS_LOT: 30,       // §20.6
+    PROVISIONS_LOT: 20,       // §20.6 (30 → 20, the build 0.9 playtest pins, P1)
+    // Hardtack (P11): a second provisions good, half the lot price, always
+    // in stock. Each action at sea eaten on hardtack costs morale.
+    HARDTACK_SHARE: 0.5,
+    HARDTACK_MORALE: 2,
     PROVISIONS_SELL_SHARE: 0.5, // the provisioner buys lots back at half his price (ruled November 18, R7)
     SIGNING: { Green: 15, Able: 30, Seasoned: 45, Veteran: 75 }, // §24.7
     TIER_ORDER: ["Green", "Able", "Seasoned", "Veteran"],

@@ -427,7 +427,7 @@
       state.money[p] = (state.money[p] || 0) + e.gold;
       return (e.gold > 0 ? "+" : "") + e.gold + " gold to " + (p === "purse" ? "your purse" : "crew gold");
     }
-    if ("provisions" in e) { state.provisions = Math.max(0, state.provisions + e.provisions); }
+    if ("provisions" in e) { if (e.provisions >= 0) state.provisions += e.provisions; else PC.crew.takeFood(state, -e.provisions); }
     else if ("treasure" in e) {
       // Treasure goes into the hold (§20.3). A purse-or-crew prompt for
       // treasure rewards (§33.1.4) waits for the selling milestone.

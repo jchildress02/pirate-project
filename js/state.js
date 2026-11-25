@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 9;
+  var SAVE_VERSION = 10;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -32,6 +32,7 @@
       captain: c.captain,
       money: c.money,           // { crew, purse } — §27
       provisions: c.provisions, // lots — §20.6
+      hardtack: 0, // hardtack lots (P11 of the build 0.9 playtest pins)
       ship: c.ship,
       crew: c.crew,
       meters: c.meters,         // Dread, Standing, Heat — §28
@@ -245,6 +246,11 @@
       data.regard = data.regard || {};
       data.letter = data.letter || null;
       data.saveVersion = 9;
+    }
+    if (data.saveVersion === 9) {
+      // The build 0.9 playtest pins: hardtack (P11) and the morale band notice (P7).
+      data.hardtack = data.hardtack || 0;
+      data.saveVersion = 10;
     }
     return data;
   }
