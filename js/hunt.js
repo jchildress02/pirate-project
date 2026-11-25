@@ -724,6 +724,7 @@
       cargo: c.cargo, size: c.size, crewMin: c.crewMin, crewMax: c.crewMax, speed: c.speed, speedMax: c.speed, handling: c.handling,
       rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: !PC.letters.legitimate(state, e.flag), prizeOf: e.flag,
     };
+    if (PC.items) PC.items.moveCabin(state, old); // the displays move with him (§32.6)
   }
 
   // ---- Ending the hunt -----------------------------------------------------------

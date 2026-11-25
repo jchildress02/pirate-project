@@ -1327,6 +1327,33 @@
     return html;
   }
 
+  // ---- Top of the Barrel, Norfolk's item merchant (§32.5, §32.7; M9 PR 6) ------------
+  function itemShopCard() {
+    var v = PC.shop.view(state);
+    if (!v) return "";
+    var who = v.who, html = mcard("m:items", who, v.name);
+    html += '<p class="note" style="margin:0 0 6px">' + esc(v.blurb) + "</p>";
+    var said = state.location.say && state.location.say.to === who;
+    html += said ? sayFor(who) : '<div class="say">' + inline(v.opening && !v.refuse ? joinQuotes(v.greet, v.opening) : v.greet) + "</div>";
+    if (v.refuse) return html + "</div></details>";
+    if (v.soldOut && !said) html += '<p class="small">' + inline(v.soldOut) + "</p>";
+    html += v.items.map(function (it) {
+      if (it.sold) return '<div class="buyrow"><span class="note">' + esc(it.name) + " · sold</span></div>";
+      var crewNote = "From crew gold: morale −" + it.crew.morale + (it.crew.pressure ? ", Pressure +" + it.crew.pressure : "");
+      var lock = it.full ? "You carry three already" : null;
+      return '<div class="buyrow" style="flex-wrap:wrap;align-items:baseline"><span style="flex:1 1 320px"><b style="font-weight:normal">' + esc(it.name) + '</b> <span class="note">' + esc(it.tier) + " · " + esc(PC.data.items.SLOT_NAMES[it.slot] || (it.slot === "inventory" ? "Kept in the inventory" : it.slot)) + "</span>" +
+        '<br><span class="small">' + esc(it.effect) + (it.inert ? ' <span class="note">(' + esc(it.inert) + ")</span>" : "") + "</span></span> " +
+        '<button class="secondary" data-act="shopbuy" data-i="' + it.i + '" data-from="purse"' + (lock || !it.purseOk ? " disabled" : "") + ">" + gold(it.price) + " from your purse</button> " +
+        '<button class="secondary" data-act="shopbuy" data-i="' + it.i + '" data-from="crew"' + (lock || !it.crewOk ? " disabled" : "") + ' title="' + esc(crewNote) + '">' + gold(it.price) + " crew gold</button>" +
+        '<span class="note" style="flex-basis:100%;margin:0 0 6px">' + esc(lock || crewNote) + "</span></div>";
+    }).join("");
+    // Selling (§32.5): what's in the inventory, at 40%, into the purse.
+    var inv = PC.items.view(state).inventory.map(function (it) { return { it: it, info: PC.shop.sellInfo(state, it.name) }; }).filter(function (x) { return x.info && !x.info.why; });
+    if (inv.length) html += '<div class="h4" style="margin-top:10px">Sell to the shop</div><p class="note" style="margin:0 0 4px">Forty percent of its price, into your purse. Take off what you\'re wearing first.</p>' +
+      inv.map(function (x) { return '<div class="buyrow"><span>' + esc(x.it.name) + (x.it.count > 1 ? " ×" + x.it.count : "") + '</span> <button class="secondary" data-act="shopsell" data-item="' + esc(x.it.name) + '">Sell · ' + gold(x.info.gold) + "</button></div>"; }).join("");
+    return html + '<p class="note">The shelves restock every season. Buying from crew gold costs the crew\'s goodwill: −1 morale per 200 gold, and Pressure +1 for every 3,000 spent on yourself since the last split.</p></div></details>';
+  }
+
   // ---- The Trade Master (§27.7) ------------------------------------------------------
   function tradeMasterCard() {
     var id = N().here(state), who = N().slotNpc(id, "trademaster");
@@ -1834,6 +1861,7 @@
       if (hasCargo("dirty") && !said.offerdirty) html += opts([opt({ act: "offerdirty", label: "Offer dirty goods", meta: "No action" })]);
     }
     html += "</div></details>";
+    html += itemShopCard();
     html += tradeMasterCard();
     if (N().fenceOpen(state)) {
       var f = N().nodeData(id).fence;
@@ -2914,9 +2942,29 @@
     return html + "</div>";
   }
 
+  // The cabin's display spots (§32.6; M9 PR 6): what hangs there works
+  // wherever you are; it goes down with the ship.
+  function cabinBlock() {
+    var v = PC.items.view(state), lk = v.lock;
+    if (!v.cabinSpots) return '<p class="note">You have no ship, so no cabin.</p>';
+    var rows = [];
+    for (var i = 0; i < v.cabinSpots; i++) {
+      var c = v.cabin[i];
+      rows.push(lrow("Spot " + (i + 1), c ? "<b style=\"font-weight:normal\">" + esc(c.name) + '</b> <span class="note">' + esc(c.tier || "") + '</span><br><span class="small">' + esc(c.effect || "") + (c.inert ? ' <span class="note">(' + esc(c.inert) + ")</span>" : "") + "</span>" +
+        (lk ? "" : ' <button class="link" data-act="takedown" data-item="' + esc(c.name) + '">Take down</button>') : '<span class="note">Empty</span>'));
+    }
+    var can = v.inventory.filter(function (it) { return it.hang; });
+    return '<div class="h4">Display spots · ' + v.cabin.length + " of " + v.cabinSpots + "</div>" + (lk ? '<p class="notice">' + esc(lk) + "</p>" : "") +
+      '<table class="ledger wide">' + rows.join("") + "</table>" +
+      (can.length ? '<p class="small">' + can.map(function (it) {
+        return esc(it.name) + (lk ? "" : it.hang.why ? ' <span class="note">(' + esc(it.hang.why) + ")</span>" : ' <button class="link" data-act="hang" data-item="' + esc(it.name) + '">Hang it here</button>');
+      }).join(" · ") + "</p>" : '<p class="note">Art, display curios and relics hang here. Buy or find one, and hang it from the cabin or your captain sheet.</p>') +
+      '<p class="note">What hangs here works wherever you go, as long as you have your flagship. If she\'s sunk, struck or taken, it\'s lost with her. A bigger ship has more spots (a sloop 1, a brig 2, a galleon 3).</p>';
+  }
+
   function cabinTab() {
     return '<div class="hotframe" style="display:flex;align-items:center;justify-content:center"><p class="note" style="text-align:center;background:rgba(239,227,198,.85);padding:6px 14px">Woodcut · your cabin (simple)<br>16 : 10 · 1600 × 1000</p></div>' +
-      '<p class="note">Your cabin and its display spots come with the items work. Not in the prototype.</p>';
+      cabinBlock();
   }
 
   // ---- The always-available menus (§38.5, §41.12) ---------------------------
@@ -3116,9 +3164,10 @@
         btns = it.keys.map(function (k) {
           return '<button class="link" data-act="equip" data-item="' + esc(it.name) + '" data-key="' + k.key + '">' + (k.holds ? "Wear as " + esc(k.name) + " (for the " + esc(k.holds) + ")" : "Wear" + (it.keys.length > 1 ? " as " + esc(k.name) : "")) + "</button>";
         }).join(" ");
+        if (it.hang) btns += it.hang.why ? ' <span class="note">' + esc(it.hang.why) + "</span>" : ' <button class="link" data-act="hang" data-item="' + esc(it.name) + '">Hang it in the cabin</button>';
         if (it.use) btns += it.use.why ? ' <span class="note">' + esc(it.use.why) + "</span>" : ' <button class="primary" data-act="useitem" data-item="' + esc(it.name) + '">Use</button>';
       }
-      var how = it.slot === "display" ? (it.works ? "counts while carried, until the cabin" : "for display: the cabin comes later") : it.works && it.tier ? "works from the inventory" : "";
+      var how = it.slot === "display" ? "works while it hangs in your cabin" : it.works && it.tier ? "works from the inventory" : "";
       return '<li><b style="font-weight:normal">' + esc(it.name) + (it.count > 1 ? " ×" + it.count : "") + "</b>" + tierNote(it.tier) +
         (it.effect ? '<br><span class="small">' + esc(it.effect) + (it.inert ? ' <span class="note">(' + esc(it.inert) + ")</span>" : "") + "</span>" : "") +
         (how ? ' <span class="note">· ' + esc(how) + "</span>" : "") + (btns ? '<div class="small" style="margin:2px 0 8px;display:flex;gap:14px;flex-wrap:wrap">' + btns + "</div>" : "") + "</li>";
@@ -3127,7 +3176,8 @@
       '<p class="small" style="margin:2px 0">In a boarding you fight with <b style="font-weight:normal">' + esc(v.melee) + "</b>" + (v.guns.length ? " and fire the " + esc(v.guns.join(" and the ")) : ", with no gun for the boarding shot") + ".</p>" +
       '<table class="ledger wide">' + slots + "</table>" +
       '<div class="h4">Inventory</div>' + (inv ? '<ul style="padding-left:1.1em;font-size:18px">' + inv + "</ul>" : '<p class="small">Nothing else.</p>') +
-      '<p class="note">Only what you wear works, except the Pistol Brace and what you use. Changing costs no actions.</p>';
+      (v.cabin.length ? '<p class="small">In your cabin: ' + esc(v.cabin.map(function (c) { return c.name; }).join(", ")) + ".</p>" : "") +
+      '<p class="note">Only what you wear works, except the Pistol Brace, what you use, and what hangs in your cabin. Changing costs no actions.</p>';
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -3689,6 +3739,18 @@
       PC.world.finishSplit(state);
       if (gaming && PC.liarsdice.canPlay(state, { free: true }).ok) { mgMark = 0; PC.liarsdice.start(state, { free: true }); }
     },
+    "shopbuy": function (el) {
+      var who_ = PC.shop.keeper(state, N().here(state));
+      var r = PC.shop.buy(state, Number(el.dataset.i), el.dataset.from);
+      say(who_, firstName(who_), r.line, null, null, r.chips ? { chips: r.chips } : null);
+    },
+    "shopsell": function (el) {
+      var who_ = PC.shop.keeper(state, N().here(state));
+      var r = PC.shop.sell(state, el.dataset.item);
+      say(who_, firstName(who_), r.line, null, null, { chips: r.chips });
+    },
+    "hang": function (el) { PC.items.hang(state, el.dataset.item); },
+    "takedown": function (el) { PC.items.takeDown(state, el.dataset.item); },
     "enroll": function (el) {
       var who_ = N().slotNpc(N().here(state), "trademaster");
       var r = PC.world.enroll(state, el.dataset.ship);

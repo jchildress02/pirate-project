@@ -456,6 +456,7 @@
     if (state.ended) return null;
     if (ending === "marooned") { PC.prison.maroon(state, { officers: m.loyalIds || [], by: "mutineers'" }); return null; }
     if (ending === "pickedUp") { state.current = { screen: "node" }; return null; }
+    if (PC.items) PC.items.loseCabin(state); // the cabin sails with the mutineers (§32.6, leaning yes)
     state.shipless = true;
     state.current = { screen: "shipless" };
     return null;

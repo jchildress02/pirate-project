@@ -79,11 +79,11 @@
 
   // Every modifier source the captain carries. Each id points at an entry
   // in PC.data.modifiers. Unknown ids are skipped (content may lag code).
-  function captainSources(captain) {
+  function captainSources(captain, state) {
     var out = [];
     ["traits", "flaws", "tags", "items"].forEach(function (kind) {
       // Items: only what's worn works (and the Brace, §32.3; js/items.js).
-      var list = kind === "items" && PC.items ? PC.items.activeOf(captain) : (captain[kind] || []);
+      var list = kind === "items" && PC.items ? PC.items.activeOf(captain, state) : (captain[kind] || []);
       list.forEach(function (id) {
         var m = PC.data.modifiers[id];
         if (m) out.push({ id: id, kind: kind, mod: m });
@@ -116,9 +116,9 @@
   // Captain modifiers for one check. A modifier that names a type follows
   // the type; one that names a stat follows the stats actually used (§11.2).
   // A modifier with the same name never applies twice.
-  function captainModifiers(captain, check, stats, ctx) {
+  function captainModifiers(captain, check, stats, ctx, state) {
     var seen = {}, parts = [], capped = 0, outside = 0;
-    captainSources(captain).forEach(function (src) {
+    captainSources(captain, state).forEach(function (src) {
       (src.mod.edge || []).forEach(function (e) {
         if (!targets(e, check, stats) || !whenMatches(e.when, ctx)) return;
         var name = src.mod.name || src.id;
@@ -165,7 +165,7 @@
     parts.push({ label: stats.join(" + ") + (stats.length > 1 ? " (average)" : ""), value: sv });
     var tr = (cap.training && cap.training[check.type]) || 0;
     if (tr) parts.push({ label: check.type + " training", value: tr });
-    var mods = captainModifiers(cap, check, stats, ctx);
+    var mods = captainModifiers(cap, check, stats, ctx, state);
     mods.parts.forEach(function (p) { parts.push(p); });
     var mm = meterModifier(state, check, ctx);
     var meter = mm.value;
@@ -220,7 +220,7 @@
     ctx = withSeason(state, ctx);
     var used = state.rerollsUsed || {};
     var found = null;
-    var sources = captainSources(state.captain);
+    var sources = captainSources(state.captain, state);
     var ms = mentorSource(state);
     if (ms) sources.push(ms);
     sources.forEach(function (src) {

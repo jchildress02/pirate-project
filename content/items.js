@@ -182,6 +182,9 @@
     STACK: 3,                  // consumables, up to 3 of each
     CORDIAL_RECOVERY: 0.60,    // the Surgeon's Cordial (§24.9)
     BURN_CAP: 0.30,            // combined burn cuts (§25.2)
+    // The flagship's cabin display spots (§32.6). Classes not named get 1.
+    CABIN_SPOTS: { Cutter: 1, Sloop: 1, Schooner: 1, "Royal Sloop": 1, Barque: 2, Brigantine: 2, Brig: 2, Merchantman: 2, "West Indiaman": 2, Frigate: 2,
+      Galleon: 3, "4th Rate": 3, "3rd Rate": 3, "2nd Rate": 3, "1st Rate": 3 },
     // §32.16's hidden-item pools by flag (proposal rows), and the tiers.
     POOLS: {
       Sicily: ["Van Huyt's Island Landscape", "Tapestry of the Breton Kings", "Portrait of Poppo von Rackel", "Gilded Icon", "Jeweled Pocket Watch"],
@@ -194,6 +197,18 @@
       Other: ["Silver Pocket Watch", "Navigator's Octant", "Fancy Spyglass", "Sea-Service Pistol", "Ruffled Shirt", "Ivory Compass", "Havana Cigars", "Classic Tricorne"],
     },
     POOL_TIERS: { Uncommon: 75, Rare: 22, "Very Rare": 3 }, // Rare only at Rich+, Very Rare only at Superior
+    // Item merchants (§32.7): what each shows a season, and the weights
+    // for what the shelves hold. Norfolk's is weapons and gear (§17.4.4):
+    // DEFAULT weights by kind. Never on a shelf: Uniques, relics, ship's
+    // stock, Talanee pieces, pets (the pet merchants) and art (the luxury
+    // traders, §32.7); 1 a slot for clothing, books and curios.
+    SHOPS: {
+      norfolk: { npcKey: "itemshop", uncommon: 4, rare: 1,
+        weights: { weapon: 4, gear: 3, consumable: 3, clothing: 1, book: 1, curio: 1 } },
+    },
+    SELL_RATE: 0.40,           // item merchants buy at 40% (§32.5)
+    CREW_MORALE_PER: 200,      // −1 morale per 200 crew gold (§32.5)
+    CREW_PRESSURE_PER: 3000,   // +1 Pressure per 3,000 since the split
     // The Uncommon a bounty target may carry (§17.4.8): drawn from the Pirate pool's Uncommons.
     lines: {
       equipLocked: "Not now: equipment can't be changed in a battle or a scene.",

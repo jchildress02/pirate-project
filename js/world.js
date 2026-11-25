@@ -383,6 +383,7 @@
   function doSplit(state) {
     var sp = state.split;
     if (!sp || sp.step !== "ask") throw new Error("No split to make.");
+    state.crew.itemSpend = 0; // crew gold spent on items since the split (§32.5)
     var sold = [];
     (state.fleet || []).filter(function (f) { return f.kind === "prize"; }).forEach(function (f) {
       var g = splitHullValue(state, f);

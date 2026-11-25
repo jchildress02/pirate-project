@@ -155,6 +155,7 @@
     state.money.purse = 0; state.money.crew = 0;
     state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } };
     state.provisions = 0;
+    if (PC.items) PC.items.loseCabin(state); // the cabin goes with the ship (§32.6)
     state.fleet = [];
     var c = state.crew;
     PC.data.economy.TIER_ORDER.forEach(function (t) { c.tiers[t] = 0; });
