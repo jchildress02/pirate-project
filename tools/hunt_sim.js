@@ -15,6 +15,10 @@
  * grapeshot losses from the attacker's manned guns (P13b); --bands prints
  * how often each odds band comes up when scouting.
  *
+ * M9 PR 3 (D11): --bounty takes one Admiralty bounty in the Hatteras Banks
+ * before each hunt (--rumor: its rumor heard, so he's in the first batch)
+ * and counts its reward (alive or dead) in the hunt's net gold.
+ *
  * --old turns off the Milestone 5 planning rulings (Shaken and the
  * boarding-loss table) to compare before and after.
  */
@@ -22,9 +26,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 
@@ -35,6 +39,8 @@ if (flag("--hull10")) PC.data.hunt.BR_HULL_DIV = 10;
 if (flag("--grape4")) PC.data.hunt.GRAPE_MULT = 4;
 if (flag("--grapeguns")) PC.data.hunt.GRAPE_BY_GUNS = { heavy: 1 / 3, light: 1 / 6 };
 var BANDS = {}, BANDS_N = 0;
+var BOUNTY = flag("--bounty"), RUMOR = flag("--rumor");
+var BRES = { met: 0, taken: 0, gold: 0 };
 var SEASON = (function () { var i = process.argv.indexOf("--season"); return i >= 0 ? process.argv[i + 1] : "Spring"; })();
 var CONDS = {}, CONDS_N = 0;
 if (OLD) {
@@ -57,6 +63,11 @@ function fitted(seed) {
   s.ap.left = 7;
   s.flags.ocr_underworld_done = true;
   s.time.year = 1755; s.time.season = Math.max(0, PC.state.SEASONS.indexOf(SEASON));
+  if (BOUNTY) {
+    PC.bounties.devOpen(s);
+    var bn = PC.bounties.board(s).cards.filter(function (n) { return n.status === "open"; })[0];
+    if (bn) { bn.waters = "north"; PC.bounties.take(s, bn.id); if (RUMOR) PC.bounties.heardRumor(s, bn.id); }
+  }
   return s;
 }
 
@@ -82,6 +93,7 @@ function play(s, g) {
     var v = PC.minigames.view(s);
     if (v.phase === "gameover") { g.over = true; break; }
     if (v.phase === "empty") { PC.hunt.next(s, g); continue; }
+    if (v.phase === "scout" && BOUNTY && v.scout.ships.some(function (x) { return x.bounty; })) { if (!g.simMet) { g.simMet = true; BRES.met++; } PC.hunt.engage(s, g); continue; }
     if (v.phase === "scout") { if (policyScout(s, g, v)) PC.hunt.engage(s, g); else PC.hunt.next(s, g); continue; }
     if (v.phase === "hunter") { PC.hunt.meetHunter(s, g); continue; }
     if (v.phase === "battle") { battleStep(s, g, v.battle); continue; }
@@ -89,7 +101,7 @@ function play(s, g) {
       if (!v.after.repairDone) { PC.hunt.doRepair(s, g); continue; }
       if (v.after.prize) {
         var pr = v.after.prize;
-        PC.hunt.settlePrize(s, g, { hull: "release", crew: pr.volunteers ? "recruit" : "release", captives: "free" });
+        PC.hunt.settlePrize(s, g, { hull: "release", crew: pr.volunteers ? "recruit" : "release", captives: "free", captain: pr.captainFate ? (pr.captainFate.kind === "bounty" ? "bring" : "prisoner") : null });
         continue;
       }
       PC.hunt.carryOn(s, g); continue;
@@ -159,6 +171,11 @@ for (var i = 0; i < N; i++) {
   var gross = haulValue(s) + (s.money.crew - crew0) + (s.money.purse - purse0);
   // Food at the port's price; a prize's food counts as a gain (P2, P12).
   var cost = (prov0 - PC.crew.food(s)) * PC.node.provisionsPrice(s) + Math.max(0, hull0 - s.ship.hull) * 8 + Math.max(0, hands0 - s.crew.count) * 15;
+  // The bounty's reward, as Howe pays it (alive, or the dead rate).
+  if (BOUNTY) (s.bounties ? s.bounties.notices : []).forEach(function (n) {
+    if (n.status !== "captured") return;
+    BRES.taken++; var gb = PC.bounties.reward(s, n, n.outcome === "alive" ? "alive" : "dead"); BRES.gold += gb; gross += gb;
+  });
   var net = gross - cost;
   res.gold += net; res.ap += g.apUsed; res.prizes += g.prizesTaken;
   perAp.push(net / g.apUsed);
@@ -173,5 +190,6 @@ console.log("  prizes per hunt:     " + (res.prizes / N).toFixed(2));
 console.log("  boardings per hunt:  " + (res.boardings / N).toFixed(2) + ", clashes per boarding " + (res.clashes / Math.max(1, res.boardings)).toFixed(2));
 console.log("  flagship lost:       " + (100 * res.lost / N).toFixed(1) + "% (captain died " + (100 * res.died / N).toFixed(1) + "%)");
 if (process.argv.indexOf("--why") >= 0) console.log(LOSTTO);
+if (BOUNTY) console.log("  bounty" + (RUMOR ? " (rumor heard)" : "") + ": met in " + (100 * BRES.met / N).toFixed(1) + "% of hunts, taken in " + (100 * BRES.taken / N).toFixed(1) + "%, reward " + Math.round(BRES.gold / Math.max(1, BRES.taken)) + " a target (in the net above)");
 if (flag("--weather")) console.log("  " + SEASON + " batch weather: " + Object.keys(CONDS).map(function (k) { return k + " " + Math.round(100 * CONDS[k] / Math.max(1, CONDS_N)) + "%"; }).join(", "));
 if (flag("--bands")) console.log("  odds bands scouted:  " + Object.keys(BANDS).sort(function (a, b) { return b - a; }).map(function (k) { return PC.data.hunt.CA_NAMES[k] + " " + Math.round(100 * BANDS[k] / BANDS_N) + "%"; }).join(", "));

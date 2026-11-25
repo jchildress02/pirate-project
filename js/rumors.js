@@ -152,6 +152,9 @@
     }
     R().pool.forEach(function (l) {
       if (l.type !== type || live(state, l.id)) return;
+      // A taken Admiralty bounty's rumor (§17.4.8; M9 PR 3): one candidate
+      // per taken notice still without its rumor, at any port.
+      if (l.bounty) { bountyCands(state, l).forEach(function (c) { out.push(c); }); return; }
       if (l.node && l.node !== node) return; // a node's own lines stay at that node
       if (l.posture && l.posture !== state.world.posture) return;
       if (l.when && !PC.scenes.test(state, l.when)) return;
@@ -166,6 +169,13 @@
     return out;
   }
 
+  function bountyCands(state, l) {
+    if (!PC.bounties) return [];
+    return PC.bounties.rumorTargets(state).map(function (n) {
+      return { line: Object.assign({}, l, { id: l.id + "_" + n.id, node: null }), ctx: { bounty: n.id }, extra: { bounty: n.id, waters: n.waters } };
+    });
+  }
+
   function scriptedFor(state) {
     var node = PC.node.here(state);
     return R().scripted.filter(function (l) {
@@ -175,7 +185,8 @@
   }
 
   function tell(state, c, source) {
-    var text = render(state, c.line, c.ctx);
+    var text = c.ctx && c.ctx.bounty ? PC.bounties.render(state, c.line.text, PC.bounties.notice(state, c.ctx.bounty)) : render(state, c.line, c.ctx);
+    if (c.ctx && c.ctx.bounty) PC.bounties.heardRumor(state, c.ctx.bounty);
     var rec = remember(state, c.line, text, source, c.extra);
     if (c.line.type === "Node") {
       var d = (state.npcs[c.extra.npc] = state.npcs[c.extra.npc] || {});
@@ -192,6 +203,13 @@
     opts = opts || {};
     var sc = scriptedFor(state);
     if (sc.length && !onlyType) return tell(state, { line: sc[0] }, source);
+    // At Norfolk, Tavern Talk and a drinking win tell a taken bounty's
+    // rumor first (§17.4.8).
+    if (!onlyType && PC.node.here(state) === "norfolk" && (source === "tavern keeper" || source === "a drinking match")) {
+      var bl = R().pool.filter(function (l) { return l.bounty; })[0];
+      var bc = bl ? bountyCands(state, bl) : [];
+      if (bc.length) return tell(state, bc[0], source);
+    }
     var r = PC.rng.fromKey(key);
     var w = {}, byTier = {};
     Object.keys(weights).forEach(function (t) {

@@ -178,6 +178,8 @@
       esc.escort = true;
       ships.push(esc);
     }
+    // French stragglers (§17.4.4; M9 PR 3): 20% of generated pirate ships.
+    if (PC.bounties) ships.forEach(function (s) { PC.bounties.maybeFrench(state, s); });
     return group(state, ships, shape, false, r);
   }
 
