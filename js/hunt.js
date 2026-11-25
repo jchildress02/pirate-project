@@ -828,8 +828,11 @@
     return " Betrayal: you stand high with " + (f === "avalon" ? "Avalon" : "Frisia") + ", so taking her costs +" + PC.data.meterRules.BETRAYAL_HEAT + " Heat on top, and doubles your Heat gains with them for a year.";
   }
   function meterNote(s, state) {
-    if (s.flag === "Avalon" || s.flag === "Burgundy" || s.flag === "Sweden") return "taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
-    if (s.flag === "Frisia" || s.flag === "Ireland") return "taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
+    // #36 of the build 0.9 pins: an ally's ship names the alliance.
+    if (s.flag === "Burgundy" || s.flag === "Sweden") return s.flag + " is Avalon's ally: taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
+    if (s.flag === "Ireland") return "Ireland is Frisia's ally: taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
+    if (s.flag === "Avalon") return "taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
+    if (s.flag === "Frisia") return "taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
     if (s.flag === "France" || s.flag === "Spain") return "France will remember it.";
     if (s.flag === "Sicily") return "Sicily will send hunters after you.";
     return "nobody here will mind.";

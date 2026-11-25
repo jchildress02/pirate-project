@@ -169,11 +169,28 @@
   }
   function heatBand(v) { return PC.meters.heatBand(v); }
 
+  // The Standing bar (#33 of the build 0.9 pins): thicker, green to the
+  // right of a center zero and red to the left, labeled ticks at 25, 50 and
+  // 75 each way, and the number beside the band.
+  // Who's allied with whom (#36 of the build 0.9 pins), from the hunt's
+  // sides table: whose ships cost you Standing and Heat with whom.
+  function alliesBlock() {
+    var S = PC.data.hunt.SIDES, row = function (fac, name) {
+      var allies = Object.keys(S[fac]).filter(function (k) { return S[fac][k] === "ally"; });
+      return "<li><b>" + name + "</b>" + (allies.length ? " and its allies " + allies.join(" and ") : "") + ": taking their ships costs " + name + " Standing and Heat.</li>";
+    };
+    return '<div class="h4">Who\'s allied with whom</div><ul class="small" style="padding-left:1.1em;margin:4px 0 10px">' + row("Avalon", "Avalon") + row("Frisia", "Frisia") +
+      "<li><b>France and Spain</b> keep a grudge; <b>Sicily</b> sends hunters. Pirates are fair game for anyone.</li></ul>";
+  }
+
   function standingBar(f, v) {
+    v = Math.max(-100, Math.min(100, Math.round(v || 0)));
     var left = v >= 0 ? 50 : 50 + v / 2, width = Math.abs(v) / 2;
-    return '<div class="meterrow"><span>' + FACTION[f] + '</span><span class="sc">' + standingBand(v) + "</span></div>" +
-      '<div class="hbar"><i style="left:' + left + "%;width:" + width + "%;background:" + INK[f] + '"></i><i style="left:50%;width:1px;background:#4a3418"></i>' +
-      '<i style="left:60%;width:1px;background:rgba(74,52,24,.4)"></i><i style="left:70%;width:1px;background:rgba(74,52,24,.4)"></i><i style="left:45%;width:1px;background:rgba(74,52,24,.4)"></i></div>';
+    var ticks = [-75, -50, -25, 25, 50, 75].map(function (t) {
+      return '<b class="stick" style="left:' + (50 + t / 2) + '%"></b><span class="stlab" style="left:' + (50 + t / 2) + '%">' + (t > 0 ? "+" : "−") + Math.abs(t) + "</span>";
+    }).join("");
+    return '<div class="meterrow"><span>' + FACTION[f] + '</span><span class="sc">' + standingBand(v) + ' <span class="stnum">' + (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + "</span></span></div>" +
+      '<div class="stbar" title="' + esc(FACTION[f] + " Standing " + v) + '"><i class="stfill ' + (v >= 0 ? "pos" : "neg") + '" style="left:' + left + "%;width:" + width + '%"></i><b class="stzero"></b>' + ticks + "</div>";
   }
   function vbar(label, v, ink, band) {
     return '<div class="vbar"><div class="tube"><i style="height:' + Math.max(0, Math.min(100, v)) + "%;background:" + INK[ink] + '"></i></div><span>' + esc(label) + '</span><span class="sc">' + esc(band) + "</span></div>";
@@ -182,7 +199,7 @@
     var m = state.meters, n = function (x) { return withNumbers ? " · " + x : ""; };
     return '<div class="h4">Standing</div>' + ["frisia", "avalon", "pirates"].map(function (f) {
       var bar = standingBar(f, m.standing[f]);
-      return withNumbers ? bar.replace(standingBand(m.standing[f]) + "</span>", standingBand(m.standing[f]) + n(m.standing[f]) + "</span>") : bar;
+      return bar; // the number always shows now (#33)
     }).join("") +
       '<div class="h4">Dread &amp; Heat</div><div class="vbars">' +
       // Dread's bonus and floor beside its number (§11.8.5, §5.6).
@@ -870,7 +887,9 @@
     if (r.text) inner += '<div class="prose">' + prose(r.text) + "</div>";
     var list = (r.chips || []).slice();
     approvalChips(r.approval).forEach(function (c) { list.push(c); });
-    if (list.length) inner += (compact ? "" : '<div class="h4" style="max-width:680px">What came of it</div>') + chips(list);
+    // #9 of the build 0.9 pins: on a wide screen, what came of it (effects,
+    // officers' approval) sits beside the text instead of under it.
+    if (list.length) inner = '<div class="rcols"><div class="rmain">' + inner + '</div><div class="rside">' + (compact ? "" : '<div class="h4" style="max-width:680px">What came of it</div>') + chips(list) + "</div></div>";
     html += OUTCOME[r.outcome] ? rbox(r.outcome, inner, key) : '<div data-result="' + esc(key) + '">' + inner + "</div>";
     return html + (compact ? DIVIDER : "");
   }
@@ -2080,10 +2099,11 @@
     } else if (H.phase === "scout" || H.phase === "hunter") {
       var sv = H.scout;
       html += '<p class="sc" style="margin:8px 0 4px">' + (sv.ships.length > 1 ? (sv.shape === "convoy" ? "A convoy of " + sv.ships.length : "A merchant under escort") : "A sail") + " · " + caWord(sv.ca) + "</p>";
-      html += sv.ships.map(function (s) { return scoutCard(s, H); }).join("");
+      // #9: the Quartermaster's advice sits beside the scouting card on a wide screen.
+      html += '<div class="beside"><div class="bmain">' + sv.ships.map(function (s) { return scoutCard(s, H); }).join("") + "</div>" +
+        '<div class="bside2">' + qmSays(H.advice, H) + "</div></div>";
       var war = sv.ships.some(function (s) { return s.warship; });
       if (war && sv.ca < 2 && !sv.hunter) html += '<p class="notice warn">☠ A warship at these odds will tear a ship your size apart. Let her go unless you mean it.</p>';
-      html += qmSays(H.advice, H);
       html += sv.hunter ? '<div class="actions"><button class="primary" data-act="hhunter">Face her</button></div>' :
         '<div class="actions"><button class="primary" data-act="hengage">Engage</button><button class="secondary" data-act="hnext">Let her pass</button>' + home + "</div>";
     } else if (H.phase === "vote") {
@@ -2888,7 +2908,7 @@
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", esc(foodWords()) + " · " + esc(seaTime(PC.crew.food(state)))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
-      meters(true) + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+      meters(true) + alliesBlock() + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
