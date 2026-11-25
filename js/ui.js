@@ -201,25 +201,28 @@
   }
 
   // Where the screen lands after an action: ONE rule, built once and used
-  // by every screen (Playtest Pins (Build 0.9), PR B: items 8-10, 23, 40, 44,
-  // 48). To be refined in play.
-  //  1. Entering something new (a location, a scene, a battle, a minigame,
-  //     a creator step; a button marked data-top, the end of a scene) goes to
-  //     the top, woodcut included. A screen can name a better landing spot
-  //     with data-land (the hunt's "Ocracoke · Hunting…" line on a new
-  //     sighting, the two ships' header in battle and on each new round, the
-  //     after-battle report): the last one on the screen wins.
-  //  2. Any other choice scrolls so the FIRST NEW LINE sits just under the
-  //     sticky bar. If nothing new appears, the screen stays put.
-  //  3. Menus: opening or closing one leaves the page where it was; inside a
+  // by every screen (Playtest Pins (Build 0.9), PR B; clarified after the
+  // scrolling playtest, November 24).
+  //  1. The story keeps its place. Inside a place and its scenes (a choice,
+  //     a result, Continue, one scene leading into the next, a scene opened
+  //     from a place's menu, back to the place's menu), the screen puts the
+  //     FIRST NEW LINE OF TEXT just under the sticky bar. The heading, the
+  //     "where" line and the woodcut never count as new. If nothing new
+  //     appears, the screen stays exactly where it is.
+  //  2. Only a real change of scene setting jumps: walking into a place from
+  //     the town menu, arriving at a port, starting a hunt or a minigame, a
+  //     creator step. Those go to the top, or to the screen's landing spot
+  //     (data-land): the hunt's "Hunting…" line on a new sighting, the two
+  //     ships' header when a battle opens and on each new round, the
+  //     after-battle report. The last spot on the screen wins.
+  //  3. Back to the town menu returns to where the town menu was left.
+  //  4. Menus: opening or closing one leaves the page where it was; inside a
   //     menu, a new line scrolls into view within the menu.
-  //  4. Back to the town menu returns to where the town menu was left (G2,
-  //     kept from the M5 playtest).
   var townScroll = 0;
 
-  // What counts as "something new": the screen, the scene, the place, the
-  // minigame, and inside a hunt the sighting, the battle round and the
-  // after-battle step. A scene's own choice-and-result is NOT new.
+  // What counts as a change of setting (rule 2). Scenes, voyage events and a
+  // place's own menu are all "the story" at that port, so moving between
+  // them is not a jump.
   function landKey() {
     if (prologue) return "prologue";
     if (!state) return creating ? "creator|" + stepIndex : "title";
@@ -229,7 +232,9 @@
       sub = [g.phase === "battle" || g.phase === "after" ? g.phase : "look", g.batch ? g.batch.n + "." + g.batch.next : "", g.battle ? g.battle.round : "",
         a ? (a.repairDone ? 1 : 0) + ":" + (a.current ? a.current.id || "prize" : "") + ":" + (a.queue ? a.queue.length : "") : ""].join(",");
     }
-    return [c.screen, c.screen === "scene" ? c.sceneId : "", c.screen === "node" ? l.place : "", g ? g.kind : "", sub].join("|");
+    var story = c.screen === "scene" || c.screen === "event" || (c.screen === "node" && l.place);
+    var where = story ? "story" : c.screen === "node" ? "town" : c.screen;
+    return [where, l.node || "", g ? g.kind : "", sub].join("|");
   }
 
   // The lines on the screen, for spotting the first new one. Leaf blocks
@@ -239,7 +244,10 @@
     if (!scope) return [];
     // Buttons and choices aren't "lines": the choice you just picked comes
     // back as a line of text, and that line is new.
-    return Array.prototype.filter.call(scope.querySelectorAll(LINE_SEL), function (el) { return !el.querySelector(LINE_SEL) && !el.closest("button, .choice, .choices, .opts, .actions"); });
+    // The heading, the "where" line and the woodcut are the frame, not news.
+    return Array.prototype.filter.call(scope.querySelectorAll(LINE_SEL), function (el) {
+      return !el.querySelector(LINE_SEL) && !el.closest("button, .choice, .choices, .opts, .actions, [data-anchor], .banner, .plate") && !el.matches(".where, h2.title");
+    });
   }
   function lineText(el) { return (el.textContent || "").replace(/\s+/g, " ").trim(); }
   function snapLines(scope) {
@@ -269,12 +277,30 @@
     var modal = a.closest(".modal");
     if (modal) { modal.scrollTop += a.getBoundingClientRect().top - modal.getBoundingClientRect().top - 16; return; }
     var y = a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset();
-    // Never above the woodcut in the middle of a scene (#9).
-    var wood = root.querySelector('.stage [data-anchor="scene"]');
-    if (wood) y = Math.max(y, wood.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset());
+    // The line just above never peeks out under the bar (its y's and g's):
+    // land at least far enough down to hide it completely.
+    var bar = stickyOffset() - 8, prev = lineAbove(a);
+    if (prev) y = Math.max(y, prev.getBoundingClientRect().bottom + (globalThis.scrollY || 0) - bar + 12); // +12: a woodcut's frame shadow reaches past its box
+    y = Math.min(y, a.getBoundingClientRect().top + (globalThis.scrollY || 0) - bar); // never past the new line itself
+    // A short page can't scroll far enough to bring the new line up: add
+    // room at the bottom of the page so it can (gone at the next redraw).
+    var doc = document.documentElement, short = y - (doc.scrollHeight - (globalThis.innerHeight || 0));
+    var stage = root.querySelector(".stage");
+    if (short > 0 && stage) { var pad = document.createElement("div"); pad.className = "landpad"; pad.style.height = Math.ceil(short) + "px"; stage.appendChild(pad); }
     scrollToY(y);
   }
   function scrollTop() { scrollToY(0); }
+  // The nearest line of text (or the woodcut) that ends above an element.
+  function lineAbove(a) {
+    var stage = root.querySelector(".stage"), top = a.getBoundingClientRect().top, best = null, bb = -Infinity;
+    if (!stage) return null;
+    stage.querySelectorAll(LINE_SEL + ", .ribbon, [data-anchor], .banner, .plate, .choice").forEach(function (x) {
+      if (x === a || x.contains(a) || a.contains(x)) return;
+      var r = x.getBoundingClientRect();
+      if (r.height && r.bottom <= top + 1 && r.bottom > bb) { bb = r.bottom; best = x; }
+    });
+    return best;
+  }
 
   function land(snap, el) {
     var modal = root.querySelector(".modal:not(.popup)");
@@ -287,16 +313,30 @@
       if (mNew) scrollToAnchor(mNew);
       return;
     }
-    // 1. Something new.
-    if ((el && el.dataset && el.dataset.top) || landKey() !== snap.land) {
+    // 2 and 3. A change of setting.
+    if (landKey() !== snap.land) {
       var placeNow = state && state.current && state.current.screen === "node" && state.location ? state.location.place : undefined;
-      if (state && state.current && state.current.screen === "node" && !placeNow && snap.place) return scrollToY(townScroll); // 4.
+      if (state && state.current && state.current.screen === "node" && !placeNow && snap.place !== undefined) return scrollToY(townScroll);
       var spots = root.querySelectorAll(".stage [data-land]");
       return spots.length ? scrollToAnchor(spots[spots.length - 1]) : scrollTop();
     }
-    // 2. The first new line, or stay put.
+    // 1. The story: the first new line of text, or stay put.
     var fresh = firstNewLine(root.querySelector(".stage"), snap.lines);
-    if (fresh) scrollToAnchor(fresh);
+    if (fresh) scrollToAnchor(withHeader(fresh));
+  }
+
+  // When the new text opens a scene step, its header comes with it: the
+  // quest ribbon and the scene's title ("Restless & Ruined · The Docks")
+  // sit just above it (the author's scrolling playtest, November 24).
+  function withHeader(el) {
+    var main = el.closest(".scene-main");
+    if (!main) return el;
+    var title = main.querySelector("h2.title");
+    if (!title || !(title.compareDocumentPosition(el) & 4)) return el; // the title comes before it
+    // Only the header and the woodcut stand between the title and the new text.
+    var before = lineEls(main).filter(function (x) { return x !== el && (x.compareDocumentPosition(el) & 4) && (title.compareDocumentPosition(x) & 4); });
+    if (before.length) return el;
+    return main.querySelector(".ribbon") || title;
   }
 
   function act(fn) {
@@ -1760,7 +1800,42 @@
     chase: "The chase", show: "A show of force", position: "Position", strikeFirst: "Strike First", endure: "Hold on", drink: "Drink", strong: "The strong stuff", vote: "The vote" };
   // The latest move's lines, in the roll's color-coded box when a roll made
   // them (G4); the screen scrolls here (G1).
+  // Battle text drops its PLACEHOLDER marks (#28 of the build 0.9 pins): the
+  // author flags lines that don't work instead.
+  function noPh(t) { return String(t || "").replace(/^PLACEHOLDER:\s*/, "").replace(/\[PLACEHOLDER\]\s*/g, ""); }
+
+  // The hunt's result box (#24, #29, #30, #31): each line of text with the
+  // check it came from beside it ("You fire your pistol, but the shot goes
+  // wide. · ◆ Partial Marksmanship"); no header over the box and no roll list
+  // under it; a big banner when she strikes.
+  function huntLatest(lines, v) {
+    var from = Math.min(mgMark, lines.length);
+    var rs = (v.rollList || []).filter(function (r) { return r.logAt >= from && r.logAt <= lines.length; });
+    var lr = v.lastRoll && v.lastRoll.logAt >= from && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
+    var wb = v.winBanner && v.winBanner.at >= from && v.winBanner.at < lines.length ? v.winBanner : null;
+    var hasLine = false;
+    for (var k = from; k < lines.length; k++) if (lines[k]) hasLine = true;
+    if (!hasLine && !rs.length && !lr && !wb) return "";
+    var tag = function (r) {
+      var o = OUTCOME[r.outcome];
+      return ' <span class="rtag ' + (o ? o[1] : "t-mid") + '">· ' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + " " + esc(OP_NAME[r.op] || r.label) + "</span>";
+    };
+    var byAt = {};
+    rs.forEach(function (r) { (byAt[r.logAt] = byAt[r.logAt] || []).push(r); });
+    var out = wb ? '<div class="winbanner">' + esc(PC.data.huntLines.winBanner[wb.how] || "She's yours!") + "</div>" : "";
+    for (var i = from; i <= lines.length; i++) {
+      var here = byAt[i] || [], line = i < lines.length ? lines[i] : null;
+      if (wb && i === wb.at) { line = null; } // the banner says it
+      if (line) out += "<p>" + inline(noPh(line)) + here.map(tag).join("") + "</p>";
+      else here.forEach(function (r) { out += '<p class="small">' + esc((OP_NAME[r.op] || r.label) + (r.effect ? ": " + r.effect : "")) + tag(r) + "</p>"; });
+    }
+    if (lr && lr.chips && lr.chips.length) out += chips(lr.chips);
+    var key = "mg:hunt:" + lines.length + ":" + (lr ? lr.seq : 0);
+    return rbox(wb ? "clean" : lr ? lr.outcome : null, out, key, "mglatest" + (wb ? " won" : ""));
+  }
+
   function mgLatest(lines, v) {
+    if (v && v.kind === "hunt") return huntLatest(lines, v);
     var fresh = lines.slice(Math.min(mgMark, lines.length)).filter(function (l) { return l; });
     var lr = v && v.lastRoll && v.lastRoll.logAt >= mgMark && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
     if (!fresh.length && !lr) return "";
@@ -1782,9 +1857,9 @@
         "<b>" + esc(OP_NAME[r.op] || r.label) + "</b>" + (r.effect ? ": " + esc(r.effect) : "") + "</li>";
     }).join("") + "</ul>";
   }
-  function mgLog(lines) {
+  function mgLog(lines, hunt) {
     var old = lines.slice(0, Math.min(mgMark, lines.length)).slice(-6);
-    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>" : "";
+    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(hunt ? noPh(l) : l) : "<hr>"; }).join("") + "</div>" : "";
   }
 
   function gpips(n, max, cls) {
@@ -1934,9 +2009,9 @@
   var CA_INK = { "3": "t-good", "2": "t-good", "1": "t-good", "0": "t-mid", "-1": "t-bad", "-2": "t-bad", "-3": "t-bad", "-4": "t-bad" };
   function caWord(b) { return '<span class="tier ' + (CA_INK[String(b)] || "t-mid") + '">' + shape(CA_INK[String(b)] || "t-mid") + esc(PC.combat.caName(b)) + "</span>"; }
 
-  function shipArtHtml(cls, faded) {
+  function shipArtHtml(cls, faded, scale) {
     var art = PC.data.shipArt(cls), c = PC.data.hunt.CLASSES[cls] || { size: 1 };
-    var w = 70 + c.size * 26;
+    var w = Math.round((70 + c.size * 26) * (scale || 1));
     return art ? '<img class="shipart" src="' + assetUrl(art) + '" alt="' + esc(cls) + '" style="width:' + w + "px" + (faded ? ";opacity:.4" : "") + '">' : "";
   }
 
@@ -1949,7 +2024,7 @@
   function qmSays(line, v) {
     if (!line) return "";
     var who = v.qm || "Your Quartermaster";
-    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(PC.text.render(line, state)) + "</div>";
+    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(noPh(PC.text.render(line, state))) + "</div>";
   }
 
   function huntStatus(v) {
@@ -1993,7 +2068,7 @@
     // After the battle, each step lands on its report (#48).
     if (H.phase === "after") html += '<div data-land="after"></div>';
     html += mgLatest(v.log, v);
-    if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending) + (H.phase === "battle" ? "" : mgLog(v.log, true));
     var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
     if (H.phase === "encounterEnd") {
       html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
@@ -2021,7 +2096,8 @@
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
-    return html + mgLog(v.log);
+    // The log hides during a battle and comes back after it (#25).
+    return html + (H.phase === "battle" ? "" : mgLog(v.log, true));
   }
 
   // ---- Voyage events (§44): the card at sea, or in port as you leave ----
@@ -2113,7 +2189,9 @@
   function shipRow(s, enemy, target) {
     var hp = s.hullMax ? Math.max(0, Math.round(100 * s.hull / s.hullMax)) : 0;
     var outWord = { struck: "struck", captured: "taken", sunk: "sunk", escaped: "escaped", taken: "taken", left: "left behind" }[s.out] || "";
-    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + '">' + shipArtHtml(s.cls, !!s.out) +
+    // Prize ships don't fight (§21.8), so they're drawn smaller (#39).
+    var prize = !enemy && s.kind === "prize";
+    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + (prize ? " prizeship" : "") + '">' + shipArtHtml(s.cls, !!s.out, prize ? 0.55 : 1) +
       '<div>' + (enemy ? flagTag(s.flag, s.role) + " " : "") + '<b>' + dirtyName(s.name ? s.name : "A " + s.cls, enemy && s.flag && s.flag !== "Pirate") + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
       (outWord ? ' <span class="badge-out">' + esc(outWord) + "</span>" : "") +
       '<div class="hbar" style="height:9px;max-width:200px;margin:3px 0"><i style="width:' + hp + "%;background:" + (hp < 50 ? "#8f2a1c" : "#5e4528") + '"></i></div>' +
@@ -2128,6 +2206,13 @@
       '<div class="bside"><div class="h4">Theirs' + (b.enemies[0] ? " · " + flagTag(b.enemies[0].flag, b.enemies[0].role) : "") + '</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
     if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
+  }
+
+  // Battle decisions (#26 of the build 0.9 pins): the choices sit side by
+  // side as strong buttons, one row (four make a 2×2), wrapping on a phone.
+  function bopts(list) {
+    list = list.filter(Boolean);
+    return '<div class="bchoices n' + list.length + '">' + opts(list) + "</div>";
   }
 
   function battlePanel(b, H) {
@@ -2151,22 +2236,22 @@
           '<div class="actions">' + B("engage", null, "Close and call on her to strike", "primary") + "</div>";
         break;
       case "showOfForce":
-        html += opts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
+        html += bopts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
         break;
       case "hunterChoice":
-        html += qmSays(A.hunter, H) + opts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
+        html += qmSays(A.hunter, H) + bopts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
           O("hunterChoice", "flee", "Run for it", chk({ type: "Outrun", dr: en ? 3 : 3 }), "Morale −15. Clean: escaped. Partial: escaped with a parting hit. Setback: she catches you, +1 to her Position.")]);
         break;
       case "chase": case "press":
         var fleeing = b.chaseMode === "flee";
         html += b.step === "press" ? '<p>She\'s pulling away. You\'re faster: you can keep after her, giving up your next sighting this action.</p>' + '<div class="actions">' + B("press", "yes", "Press the chase", "primary") + B("press", "no", "Let her go") + "</div>" :
-          opts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
+          bopts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
         break;
       case "position":
-        html += opts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
+        html += bopts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
         break;
       case "posChoice":
-        html += '<p class="sc">You have the position. What now?</p>' + opts([
+        html += '<p class="sc">You have the position. What now?</p>' + bopts([
           O("choosePosition", "rake", "Rake her", null, "+2 on this round's Exchange."),
           O("choosePosition", "close", "Close for boarding", chk(b.grappleCheck), "Skip the Exchange: the grapple rolls at once, +1."),
           O("choosePosition", "open", "Open the range", null, "Your next attempt to flee needs no roll.")]);
@@ -2175,33 +2260,34 @@
         var ex = b.exchange, rc = rawCheck("Exchange", ex.edge, ex.parts);
         var shots = [["round", "Round shot", "Full damage. Sink or cripple her."], ["chain", "Chain shot", "Half damage; a heavy hit costs her 1 Speed. Stops a runner."], ["grape", "Grapeshot", "Quarter damage, double crew losses. Thins her crew before boarding and keeps the prize whole."]];
         if (b.gunnersEye) { shots.push(["rigging", "Called shot: her rigging", "Gunner's Eye. Half damage; a heavy hit costs her 1 Speed."]); shots.push(["rudder", "Called shot: her rudder", "Gunner's Eye. Half damage; a heavy hit costs her −1 on her next Position."]); }
-        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + opts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
+        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + bopts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
         html += qmSays(me && en && me.crew >= 0.75 * en.crew ? A.grape : en && en.speed >= me.speed ? A.chain : A.fire, H);
         break;
       case "decision":
         var hurt = me.hull < 0.6 * me.hullMax;
-        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + opts([
+        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + bopts([
           O("decide", "fire", "Fire again", null, "A new round, starting with Position."),
           O("decide", "board", "Board her", chk(b.grappleCheck), "The grapple rolls at once. Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples. Then up to three clashes."),
-          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun.")),
-          O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]);
+          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun."))]) +
+          // Strike your colors sits apart, smaller and muted: it ends the game (#26).
+          '<div class="bstrike">' + opts([O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]) + "</div>";
         break;
       case "grapple":
-        html += opts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
+        html += bopts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
         break;
       case "repel":
-        html += '<p class="notice">She\'s coming alongside to board you.</p>' + opts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
+        html += '<p class="notice">She\'s coming alongside to board you.</p>' + bopts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
         break;
       case "clash":
         var bd = b.board || {};
         html += '<p class="sc" style="margin:4px 0">' + (bd.meBoarding ? "On her deck" : "On your deck") + " · clash " + (bd.clash + 1) + " of 3" + (bd.sf && bd.clash === 0 ? " · " + esc(PC.data.huntLines.strikeFirst[bd.sf]) : "") + "</p>" +
-          opts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
+          bopts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
         break;
       case "retarget":
         html += '<p class="sc">Your target is out of the fight. Who next?</p><div class="actions">' + b.enemies.filter(function (e) { return !e.out; }).map(function (e) { return B("retarget", e.id, esc(e.name || e.cls)); }).join("") + "</div>";
         break;
       case "endure":
-        html += opts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
+        html += bopts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
         break;
     }
     if (state.settings.showDice && b.lastExchange) html += '<div class="dice">Last Exchange: dice ' + b.lastExchange.dice.join(" + ") + ", edge " + signed(b.lastExchange.edge) + " · " + b.lastExchange.outcome + "</div>";
