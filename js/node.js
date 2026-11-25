@@ -1188,9 +1188,11 @@
       lines.push("PLACEHOLDER: You set " + state.captives + " captive" + (state.captives === 1 ? "" : "s") + " ashore, free. Their thanks come with " + reward + " gold.");
       state.captives = 0;
     }
-    // Holdings come in M9; the trade ship's earnings are collected here (§27.7).
+    // The trade ship's earnings (§27.7) and the holdings' ledger (§27.5) are collected here.
     var ledger = PC.world ? PC.world.collectLedger(state, id) : null;
     if (ledger) lines.push("PLACEHOLDER: The Trade Master hands over your trade ship's earnings: " + ledger + " gold, into your purse.");
+    var hl = PC.holdings ? PC.holdings.collect(state, id) : null;
+    if (hl) lines.push(hl);
     if (firstScene) {
       state.location.queue = (state.location.queue || []).concat([firstScene]);
       var fall = pre.concat(lines);

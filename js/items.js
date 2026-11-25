@@ -67,7 +67,7 @@
       if (!d) add(n);                                // quest pieces work while carried
       else if (d.brace) add(n);                      // the Pistol Brace, from inventory
     });
-    if (state) cabin(state).forEach(add);
+    if (state) { cabin(state).forEach(add); if (PC.holdings) PC.holdings.displays(state).forEach(add); } // the cabin and homes (§32.6)
     return out;
   }
 
@@ -246,7 +246,7 @@
     return c;
   }
   // Held anywhere: carried, worn or in the cabin (a relic is one of each, §32.1).
-  function held(state, name) { return owns(state.captain, name) || cabin(state).indexOf(name) >= 0 || ((state.ship && state.ship.cabin) || []).indexOf(name) >= 0; }
+  function held(state, name) { return owns(state.captain, name) || cabin(state).indexOf(name) >= 0 || ((state.ship && state.ship.cabin) || []).indexOf(name) >= 0 || (PC.holdings ? PC.holdings.displays(state).indexOf(name) >= 0 : false); }
 
   // ---- What the worn items do ------------------------------------------------
 

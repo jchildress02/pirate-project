@@ -278,7 +278,7 @@
     if (s.rumorsAsked) return { line: L.outOfRumors, rumors: [], again: true };
     s.rumorsAsked = true;
     var weights = PC.node.nodeData(node).rumorWeights;
-    var n = Math.max(1, 1 + sl);
+    var n = Math.max(1, 1 + sl) + (PC.holdings ? PC.holdings.rumorBonus(state, node) : 0); // a tavern share's free rumor (§27.5)
     var key = [state.world.seed, stamp(state), node, "keeper-rumor"].join("|");
     var out = [];
     for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix(state) }); if (r) out.push(r); }
