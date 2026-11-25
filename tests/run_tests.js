@@ -4046,6 +4046,51 @@ test("#31: the first ship to strike in a battle raises the win banner, one a bat
   ok(PC.data.huntLines.winBanner.struck === "She strikes her colors!");
 });
 
+
+// ---- Post-M8 playtest, PR D: compact boxes and the rest ----
+console.log("Post-M8 playtest, PR D: compact boxes and the rest");
+
+test("#46: Replace a prize ship: the old prize's crew move across, she's let go, the new one is the prize", function () {
+  var s = huntReady("rp"); s.crew.count = 40; s.crew.tiers = { Green: 10, Able: 20, Seasoned: 10, Veteran: 0 }; s.ship.crewMax = 60;
+  var first = aShip(s, "Sloop", "Trade", "Pirate"), g = huntWith(s, { ships: [first], shape: "single", hunter: false });
+  withDice([6, 6], function () { PC.hunt.engage(s, g); });
+  PC.hunt.settlePrize(s, g, { hull: "prize", crew: "release", captives: "free" });
+  var old = s.fleet.filter(function (f) { return f.kind === "prize"; })[0]; ok(old, "a prize ship");
+  var crewAll = s.crew.count + old.crew;
+  var second = aShip(s, "Brig", "Trade", "Pirate"); second.id = "brig2";
+  var g2 = huntWith(s, { ships: [second], shape: "single", hunter: false });
+  withDice([6, 6], function () { PC.hunt.engage(s, g2); });
+  var opt = PC.hunt.hullOptions(s, g2).filter(function (o) { return o.id === "replace"; })[0];
+  ok(opt && !opt.lock, "offered: " + (opt && opt.lock));
+  PC.hunt.settlePrize(s, g2, { hull: "replace", replace: old.id, oldFate: "scuttle", crew: "release", captives: "free" });
+  var prizes = s.fleet.filter(function (f) { return f.kind === "prize"; });
+  eq(prizes.length, 1); eq(prizes[0].cls, "Brig");
+  ok(prizes[0].crew >= prizes[0].crewMin, "she has her prize crew");
+  eq(s.crew.count + prizes[0].crew, crewAll, "nobody lost in the swap");
+});
+
+test("#45: repairs at sea restore 40% (partial 20%), 50% / 25% with a Carpenter", function () {
+  eq(PC.data.hunt.REPAIR_AT_SEA.clean, 0.4); eq(PC.data.hunt.REPAIR_AT_SEA.partial, 0.2);
+  eq(PC.data.hunt.REPAIR_AT_SEA_CARPENTER.clean, 0.5); eq(PC.data.hunt.REPAIR_AT_SEA_CARPENTER.partial, 0.25);
+});
+
+test("#5: the Cook is the Surgeon; an old save's Cook becomes a Surgeon", function () {
+  ok(PC.data.creator.OFFICER_TYPES.some(function (t) { return t.id === "Surgeon"; }));
+  ok(!PC.data.creator.OFFICER_TYPES.some(function (t) { return t.id === "Cook"; }));
+  var s = m7("cook"); var o = s.officers[0]; var keep = o.type;
+  var old = JSON.parse(PC.state.serialize(s)); old.officers[0].type = "Cook"; old.saveVersion = 12;
+  eq(PC.state.deserialize(JSON.stringify(old)).officers[0].type, "Surgeon");
+});
+
+test("#49: an empty horizon on the batch's last roll goes straight to the batch's end", function () {
+  var s = m7("e49"), g = PC.hunt.start(s);
+  if (g.phase === "batchEnd") return;
+  var real = PC.huntGen.density; PC.huntGen.density = function () { return -1; };
+  try { var guard = 0; g.batch.found = 1; while (g.phase === "empty" && guard++ < 10) PC.hunt.next(s, g); } finally { PC.huntGen.density = real; }
+  ok(g.phase === "batchEnd" || g.phase === "scout" || g.phase === "hunter", "never an empty screen after the last roll: " + g.phase);
+  ok(g.phase !== "empty");
+});
+
 test("the build label reads Build 0.9 · Milestone 8", function () {
   var src = require("fs").readFileSync(require("path").join(__dirname, "..", "js", "ui.js"), "utf8");
   ok(/Build 0\.9 · Milestone 8/.test(src));

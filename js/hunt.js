@@ -413,6 +413,19 @@
     out.push({ id: "fleet", label: "Make her a fleet ship", note: "An officer captains her and she fights beside you.", lock: lockFleet, officers: freeOfficers.map(function (o) { return { id: o.id, name: o.first + " " + (o.last || ""), type: o.type }; }) });
     var lockFlag = e.hull <= 0 ? "She's sinking" : state.crew.count < e.crewMin + (state.ship.crewMin || 5) ? "Not enough hands to crew both" : null;
     out.push({ id: "flagship", label: "Make her your new flagship", note: "Your " + state.ship.type + " becomes a prize ship.", lock: lockFlag });
+    // #46 of the build 0.9 pins: swap one of your prize ships for this better capture.
+    var olds = fleet(state).filter(function (f) { return f.kind === "prize" && !f.out; });
+    if (olds.length) {
+      var lockSwap = e.hull <= 0 ? "She's sinking" : null;
+      var choices = olds.map(function (f) {
+        var short = Math.max(0, e.crewMin - (f.crew || 0));
+        var cap0 = PC.crew.holdCapacity(state), over = Math.max(0, PC.crew.slotsUsed(state) - (cap0 - (f.cargo || 0) + (e.cargo || 0)));
+        return { id: f.id, name: (f.name ? f.name + " (" + f.cls + ")" : f.cls), crew: f.crew || 0, cargo: f.cargo || 0, short: short, over: over,
+          lock: short > spare ? "Not enough hands: she needs " + e.crewMin + ", the " + (f.name || f.cls) + " has " + (f.crew || 0) : null };
+      });
+      if (!lockSwap && choices.every(function (c) { return c.lock; })) lockSwap = choices[0].lock;
+      out.push({ id: "replace", label: "Replace a prize ship", note: "Her prize crew move across to this one, and her cargo joins the hold. Then you let the old prize go, or scuttle her.", lock: lockSwap, olds: choices });
+    }
     out.push({ id: "release", label: "Take what you can and let her go", note: "Her surviving crew sail her home." });
     out.push({ id: "scuttle", label: "Scuttle her", note: "Denies her to her owners. No value." });
     return out;
@@ -465,7 +478,12 @@
     meterChips(state, e, crewChoice === "execute").forEach(function (c) { chips.push(c); });
     // The hull.
     var shipRec = null;
-    if (ch.hull === "prize" || ch.hull === "fleet") {
+    if (ch.hull === "replace") {
+      var sw = replacePrize(state, e, ch.replace, ch.oldFate);
+      shipRec = sw.rec;
+      chips.push({ icon: "ship", text: "Prize ship: " + (e.name || e.cls) + " in place of the " + sw.oldName + (sw.oldFate === "scuttle" ? " (scuttled)" : " (let go)") });
+      if (sw.thrown.length) chips.push({ icon: "cond", text: "Over the side, for want of room: " + sw.thrown.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions" : x.what); }).join(", "), ink: "bad" });
+    } else if (ch.hull === "prize" || ch.hull === "fleet") {
       shipRec = toFleet(state, e, ch.hull, ch.officer);
       chips.push({ icon: "ship", text: (ch.hull === "prize" ? "Prize ship: " : "Fleet ship: ") + (e.name || e.cls) });
     } else if (ch.hull === "flagship") {
@@ -607,6 +625,35 @@
     }
     fleet(state).push(rec);
     return rec;
+  }
+
+  // Replace a prize ship with this capture (#46): the old prize's crew move
+  // across (topped up from the flagship if she needs more, the extra back to
+  // the flagship's berths), her cargo stays in the pooled hold (what no
+  // longer fits goes over the side), and the old prize is let go or scuttled.
+  function replacePrize(state, e, oldId, oldFate) {
+    var old = fleet(state).filter(function (f) { return f.id === oldId && f.kind === "prize"; })[0];
+    if (!old) throw new Error("Pick the prize ship she replaces.");
+    var tiers = {}, n = 0;
+    Object.keys(old.crewTiers || { Green: old.crew }).forEach(function (t) { var k = (old.crewTiers || { Green: old.crew })[t] || 0; if (k) { tiers[t] = k; n += k; } });
+    state.fleet = fleet(state).filter(function (f) { return f !== old; });
+    if (n < e.crewMin) {
+      var more = takeHands(state, e.crewMin - n);
+      Object.keys(more).forEach(function (t) { tiers[t] = (tiers[t] || 0) + more[t]; n += more[t]; });
+    }
+    var extra = Math.max(0, n - (e.crewMax || n));
+    PC.data.economy.TIER_ORDER.slice().reverse().forEach(function (t) {
+      if (!extra || !tiers[t]) return;
+      var k = Math.min(extra, tiers[t], PC.crew.berths(state));
+      if (k) { tiers[t] -= k; n -= k; extra -= k; PC.crew.addHands(state, t, k); }
+    });
+    var rec = { id: e.id, kind: "prize", cls: e.cls, name: e.name, flag: e.flag, role: e.role, size: e.size, hull: Math.max(1, e.hull), hullMax: e.hullMax,
+      guns: e.guns, gunsMax: e.gunsMax, crew: n, crewMin: e.crewMin, crewMax: e.crewMax, cargo: e.cargo, speed: e.speed,
+      handling: e.handling, rating: 3, dirty: !PC.letters.legitimate(state, e.flag), crewTiers: tiers, wounded: 0 };
+    fleet(state).push(rec);
+    var thrown = PC.crew.jettisonOverflow(state);
+    PC.state.addLog(state, (oldFate === "scuttle" ? "Scuttled" : "Let go") + " the prize " + (old.name || old.cls) + " for the " + (e.name || e.cls) + ".");
+    return { rec: rec, oldName: old.name || old.cls, oldFate: oldFate === "scuttle" ? "scuttle" : "release", thrown: thrown };
   }
 
   // Make a captured ship the flagship (0 AP, §22.7). The old flagship
@@ -840,6 +887,7 @@
       volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), hullOptions: hullOptions(state, game).map(function (o) {
         // Keeping her hull adds her hold to the pool before her cargo comes across (A7).
         o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
+        if (o.id === "replace" && !o.lock && o.olds && o.olds[0]) o.addsHold = (e.cargo || 0) - o.olds[0].cargo; // with the first old prize picked
         return o;
       }),
       dirty: !PC.letters.legitimate(state, e.flag),

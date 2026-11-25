@@ -671,3 +671,7 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .bchoices .choice .row { flex-wrap: wrap; }
 .bchoices .choice .oddsbtn { padding: 0 14px 8px; }
 .rtag svg { width: 11px; height: 11px; margin: 0 3px 0 4px; vertical-align: -1px; fill: currentColor; }
+/* #41: provisions before Keep hunting / Head home. */
+.foodline { max-width: 680px; margin: 4px 0 2px; padding: 6px 12px; border-left: 3px solid #8a6414; background: rgba(201,159,69,.12); font-size: 16.5px; }
+.foodline.low { border-left-color: #b0661a; background: rgba(176,102,26,.12); }
+.foodline.short { border-left-color: #8f2a1c; background: rgba(143,42,28,.10); }
