@@ -2075,7 +2075,7 @@
     if (H.phase === "encounterEnd") {
       html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
     } else if (H.phase === "empty") {
-      html += '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
+      html += foodAtSea() + '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
     } else if (H.phase === "scout" || H.phase === "hunter") {
       var sv = H.scout;
       html += '<p class="sc" style="margin:8px 0 4px">' + (sv.ships.length > 1 ? (sv.shape === "convoy" ? "A convoy of " + sv.ships.length : "A merchant under escort") : "A sail") + " · " + caWord(sv.ca) + "</p>";
@@ -2094,7 +2094,7 @@
     } else if (H.phase === "batchEnd") {
       // Read Weather rolls itself (#38): only the next batch's weather shows.
       if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + (H.readAhead.rerolled ? ' <span class="note">(you wait out a storm)</span>' : "") + "</p>";
-      html += '<p>The horizon is empty for now.</p><div class="actions">' +
+      html += '<p>The horizon is empty for now.</p>' + foodAtSea() + '<div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
@@ -2154,6 +2154,16 @@
   }
 
   // Sail on from the hunting grounds to another live place (§22.1).
+  // #41 of the build 0.9 pins: before Keep hunting or Head home, what's
+  // aboard to eat and what another action at sea will cost.
+  function foodAtSea() {
+    var heads = PC.world.headsAtSea(state), per = Math.ceil(heads / 5 * (PC.state.seasonName(state) === "Winter" ? 1.5 : 1));
+    var food = PC.crew.food(state), left = Math.floor(food / Math.max(1, per));
+    return '<div class="foodline' + (food < per ? " short" : left <= 1 ? " low" : "") + '"><b>Provisions ' + food + "</b> aboard · each action at sea eats about <b>" + per + "</b>" +
+      (PC.state.seasonName(state) === "Winter" ? " (Winter)" : "") + " · enough for <b>" + (left === 1 ? "1 more action" : left + " more actions") + "</b>" +
+      (food < per ? " · <b>not enough for another action: the crew go hungry</b>" : "") + "</div>";
+  }
+
   function sailOnButtons() {
     var g = state.minigame;
     if (!g || g.kind !== "hunt") return "";
@@ -2337,7 +2347,9 @@
         var id = "pk-" + i;
         pickRows.push({ id: id, what: r.what });
         return "<tr><td>" + dirtyName(r.label, p.dirty && r.what !== "provisions") + (r.what === "treasure" ? ' <span class="note">(five to a slot)</span>' : "") + "</td><td>" + r.have + "</td><td>" + qstep(id, r.def, r.have, 0, true) + "</td></tr>";
-      }).join("") + "</table>";
+      }).join("") + "</table>" +
+        // #35: everything she carries in one tap (what won't fit stays in her hold, and the bar says so).
+        (rows.length > 1 ? '<div class="actions" style="margin:4px 0 6px"><button type="button" class="secondary maxbtn" data-takeall="' + rows.map(function (r, i) { return "pk-" + i; }).join(" ") + '">Take all</button></div>' : "");
       html += totalSlot(function () { return pickBar(p); }, "") + (p.dirty ? '<p class="note" style="margin:2px 0 6px">' + dirtyName("Dirty", true) + ": no letter covers her, so only a fence will buy her cargo.</p>" : "");
     } else html += '<p class="small">Nothing in her hold worth taking.</p>';
     var radio = function (name, val, label, note, lock, on) {
@@ -2346,6 +2358,11 @@
     };
     html += '<div class="h4">Her hull</div>' + p.hullOptions.map(function (o) {
       var off = o.id === "fleet" && !o.lock && o.officers.length ? ' <select class="hofficer">' + o.officers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name + " (" + x.type + ")") + "</option>"; }).join("") + "</select>" : "";
+      // #46: which prize she replaces, and what becomes of the old one.
+      if (o.id === "replace" && !o.lock) off = '<div class="swaprow small">In place of <select class="hreplace">' + o.olds.map(function (x) {
+          return '<option value="' + esc(x.id) + '"' + (x.lock ? " disabled" : "") + ">" + esc(x.name + " · crew " + x.crew + " · hold " + x.cargo + (x.over ? " · " + x.over + " would go over the side" : "") + (x.lock ? " · " + x.lock : "")) + "</option>";
+        }).join("") + '</select> · then <label><input type="radio" name="h-oldfate" value="release" checked> let her go</label> <label><input type="radio" name="h-oldfate" value="scuttle"> scuttle her</label>' +
+        (o.olds.some(function (x) { return x.over; }) ? '<p class="notice warn" style="margin:4px 0">Her hold is smaller than the one she replaces: what no longer fits goes over the side.</p>' : "") + "</div>";
       return radio("h-hull", o.id, o.label, o.addsHold && !o.lock ? "her hold adds " + o.addsHold + " · " + o.note : o.note, o.lock, o.id === "release") + off;
     }).join("");
     html += '<div class="h4">Her crew (' + p.crew + ")</div>" +
@@ -3106,7 +3123,9 @@
       var cargo = pickRows.length ? { treasure: 0, goods: {}, provisions: 0 } : null;
       pickRows.forEach(function (r) { var n = val(r.id); if (r.what === "treasure") cargo.treasure = n; else if (r.what === "provisions") cargo.provisions = n; else cargo.goods[r.what] = n; });
       markLog();
-      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null, cargo: cargo });
+      var rp = document.querySelector(".hreplace");
+      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null, cargo: cargo,
+        replace: rp ? rp.value : null, oldFate: pick("h-oldfate", "release") });
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
@@ -4322,6 +4341,13 @@
         el.addEventListener("mouseleave", off); el.addEventListener("blur", off);
       });
     }
+    // Take all on a prize's cargo (#35): every stepper to its top.
+    root.querySelectorAll("[data-takeall]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.dataset.takeall.split(" ").forEach(function (id) { var box = document.getElementById(id); if (box) box.value = box.max; });
+        refreshTotals();
+      });
+    });
     // The weather chip's effects: hover on desktop, tap on a phone (#43).
     root.querySelectorAll("[data-wxtip]").forEach(function (w) {
       w.addEventListener("click", function (ev) { ev.stopPropagation(); toast(w.dataset.wxtip); });
