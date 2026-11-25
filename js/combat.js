@@ -40,7 +40,12 @@
   function chance(state, game, what, p) { return M().rand(state, game, what)() < p; }
   // Probabilistic rounding (§21.11): 4% of 12 men is 0 or 1, averaging right.
   function prnd(state, game, x) { var f = Math.floor(x); return f + (chance(state, game, "prnd", x - f) ? 1 : 0); }
-  function say(state, game, line) { M().say(state, game, line); }
+  // Bug Log B6: the same line twice in a row (the clash and the strike roll
+  // both reporting her colors coming down) is said once.
+  function say(state, game, line) {
+    if (line && game.log.length && game.log[game.log.length - 1] === PC.text.render(line, state)) return;
+    M().say(state, game, line);
+  }
   function fill(line, map) { return String(line).replace(/\{(\w+)\}/g, function (m, k) { return map[k] != null ? map[k] : m; }); }
 
   function caBand(ratio) {
@@ -715,7 +720,7 @@
     var intent = enemyIntent(state, game, b, e);
     e.willBoard = intent === "board";
     b.lastIntent = intent;
-    if (intent === "strike") { say(state, game, L().struck); knockOut(state, game, b, e, "struck"); return afterEnemyOut(state, game); }
+    if (intent === "strike") { knockOut(state, game, b, e, "struck"); return afterEnemyOut(state, game); } // knockOut says the line (Bug Log B6)
     if (intent === "flee") {
       say(state, game, L().runs);
       b.chase = { mode: "chase", then: what === "board" ? "grapple" : "round" };
@@ -949,6 +954,15 @@
     return rollAction(state, game, a);
   }
 
+  // A setback that Wounds the captain says so on the roll's result (Bug Log
+  // B5: the wound went unseen, so Treat Wounds after the battle looked like
+  // it came from nowhere).
+  function woundCaptain(state, game) {
+    var already = hasTag(state, "Wounded");
+    PC.scenes.applyEffect(state, { tag: "Wounded", untilSeasonEnd: true });
+    if (game.lastRoll && !already) game.lastRoll.chips.push({ icon: "cond", text: "You're Wounded (until the season ends)", ink: "bad" });
+  }
+
   function settleAction(state, game, p) {
     var b = game.battle, bd = b.board, e = lead(b), id = p.op.slice(4);
     var mod = 0, hold = false;
@@ -956,7 +970,7 @@
       say(state, game, L().lead[p.outcome]);
       if (bd.shotHit) { loseCrew(state, game, b, e.id, 1); bd.shotHit = false; }
       if (p.outcome === "clean") mod = 2; else if (p.outcome === "partial") mod = 1;
-      else PC.scenes.applyEffect(state, { tag: "Wounded", untilSeasonEnd: true });
+      else woundCaptain(state, game);
     } else if (id === "rally") {
       say(state, game, L().rally[p.outcome]);
       if (p.outcome !== "setback") bd.rallyNext = 1;
@@ -972,7 +986,7 @@
         e.leaderless = true;
         if (strikeRoll(state, game, b, e, crewAdvantage(state, b, "flagship", e.id), "duel")) return afterBoardingOut(state, game);
       } else if (p.outcome === "partial") say(state, game, L().duel.partial);
-      else { say(state, game, L().duel.setback); PC.scenes.applyEffect(state, { tag: "Wounded", untilSeasonEnd: true }); bd.enemyNext += 1; }
+      else { say(state, game, L().duel.setback); woundCaptain(state, game); bd.enemyNext += 1; }
     } else if (id === "demand") {
       // A clean demand shows only the surrender line (B40 of the M5 playtest).
       say(state, game, L().demand[p.outcome]);
@@ -1188,6 +1202,7 @@
 
   PC.combat = {
     rollEffect: rollEffect,
+    _woundCaptain: woundCaptain, // for the tests (Bug Log B5)
     weatherParts: weatherParts,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,

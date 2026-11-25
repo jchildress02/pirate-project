@@ -376,18 +376,17 @@
 
   // The slots in use if `picks` ([{ what, n, dirty }]) were left behind.
   function usedAfter(state, picks) {
-    var prov = state.provisions, hard = state.hardtack || 0, goods = 0, tr = { clean: state.cargo.treasure.clean || 0, dirty: state.cargo.treasure.dirty || 0 };
+    var prov = state.provisions, goods = 0, tr = { clean: state.cargo.treasure.clean || 0, dirty: state.cargo.treasure.dirty || 0 };
     var g = {};
     Object.keys(state.cargo.goods).forEach(function (k) { g[k] = { clean: state.cargo.goods[k].clean || 0, dirty: state.cargo.goods[k].dirty || 0 }; });
     picks.forEach(function (x) {
       var n = Math.max(0, Math.floor(x.n || 0)), k = x.dirty ? "dirty" : "clean";
       if (x.what === "provisions") prov = Math.max(0, prov - n);
-      else if (x.what === "hardtack") hard = Math.max(0, hard - n);
       else if (x.what === "treasure") tr[k] = Math.max(0, tr[k] - n);
       else if (g[x.what]) g[x.what][k] = Math.max(0, g[x.what][k] - n);
     });
     Object.keys(g).forEach(function (k) { goods += g[k].clean + g[k].dirty; });
-    return prov + hard + goods + Math.ceil((tr.clean + tr.dirty) / PC.data.economy.TREASURE_PER_SLOT);
+    return prov + goods + Math.ceil((tr.clean + tr.dirty) / PC.data.economy.TREASURE_PER_SLOT);
   }
 
   // The player's choice of what stays on the beach. Throws if it still
@@ -400,7 +399,7 @@
     var said = [];
     picks.forEach(function (x) {
       PC.crew.jettison(state, x.what, x.n, x.dirty);
-      said.push(x.n + " " + (x.what === "provisions" ? "provisions" : x.what === "hardtack" ? "hardtack" : x.what === "treasure" ? (x.dirty ? "dirty treasure" : "treasure") : x.what));
+      said.push(x.n + " " + (x.what === "provisions" ? "provisions" : x.what === "treasure" ? (x.dirty ? "dirty treasure" : "treasure") : x.what));
     });
     game.beach = false;
     if (said.length) M().say(state, game, "You leave " + said.join(", ") + " on the beach.");

@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -1978,11 +1978,12 @@ test("the keeper's Beach Captain questions: Jack's follows, both name Twopenny a
   var s = at(ocr("keeper"), "tavern"); playOpening(s); s.location.place = "tavern"; s.current = { screen: "node" };
   delete s.npcs.twopenny.met;
   var ap = s.ap.left;
-  eq(PC.node.keeperQuestions(s).map(function (q) { return q.id; }), ["beach_captain"]);
+  var notLoss = function (q) { return q.id !== "loss_lead"; }; // the loss lead has its own test (Playtest Pins 0.9, #13)
+  eq(PC.node.keeperQuestions(s).filter(notLoss).map(function (q) { return q.id; }), ["beach_captain"]);
   var r = PC.node.askKeeperQuestion(s, "beach_captain");
   ok(r.line.indexOf("Arthur Twopenny") >= 0);
   ok(PC.npcs.isMet ? PC.npcs.isMet(s, "twopenny") : s.npcs.twopenny.met, "Twopenny is named now");
-  eq(PC.node.keeperQuestions(s).map(function (q) { return q.id + (q.asked ? "*" : ""); }), ["beach_captain*", "amber_jack"]);
+  eq(PC.node.keeperQuestions(s).filter(notLoss).map(function (q) { return q.id + (q.asked ? "*" : ""); }), ["beach_captain*", "amber_jack"]);
   var j = PC.node.askKeeperQuestion(s, "amber_jack");
   ok(j.line.indexOf("{keeper}") < 0 && j.line.indexOf(PC.npcs.get(s, PC.node.slotNpc("ocracoke", "keeper")).first + " stares") === 0);
   eq(s.ap.left, ap);
@@ -2692,6 +2693,17 @@ test("each hunt batch rolls a condition; a Storm batch makes a Ride Out Storm ch
   eq(g.batch.condition, "Storm");
   ok(s.ship.hull < hull, "a setback costs hull");
   ok(PC.huntGen.density(s, "Storm") < PC.huntGen.density(s, "Fair"));
+});
+
+test("Read Weather before a batch rolls itself at the batch's end, with no line in the log (#38)", function () {
+  var s = m7("wx4b"), g = PC.hunt.start(s), guard = 0;
+  while (g.phase !== "batchEnd" && guard++ < 12) {
+    if (g.phase === "scout" || g.phase === "hunter") { g.phase = "empty"; }
+    PC.hunt.next(s, g);
+  }
+  if (g.phase !== "batchEnd") return; // a hunter or an encounter took the batch; covered elsewhere
+  ok(g.readAhead, "rolled on its own");
+  ok(!g.log.some(function (l) { return /study the sky/.test(l); }), "no line");
 });
 
 test("Read Weather before a batch: clean reveals the next condition and rerolls a Storm once", function () {
@@ -3610,30 +3622,18 @@ test("Howe's information steps: three now, the notice board's after A Wanted Man
 // ---- The build 0.9 playtest pins (mid-Milestone 8) ----
 console.log("Milestone 8: the build 0.9 playtest pins (P1-P12)");
 
-test("P1/P11: provisions 20 a lot at a Modest port; hardtack half that; both sell back at half", function () {
+test("P1: provisions 20 a lot at a Modest port; they sell back at half", function () {
   var s = atNorfolk("pp1");
   eq(PC.data.economy.PROVISIONS_LOT, 20);
-  eq(PC.node.hardtackPrice(s), Math.round(PC.node.provisionsPrice(s) / 2));
-  s.money.crew = 1000; var g = s.money.crew, cost = PC.node.buyHardtack(s, 4).cost;
-  eq(s.hardtack, 4); eq(g - s.money.crew, cost); eq(PC.crew.food(s), s.provisions + 4);
-  var r = PC.node.sellHardtack(s, 2); eq(s.hardtack, 2); ok(r.gold > 0);
+  eq(PC.node.provisionsPrice(s), 20);
 });
 
-test("P11: ordinary lots are eaten first, then hardtack, at -2 morale for each action eaten on it", function () {
-  var s = m7("pp11"); s.time.season = 0; s.crew.rationing = false;
-  var per = Math.ceil(PC.world.headsAtSea(s) / 5);
-  s.provisions = per; s.hardtack = per * 3; s.crew.morale = 60;
-  var b = PC.world.burn(s, 2, {});
-  eq(s.provisions, 0); eq(s.hardtack, per * 3 - per * 2 + per); eq(b.hardtackAP, 1); eq(s.crew.morale, 58);
-  ok(!b.goWithout, "no Go Without check on hardtack");
-  eq(PC.world.hardtackActions(10, 2, 4, 6), 2, "an action is on hardtack if any of its burn was");
-  eq(PC.world.hardtackActions(10, 2, 5, 5), 1);
-});
-
-test("P11: hardtack takes hold space, and the save migration adds it", function () {
-  var s = m7("pp11b"); var used = PC.crew.slotsUsed(s); s.hardtack = 5; eq(PC.crew.slotsUsed(s), used + 5);
-  var old = JSON.parse(PC.state.serialize(s)); delete old.hardtack; old.saveVersion = 9;
-  var m = PC.state.deserialize(JSON.stringify(old)); eq(m.hardtack, 0); eq(m.saveVersion, PC.state.SAVE_VERSION);
+test("#51: hardtack is cut; the save migration turns any aboard into provisions", function () {
+  var s = m7("pp11b");
+  ok(!PC.node.buyHardtack && !PC.node.hardtackPrice, "no hardtack at the provisioner");
+  ok(!("hardtack" in s), "no hardtack in a new game");
+  var old = JSON.parse(PC.state.serialize(s)); old.hardtack = 5; old.saveVersion = 11; var p0 = old.provisions;
+  var m = PC.state.deserialize(JSON.stringify(old)); eq(m.provisions, p0 + 5); ok(!("hardtack" in m)); eq(m.saveVersion, PC.state.SAVE_VERSION);
 });
 
 test("P2: a prize carries her crew ÷ 5 × 2-4 lots; the calculator's provisions share is goods", function () {
@@ -3945,6 +3945,82 @@ test("Freedom's plan: +1 escape point and +1 rung; Captivity's calm on a setback
   s.jail.points = 0;
   PC.prison.seasonTurn(s); ok(s.jail.captivity);
   withDice([1, 1], function () { PC.escape.captivity(s, "calm"); }); eq(s.jail.points, -1);
+});
+
+
+// ---- Post-M8 playtest, PR A (Playtest Pins (Build 0.9); Bug Log B3-B8) ----
+console.log("Post-M8 playtest, PR A: bugs, cuts and the run log");
+
+test("B3: the Developer menu's content check survives dirty cargo at Ocracoke before any Norfolk visit", function () {
+  var s = m7("b3"); delete s.nodes.norfolk;
+  s.cargo.goods.Sugar = { clean: 0, dirty: 6 }; s.cargo.treasure.dirty = 12;
+  var v = PC.validate(s);
+  ok(!v.errors.some(function (e) { return /failed to render/.test(e); }), v.errors.join("; "));
+  ok(!s.nodes.norfolk, "pricing Norfolk's goods doesn't create the node");
+  ok(/gold/.test(PC.text.vars.bribe_found(s)));
+});
+
+test("B4: a stale, already-played entry in the queue no longer stops Bobby on leaving", function () {
+  var s = ocr("b4"); playOpening(s);
+  PC.node.enter(s, "tavern");
+  s.seen.ocr_opening_stub = true; s.location.queue = ["ocr_opening_stub"];
+  eq(PC.node.leave(s), "ocr_uw_1");
+});
+
+test("B4: a question to the keeper (no action) is the first Tavern action: Bobby comes after it", function () {
+  var s = ocr("b4b"); playOpening(s);
+  PC.node.enter(s, "tavern");
+  PC.node.askKeeperQuestion(s, "beach_captain");
+  eq(PC.node.nextQueued(s), "ocr_uw_1");
+  ok(s.flags.ocr_first_tavern_action);
+});
+
+test("#13: the keeper points to the loss lead until it's heard (A/C: the one-armed pirate; B: Bobby)", function () {
+  ["A", "B", "C"].forEach(function (v) {
+    var s = ocr("ll" + v); s.captain.loss = v; playOpening(s);
+    PC.node.enter(s, "tavern");
+    var q = PC.node.keeperQuestions(s).filter(function (x) { return x.id === "loss_lead"; })[0];
+    ok(q, v + ": offered");
+    ok(q.label.indexOf("[Loss Target]") < 0, "the target is filled in: " + q.label);
+    var r = PC.node.askKeeperQuestion(s, "loss_lead");
+    ok(new RegExp(v === "B" ? "Bobby" : "one-armed").test(r.line), v + ": " + r.line);
+    if (v === "B") PC.quests.addLead(s, "what_was_lost", "bald_man"); else s.flags.lead_trident_heard = true;
+    s.location.visit += 1;
+    ok(!PC.node.keeperQuestions(s).some(function (x) { return x.id === "loss_lead"; }), v + ": gone once the lead is heard");
+  });
+});
+
+test("B5: a setback that Wounds the captain says so on the roll", function () {
+  var s = m7("b5"), g = PC.hunt.start(s);
+  g.lastRoll = { chips: [] };
+  PC.combat._woundCaptain ? PC.combat._woundCaptain(s, g) : null;
+  if (!PC.combat._woundCaptain) return;
+  ok(s.captain.tags.indexOf("Wounded") >= 0);
+  ok(g.lastRoll.chips.some(function (c) { return /Wounded/.test(c.text); }));
+});
+
+test("#38: Read Weather is gone from the batch's end menu (it rolls itself)", function () {
+  var src = require("fs").readFileSync(require("path").join(__dirname, "..", "js", "ui.js"), "utf8");
+  ok(src.indexOf('act: "hreadwx"') < 0);
+});
+
+test("the run log records choices, checks with their keys and state changes, and exports the save", function () {
+  var RL = PC.runlog; RL.wrap(); RL.on = true; RL.clear();
+  try {
+    var s = m7("rl");
+    RL.choice("rumors", { act: "rumors", q: "x" }, "node||||");
+    PC.checks.resolve(s, { type: "Tavern Talk", dr: 2 }, "rl|test-key", {});
+    RL.after(s); RL.after(s);
+    var e = RL.entries();
+    ok(e.some(function (x) { return x.k === "choice" && /rumors \(q=x\)/.test(x.x); }), "the choice");
+    ok(e.some(function (x) { return x.k === "check" && /Tavern Talk DR 2/.test(x.x) && /key rl\|test-key/.test(x.x); }), "the check with its key");
+    eq(e.filter(function (x) { return x.k === "dice"; }).length, 0, "a check's dice aren't logged twice");
+    eq(e.filter(function (x) { return x.k === "state"; }).length, 1, "a state line only when something changed");
+    var t = RL.exportText(s, "Build test");
+    ok(/World seed/.test(t) && /---- The save at export/.test(t));
+    var save = t.split("---- The save at export (load it to pick up the run) ----\n")[1];
+    eq(PC.state.deserialize(save).world.seed, s.world.seed);
+  } finally { RL.on = false; RL.clear(); }
 });
 
 test("the build label reads Build 0.9 · Milestone 8", function () {

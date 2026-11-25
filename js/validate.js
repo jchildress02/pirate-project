@@ -41,7 +41,10 @@
 
     function checkText(where, text) {
       pieces(text).forEach(function (t) {
-        var out = PC.text.render(t, sampleState);
+        // Bug Log B3: a text variable that throws is reported, not allowed to
+        // break the Developer menu.
+        var out;
+        try { out = PC.text.render(t, sampleState); } catch (ex) { return err(where, "text failed to render: " + ex.message); }
         PC.text.unresolved(out).forEach(function (u) { err(where, "unresolved token " + u); });
       });
     }

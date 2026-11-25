@@ -263,6 +263,9 @@
       var onNode = state && state.current && state.current.screen === "node" && state.location;
       var placeBefore = onNode ? state.location.place : undefined;
       if (onNode && !state.location.place) townScroll = globalThis.scrollY || 0;
+      // The run log (Playtest Pins 0.9, PR A): the choice, then what changed.
+      var RL = PC.runlog;
+      if (RL && el && el.dataset) RL.choice(el.dataset.act || "?", el.dataset, before, (el.textContent || el.value || "").replace(/\s+/g, " ").trim().slice(0, 90));
       try { fn.apply(null, arguments); }
       catch (e) { console.error(e); toast("Something went wrong: " + e.message); }
       if (state) PC.state.saveToBrowser(state);
@@ -270,6 +273,7 @@
       stampFlash = !!state;
       draw();
       stampFlash = false;
+      if (RL) { var nowKey = screenKey(); if (nowKey !== before) RL.screen(nowKey); RL.after(state); RL.save(); }
       land(before, keys, el, placeBefore, menuBefore, panelTop);
     };
   }
@@ -584,7 +588,7 @@
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
       // P8: provisions as lots, with time at sea in the tooltip.
-      lrow("Provisions", '<span title="' + esc(foodWords() + ": " + timeAtSea(PC.crew.food(state))) + '">' + esc(String(PC.crew.food(state))) + (state.hardtack ? ' <span class="note">(' + state.hardtack + " hardtack)</span>" : "") + "</span>") + "</table>" +
+      lrow("Provisions", '<span title="' + esc(foodWords() + ": " + timeAtSea(PC.crew.food(state))) + '">' + esc(String(PC.crew.food(state))) + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
       meters(false) +
       '<div class="h4">Officers</div>' + offs.map(function (o) {
@@ -1502,27 +1506,8 @@
       ' <span class="note">tap for the manifest</span></summary><ul class="small">' + manifest.map(function (m) { return "<li>" + m + "</li>"; }).join("") + "</ul></details>";
   }
 
-  // "12 lots" or "12 lots (4 of them hardtack)".
-  function foodWords() { return PC.crew.food(state) + " lots" + (state.hardtack ? " (" + state.hardtack + " of them hardtack)" : ""); }
-
-  // Hardtack (P11 of the build 0.9 playtest pins): its own row under the
-  // provisions, always in stock, with its cost to morale said plainly.
-  function hardtackBlock(free, onHand) {
-    var hp = N().hardtackPrice(state), max = Math.min(free, afford(hp)), have = state.hardtack || 0;
-    var html = '<div class="svc"><h4>Hardtack</h4><p class="small">Cheap and grim: −' + (PC.data.economy.HARDTACK_MORALE || 2) + " morale for each action the crew eats it. It feeds the same as a lot, and the crew eat it only once the ordinary lots run out. Aboard: " + have + " lots.</p>" +
-      '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(hp) + " gold each. Always in stock.</p>" +
-      (free <= 0 ? '<p class="note">The hold is full.</p>' : max > 0 ? '<div class="buyrow">' + qstep("q-hard", Math.min(max, 10), max) + '<button class="primary" data-act="buyhard" data-for="q-hard">' +
-        totalSlot(function () { return "Buy · " + gold(val("q-hard") * hp); }, "") + "</button></div>" +
-        '<p class="small">' + totalSlot(function () { var n = val("q-hard"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * hp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>');
-    if (have > 0) {
-      var sp = N().hardtackSellPrice(state), cl = N().provisionerCapLeft(state);
-      var smax = Math.max(1, Math.min(have, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
-      html += '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
-        '<div class="buyrow">' + qstep("q-sellhard", 1, smax) + '<button class="secondary outline" data-act="sellhard" data-for="q-sellhard"' + (cl < sp ? " disabled" : "") + ">" +
-        totalSlot(function () { return "Sell · " + gold(val("q-sellhard") * sp); }, "") + "</button></div>";
-    }
-    return html + "</div>";
-  }
+  // "12 lots".
+  function foodWords() { return PC.crew.food(state) + " lots"; }
 
   // Provisions as time at sea, short form for the strip: "4½ actions".
   function seaTime(lots) {
@@ -1573,7 +1558,7 @@
         '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(pp) + " gold each.</p>" +
         (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="primary" data-act="buyprov" data-for="q-prov">' +
           totalSlot(function () { return "Buy · " + gold(val("q-prov") * pp); }, "") + "</button></div>" +
-          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * pp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
+          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * pp) + " left (purse and crew gold together)"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
         // R7: provisions sell back at half his price, out of his coffers.
         (state.provisions > 0 ? (function () {
           var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
@@ -1581,8 +1566,8 @@
           return '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
             '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary outline" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
             totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>" +
-            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, PC.crew.food(state) - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
-        })() : "") + "</div>" + hardtackBlock(free, onHand);
+            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, PC.crew.food(state) - n) + " lots aboard · " + gold(onHand() + n * sp) + " left (purse and crew gold together)"; }) + "</p>";
+        })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
         Object.keys(stock).map(function (gname) {
@@ -1814,7 +1799,6 @@
   // provisions, then treasure) to change as he likes.
   function beachPicker(bch) {
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
-    if (state.hardtack) rows.push({ what: "hardtack", label: "Hardtack lots", n: state.hardtack, dirty: false });
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
@@ -1967,9 +1951,8 @@
     } else if (H.phase === "after") {
       html += afterPanel(H.after, H);
     } else if (H.phase === "batchEnd") {
-      if (H.canReadAhead) html += opts([opt({ act: "hreadwx", label: "Read the weather (optional)", check: chk(H.readCheck),
-        meta: "No action · once a batch. Clean: see the next batch's weather, and if it's a storm, wait it out (reroll once). Partial: see it. Setback: nothing." })]);
-      else if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + "</p>";
+      // Read Weather rolls itself (#38): only the next batch's weather shows.
+      if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + (H.readAhead.rerolled ? ' <span class="note">(you wait out a storm)</span>' : "") + "</p>";
       html += '<p>The horizon is empty for now.</p><div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
@@ -2502,7 +2485,6 @@
   function cargoTab() {
     var html = holdBar() + '<p class="small">Treasure packs five units to a slot. Every ship\'s hold adds to one total (see Fleet).</p>';
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
-    if (state.hardtack) rows.push({ what: "hardtack", label: "Hardtack lots", n: state.hardtack, dirty: false });
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
@@ -2813,6 +2795,8 @@
           [0, 2, 3, 4].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
+      grp("Run log", '<p class="small">Every choice, roll (with its seed), screen and change this run, and any error: ' + (PC.runlog ? PC.runlog.count() : 0) + " entries. Export it and attach the file in the playtest chat.</p>" +
+        '<div class="actions">' + b("runlogexport", "Export the run log") + b("runlogcopy", "Copy it") + b("runlogclear", "Clear it") + "</div>") +
       grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
       grp("Info", '<p class="small">World seed ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
         (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) {
@@ -2974,14 +2958,13 @@
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
-    "hreadwx": function () { markLog(); PC.hunt.readAhead(state, state.minigame); },
     "hhome": function () { PC.hunt.sailHome(state, state.minigame); PC.minigames.leave(state); },
     "sellhull": function (el) {
       var id = who("shipwright");
       // A sale that leaves cargo with no room forces a jettison: warn first (A9, G7).
       var hh = N().hullSaleHold(state, el.dataset.ship);
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Selling her takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
-        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what === "hardtack" ? "hardtack lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
       var r = N().sellHull(state, el.dataset.ship);
       say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths" + (r.paidFromPurse ? " (" + gold(r.paidFromPurse) + " from your purse)" : "")) : null]
           .concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) } : null);
@@ -2991,7 +2974,7 @@
     "layup": function (el) {
       var id = who("shipwright"), hh = N().hullSaleHold(state, el.dataset.ship);
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
-        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what === "hardtack" ? "hardtack lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
       var r = N().layUp(state, el.dataset.ship);
       say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Plus " + gold(r.season) + " gold a season, paid when you take her back"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
         r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
@@ -3157,12 +3140,6 @@
       say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
         { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", html: "Sold " + r.units + " " + dirtyName(el.dataset.what === "treasure" ? "treasure" : el.dataset.what, el.dataset.buyer === "fence") }, goldChip(r.gold)] : null });
     },
-    "buyhard": function (el) { var id = who("provisioner"); var n = qty(el); var r = N().buyHardtack(state, n); say(id, firstName(id), r.line, null, null, r.cost ? { chips: [textChip("prov", "+" + n + " hardtack", "good"), goldChip(-r.cost)] } : null); bought(r, "Bought " + n + " hardtack"); },
-    "sellhard": function (el) {
-      var r = N().sellHardtack(state, qty(el)), id = who("provisioner");
-      if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
-      say(id, firstName(id), r.line, null, null, { chips: r.units ? [{ icon: "treasure", text: "Sold " + plural(r.units, "hardtack lot") }, goldChip(r.gold)] : [] });
-    },
     "sellprov": function (el) {
       var r = N().sellProvisions(state, qty(el)), id = who("provisioner");
       if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
@@ -3209,7 +3186,7 @@
     "jettison": function (el) {
       var n = qty(el);
       if ((el.dataset.big === "1" || n > 3) && !jettisonOk) { jettisonOk = { what: el.dataset.what, n: n, dirty: el.dataset.dirty === "1" };
-        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what === "hardtack" ? "lots of hardtack" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
+        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
         return; }
       PC.crew.jettison(state, el.dataset.what, n, el.dataset.dirty === "1");
     },
@@ -3864,6 +3841,7 @@
       var seed = PC.rng.newWorldSeed();
       var template = PC.creator.build(draft, seed);
       var built = PC.state.newGame(template, { seed: seed });
+      if (PC.runlog) PC.runlog.newRun(built);
       PC.state.addLog(built, "— Spring 1754 begins. —");
       PC.state.addLog(built, "The quest What Was Lost is open (until the end of Spring 1755).");
       var m = (built.officers || []).filter(function (o) { return o.mentor; })[0];
@@ -3933,6 +3911,7 @@
       dialog = null; menu = null;
       // Quick start brings the test mentor, Jesse Dew (Playtest Pins 0.8, #3).
       state = PC.state.newGame(Object.assign({}, PC.data.testCaptain, { officers: [PC.data.testMentor] }));
+      if (PC.runlog) PC.runlog.newRun(state);
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; creating = false; menu = null; },
@@ -3976,6 +3955,9 @@
     "import": function () { dialog = "import"; },
     "closedialog": function () { dialog = null; },
     "download": downloadSave,
+    "runlogexport": downloadRunLog,
+    "runlogcopy": copyRunLog,
+    "runlogclear": function () { PC.runlog.clear(); toast("Run log cleared."); },
     "copy": copySave,
     "pickfile": pickSaveFile,
     "loadpasted": function () { var t = document.querySelector(".pastebox").value; if (t.trim()) loadSaveText(t); else toast("Paste a save first."); },
@@ -4139,7 +4121,7 @@
         if (el.classList.contains("modal") && ev.target !== el) return;
         // These redraw (or not) themselves: file reads finish later, and
         // copy/download must not rebuild the dialog under the user.
-        if (name === "pickfile" || name === "loadpasted" || name === "copy" || name === "download") { h(el); return; }
+        if (name === "pickfile" || name === "loadpasted" || name === "copy" || name === "download" || name === "runlogexport" || name === "runlogcopy") { h(el); return; }
         act(h)(el);
       });
     });
@@ -4212,7 +4194,48 @@
 
   function start(rootEl) {
     root = rootEl;
+    startRunLog();
     draw();
+  }
+
+  // The run log (Playtest Pins 0.9, PR A): it records from the moment the
+  // game opens. Errors, failed pictures and console errors go in too, so a
+  // playtest's bug comes with its trail.
+  function startRunLog() {
+    var RL = PC.runlog;
+    if (!RL || typeof globalThis.addEventListener !== "function") return;
+    RL.start();
+    RL.note("Game opened · " + BUILD);
+    globalThis.addEventListener("error", function (ev) {
+      var t = ev && ev.target;
+      if (t && t.tagName === "IMG") { RL.error("A picture failed to load: " + (t.getAttribute("alt") || "") + " · " + String(t.getAttribute("src") || "").slice(0, 80)); RL.save(); return; }
+      RL.error((ev.message || "error") + (ev.filename ? " at " + ev.filename.split("/").pop() + ":" + ev.lineno : "") + (ev.error && ev.error.stack ? "\n" + ev.error.stack : "")); RL.save();
+    }, true);
+    globalThis.addEventListener("unhandledrejection", function (ev) { RL.error("Unhandled: " + (ev.reason && ev.reason.stack || ev.reason)); RL.save(); });
+    var ce = console.error;
+    console.error = function () {
+      try { RL.error(Array.prototype.map.call(arguments, function (a) { return a && a.stack ? a.stack : String(a); }).join(" ")); RL.save(); } catch (e) { /* never let the log break the game */ }
+      return ce.apply(console, arguments);
+    };
+  }
+
+  function downloadRunLog() {
+    var text = PC.runlog.exportText(state, BUILD);
+    try {
+      var blob = new Blob([text], { type: "text/plain" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "pirate-chronicle-run-log-" + (state && state.world ? state.world.seed : "none") + ".txt";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      toast("Run log downloaded. Attach it in the playtest chat. (If nothing appeared, use Copy instead.)");
+    } catch (e) { toast("Downloads are blocked here. Use Copy instead."); }
+  }
+  function copyRunLog() {
+    var text = PC.runlog.exportText(state, BUILD);
+    try { globalThis.navigator.clipboard.writeText(text).then(function () { toast("Run log copied. Paste it into the playtest chat."); }, function () { toast("Copying is blocked here. Use Export instead."); }); }
+    catch (e) { toast("Copying is blocked here. Use Export instead."); }
   }
 
   PC.ui = { start: start };

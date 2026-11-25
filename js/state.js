@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 11;
+  var SAVE_VERSION = 12;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -32,7 +32,6 @@
       captain: c.captain,
       money: c.money,           // { crew, purse } — §27
       provisions: c.provisions, // lots — §20.6
-      hardtack: 0, // hardtack lots (P11 of the build 0.9 playtest pins)
       jail: null, shipless: false, secretsExposed: {}, fenceShut: {}, // §43, §30.12 (M8 PR 6)
       ship: c.ship,
       crew: c.crew,
@@ -258,6 +257,13 @@
       data.jail = data.jail || null; data.shipless = !!data.shipless;
       data.secretsExposed = data.secretsExposed || {}; data.fenceShut = data.fenceShut || {};
       data.saveVersion = 11;
+    }
+    if (data.saveVersion === 11) {
+      // The build 0.9 playtest (#51): hardtack is cut; any aboard becomes
+      // ordinary provisions lots.
+      data.provisions = (data.provisions || 0) + (data.hardtack || 0);
+      delete data.hardtack;
+      data.saveVersion = 12;
     }
     return data;
   }

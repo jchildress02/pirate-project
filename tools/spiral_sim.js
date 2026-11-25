@@ -1,13 +1,11 @@
 /* Pirate Chronicle — the spiral test (P12 of the build 0.9 playtest pins).
  * A royal sloop based at Norfolk, no letter, no fence there, 0 crew gold
  * and 5 lots aboard: how many seasons until crew gold recovers to 1,000?
- * Played with and without hardtack, on the real engine.
+ * Played on the real engine. (Hardtack was cut by the build 0.9 playtest, #51.)
  *
  *   node tools/spiral_sim.js [runs] [--seasons 12] [--gold 0] [--trace]
  *
- * The policy, each season: buy food for a three-action hunt (ordinary lots
- * first; with hardtack on, hardtack for whatever the gold can't cover in
- * ordinary lots); hunt from Norfolk with the hunt simulator's choices
+ * The policy, each season: buy food for a three-action hunt; hunt from Norfolk with the hunt simulator's choices
  * (with no food and no gold, the captain hunts one hungry action anyway,
  * as the playtester did);
  * come home (the port fee and the wounded's payouts as in play); sell every
@@ -49,7 +47,7 @@ function setup(seed) {
   if (add > 0) PC.crew.addHands(s, "Able", add);
   else if (add < 0) { s.crew.tiers.Green = Math.max(0, (s.crew.tiers.Green || 0) + add); s.crew.count = want; }
   s.crew.morale = 45; s.crew.pressure = 0;
-  s.money.crew = GOLD; s.money.purse = 0; s.provisions = 5; s.hardtack = 0;
+  s.money.crew = GOLD; s.money.purse = 0; s.provisions = 5;
   s.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } };
   s.location = { node: "norfolk", place: null, queue: [] };
   PC.node.initNode(s, "norfolk");
@@ -130,16 +128,12 @@ function hunt(s) {
   return "ok";
 }
 
-function buyFood(s, hardtack) {
+function buyFood(s) {
   var need = Math.max(0, perAction(s) * 3 - PC.crew.food(s));
   if (!need) return;
   var pp = PC.node.provisionsPrice(s), n = Math.min(need, Math.floor(s.money.crew / pp), PC.crew.slotsFree(s));
   if (n > 0) PC.node.buyProvisions(s, n);
   need -= Math.max(0, n);
-  if (hardtack && need > 0) {
-    var hp = PC.node.hardtackPrice(s), h = Math.min(need, Math.floor(s.money.crew / hp), PC.crew.slotsFree(s));
-    if (h > 0) PC.node.buyHardtack(s, h);
-  }
 }
 
 // Forge a Clearance (§20.3) and sell what it cleared.
@@ -161,13 +155,13 @@ function makeRoom(s) {
   dirty.forEach(function (g) { if (want <= 0) return; var n = Math.min(want, s.cargo.goods[g].dirty); PC.crew.jettison(s, g, n, true); want -= n; });
 }
 
-function run(seed, hardtack) {
+function run(seed) {
   var s = setup(seed);
   for (var season = 1; season <= SEASONS; season++) {
     forge(s);
     while (s.ap.left >= 1 && !s.gameOver) {
       makeRoom(s);
-      buyFood(s, hardtack);
+      buyFood(s);
       if (s.crew.count < s.ship.crewMin) return { seasons: null, why: "short-handed" };
       if (hunt(s) === "lost") return { seasons: null, why: "lost" };
       PC.node.sellAll(s, "provisioner");
@@ -176,7 +170,7 @@ function run(seed, hardtack) {
       if (fix > 0) { try { PC.node.repair(s, fix); } catch (e) { /* an action short */ } }
       if (s.money.crew >= 1000) return { seasons: season, morale: s.crew.morale };
     }
-    if (TRACE) console.log("  " + seed + (hardtack ? " (hardtack)" : "") + " season " + season + ": crew gold " + s.money.crew + ", food " + PC.crew.food(s) + " (" + (s.hardtack || 0) + " hardtack), hold " + PC.crew.slotsUsed(s) + "/" + PC.crew.holdCapacity(s) +
+    if (TRACE) console.log("  " + seed + " season " + season + ": crew gold " + s.money.crew + ", food " + PC.crew.food(s) + " (" + (s.hardtack || 0) + " hardtack), hold " + PC.crew.slotsUsed(s) + "/" + PC.crew.holdCapacity(s) +
       " (dirty " + PC.crew.goodsUnits(s, "dirty") + " goods, " + s.cargo.treasure.dirty + " treasure), hull " + s.ship.hull + "/" + s.ship.hullMax + ", crew " + s.crew.count + ", morale " + s.crew.morale + ", AP left " + s.ap.left);
     var t = PC.world.endSeason(s);
     if (s.gameOver) return { seasons: null, why: "over" };
@@ -186,19 +180,18 @@ function run(seed, hardtack) {
   return { seasons: null, why: "not within " + SEASONS };
 }
 
-function report(hardtack) {
+function report() {
   var got = [], fail = {}, mor = 0;
   for (var i = 0; i < RUNS; i++) {
     var r;
-    try { r = run("spiral-" + i, hardtack); } catch (e) { r = { seasons: null, why: "error: " + e.message }; }
+    try { r = run("spiral-" + i); } catch (e) { r = { seasons: null, why: "error: " + e.message }; }
     if (r.seasons) { got.push(r.seasons); mor += r.morale; } else fail[r.why] = (fail[r.why] || 0) + 1;
   }
   got.sort(function (a, b) { return a - b; });
   var med = got.length ? got[Math.floor(got.length / 2)] : "-";
-  console.log((hardtack ? "WITH hardtack:    " : "WITHOUT hardtack: ") + got.length + " of " + RUNS + " recover to 1,000 crew gold within " + SEASONS + " seasons; median " + med + " season(s)" +
+  console.log(got.length + " of " + RUNS + " recover to 1,000 crew gold within " + SEASONS + " seasons; median " + med + " season(s)" +
     (got.length ? ", mean morale then " + Math.round(mor / got.length) : "") + (Object.keys(fail).length ? "; the rest: " + JSON.stringify(fail) : ""));
 }
 
 console.log("The spiral test: a royal sloop at Norfolk, no letter, " + GOLD + " crew gold, 5 lots (" + RUNS + " runs)");
-report(false);
-report(true);
+report();
