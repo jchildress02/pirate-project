@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -4173,6 +4173,176 @@ test("3-34: Read Weather sits above the passage line in the arrival popup", func
 
 test("3-22 and the hurricane log: no \"the the\"", function () {
   ok(!/the \[Waters\]/.test(JSON.stringify(PC.data.weather.lines)));
+});
+
+// ---- M9 PR 2: desertion and the mutiny (§24.10, §24.13, §25.13, §25.14) ----
+
+function mutinyReady(seed) {
+  var s = m7(seed); s.crew.morale = 50; s.crew.pressure = 0; s.money.crew = 3000;
+  s.officers.forEach(function (o) { o.rung = 0; });
+  return s;
+}
+
+test("desertion at departure: none at Steady; Sullen 5-10% (+5% at an Avalon port), Green first, morale +10 for the rest", function () {
+  var s = mutinyReady("ds1"); var n = s.crew.count;
+  PC.world.sail(s, "norfolk"); eq(s.crew.count, n, "Steady: nobody goes");
+  var t = mutinyReady("ds2"); PC.world.sail(t, "norfolk"); t.location.popup = null; t.current = { screen: "node" };
+  t.crew.morale = 20; var c0 = t.crew.count, g0 = t.crew.tiers.Green;
+  PC.world.sail(t, "ocracoke");
+  var gone = c0 - t.crew.count;
+  ok(gone >= Math.round(c0 * 0.10) && gone <= Math.round(c0 * 0.15), "10-15% at Norfolk: " + gone + " of " + c0);
+  eq(g0 - t.crew.tiers.Green, Math.min(gone, g0), "Green first");
+  ok(t.crew.morale >= 30, "morale +10 for the crew who stay");
+});
+
+test("an officer at Rival deserts at departure, unless Pressure is 3 or more", function () {
+  var s = mutinyReady("ds3"); var o = s.officers[0]; o.rung = -2;
+  PC.world.sail(s, "norfolk");
+  ok(o.gone && o.left === "deserted");
+  var t = mutinyReady("ds4"); var q = t.officers[0]; q.rung = -2; t.crew.pressure = 3;
+  PC.world.sail(t, "norfolk");
+  ok(!q.gone, "stays with the mutineers at Pressure 3");
+});
+
+test("the mutiny fires at departure at Pressure 4; Reason clean ends it, Pressure 1, and the voyage goes on", function () {
+  var s = mutinyReady("mu1"); s.crew.pressure = 4; var ap = s.ap.left;
+  eq(PC.world.sail(s, "norfolk"), null);
+  eq(s.current.screen, "mutiny"); eq(s.ap.left, ap, "no action spent yet");
+  eq(PC.mutiny.dr(s), 5, "DR 1 + 4");
+  var m0 = s.crew.morale;
+  forced("clean", function () { PC.mutiny.choose(s, "reason"); });
+  eq(s.crew.pressure, 1); eq(s.crew.morale, m0 + 10); eq(s.mutiny.stage, "quelled");
+  PC.mutiny.carryOn(s);
+  ok(!s.mutiny); eq(s.location.node, "norfolk", "the voyage resumed and arrived");
+});
+
+test("Reason partial: morale +10, Pressure unchanged; the hunt goes on", function () {
+  var s = mutinyReady("mu2"); s.crew.pressure = 4;
+  eq(PC.hunt.start(s), null); eq(s.current.screen, "mutiny");
+  forced("partial", function () { PC.mutiny.choose(s, "reason"); });
+  eq(s.crew.pressure, 4);
+  var g = PC.mutiny.carryOn(s);
+  ok(g && g.kind === "hunt", "the hunt starts");
+});
+
+test("the mutiny fires at the season's end at Pressure 5", function () {
+  var s = mutinyReady("mu3"); s.time.season = 0; s.crew.pressure = 4; s.crew.morale = 20; s.location.place = null;
+  var out = PC.world.endSeason(s);
+  ok(out.mutiny); eq(s.current.screen, "mutiny"); eq(s.mutiny.when, "season");
+});
+
+test("Pay Off: not below 25 a head; clean costs half the crew gold, Pressure 2", function () {
+  var s = mutinyReady("mu4"); s.crew.pressure = 4; s.money.crew = 20 * s.crew.count;
+  PC.mutiny.start(s, "season", { kind: "season" });
+  ok(PC.mutiny.approaches(s).filter(function (a) { return a.id === "payoff"; })[0].lock);
+  s.money.crew = 2000;
+  forced("clean", function () { PC.mutiny.choose(s, "payoff"); });
+  eq(s.money.crew, 1000); eq(s.crew.pressure, 2);
+});
+
+test("the ringleader: the mutinous officer with the lowest opinion; +1 DR; Strike First and Call Out need warning", function () {
+  var s = mutinyReady("mu5"); s.crew.pressure = 4;
+  var a = s.officers[0];
+  var b = PC.officers.generate(s, "ocracoke", "t|b", "off_b"); b.aboard = "flagship"; s.officers.push(b);
+  a.rung = -2; b.rung = -3;
+  eq(PC.mutiny.ringleader(s).id, b.id);
+  PC.mutiny.start(s, "season", { kind: "season" });
+  eq(PC.mutiny.dr(s), 6, "1 + 4, then +1 for an officer ringleader");
+  var ap = PC.mutiny.approaches(s);
+  ok(ap.filter(function (x) { return x.id === "strikeFirst"; })[0].lock, "Strike First needs a warning");
+  ok(!ap.some(function (x) { return x.id === "callOut"; }), "Call Out needs a known ringleader");
+  PC.mutiny.noteWarning(s, { name: true });
+  ap = PC.mutiny.approaches(s);
+  ok(!ap.filter(function (x) { return x.id === "strikeFirst"; })[0].lock);
+  ok(ap.some(function (x) { return x.id === "callOut"; }));
+  var n = s.crew.count;
+  forced("partial", function () { PC.mutiny.choose(s, "strikeFirst"); });
+  ok(a.dead && b.dead, "Strike First kills every mutinous officer");
+  eq(n - s.crew.count, Math.max(1, Math.round(n * 0.1)), "a tenth of the crew killed");
+  eq(s.crew.pressure, 0);
+});
+
+test("Call Out the Ringleader: clean, and the plank: Dread +8", function () {
+  var s = mutinyReady("mu6"); s.crew.pressure = 4; s.meters.dread = 0;
+  var a = s.officers[0]; a.rung = -3;
+  PC.mutiny.start(s, "season", { kind: "season" }); PC.mutiny.noteWarning(s, { name: true });
+  forced("clean", function () { PC.mutiny.choose(s, "callOut"); });
+  eq(s.mutiny.stage, "ringleaderFate");
+  PC.mutiny.ringleaderFate(s, "plank");
+  ok(a.dead); eq(s.meters.dread, 8); eq(s.crew.pressure, 1); eq(s.mutiny.stage, "quelled");
+});
+
+test("a setback at Sullen or above: one plea; a setback on it is marooned, losing the fleet, the gold and the purse; loyal officers come too", function () {
+  var s = mutinyReady("mu7"); s.crew.pressure = 4; s.crew.morale = 20; s.money.purse = 500;
+  var friend = s.officers[0]; friend.rung = 2;
+  PC.mutiny.start(s, "season", { kind: "season" });
+  forced("setback", function () { PC.mutiny.choose(s, "reason"); });
+  eq(s.mutiny.stage, "plea");
+  forced("setback", function () { PC.mutiny.plea(s); });
+  eq(s.mutiny.ending, "marooned");
+  eq(s.money.crew, 0); eq(s.money.purse, 0); eq(s.crew.count, 0); ok(s.shipless);
+  PC.mutiny.afterLoss(s);
+  eq(s.jail.kind, "marooned"); ok(s.jail.cell.officers.indexOf(friend.id) >= 0, "the loyal officer shares the captain's fate");
+});
+
+test("put ashore at the port: shipless there, bystander officers sail on with the mutineers", function () {
+  var s = mutinyReady("mu8"); s.crew.pressure = 4; s.crew.morale = 20;
+  var by = s.officers[0]; by.rung = 0;
+  PC.mutiny.start(s, "season", { kind: "season" });
+  forced("setback", function () { PC.mutiny.choose(s, "reason"); });
+  forced("clean", function () { PC.mutiny.plea(s); });
+  eq(s.mutiny.ending, "ashore"); ok(by.gone);
+  PC.mutiny.afterLoss(s);
+  eq(s.current.screen, "shipless"); eq(s.location.node, "ocracoke");
+});
+
+test("at Mutinous: the verdict, the last stand, and a friend's sacrifice; with no friend, the captain dies", function () {
+  var s = mutinyReady("mu9"); s.crew.pressure = 5; s.crew.morale = 5;
+  var f = s.officers[0]; f.rung = 3;
+  PC.mutiny.start(s, "season", { kind: "season" });
+  forced("setback", function () { PC.mutiny.choose(s, "reason"); });
+  forced("setback", function () { PC.mutiny.plea(s); });
+  eq(s.mutiny.stage, "lastStand");
+  forced("setback", function () { PC.mutiny.lastStand(s); });
+  ok(f.dead && f.sacrificed, "the friend dies in the captain's place");
+  ok(s.captain.tags.indexOf("Wounded") >= 0); eq(s.mutiny.ending, "marooned"); ok(!s.ended);
+  var t = mutinyReady("mu10"); t.crew.pressure = 5; t.crew.morale = 5;
+  PC.mutiny.start(t, "season", { kind: "season" });
+  forced("setback", function () { PC.mutiny.choose(t, "reason"); });
+  forced("setback", function () { PC.mutiny.plea(t); });
+  forced("setback", function () { PC.mutiny.lastStand(t); });
+  ok(t.ended && t.ended.how === "died", "killed");
+});
+
+test("a loyal fleet captain picks up a marooned captain: her ship is his", function () {
+  var s = mutinyReady("mu11"); s.crew.pressure = 4; s.crew.morale = 20;
+  PC.hunt.devFleetShip(s, "Sloop");
+  var cap = s.officers.filter(function (o) { return o.aboard && o.aboard !== "flagship"; })[0]; cap.rung = 2;
+  var shipName = s.fleet[0].name;
+  PC.mutiny.start(s, "season", { kind: "season" });
+  forced("setback", function () { PC.mutiny.choose(s, "reason"); });
+  forced("setback", function () { PC.mutiny.plea(s); });
+  eq(s.mutiny.ending, "pickedUp");
+  eq(s.ship.name, shipName); ok(s.crew.count > 0); ok(!s.shipless); eq(cap.aboard, "flagship");
+  PC.mutiny.afterLoss(s); eq(s.current.screen, "node");
+});
+
+test("Read People in the grumbling event reveals the Pressure, and on a clean the ringleader", function () {
+  var g = PC.data.voyageEvents.written.filter(function (e) { return e.id === "ve_c01_grumbling"; })[0];
+  var c = g.choices.filter(function (x) { return x.check && x.check.type === "Read People"; })[0];
+  ok(c.clean.fx.some(function (f) { return f.reveal === "full"; }));
+  ok(c.partial.fx.some(function (f) { return f.reveal === "level"; }));
+});
+
+test("season Pressure: +1 for each mutinous officer and a Schemer at Wary or below", function () {
+  var s = mutinyReady("mu12"); var o = s.officers[0];
+  o.rung = -3; eq(PC.mutiny.seasonPressure(s), 1 + (o.voice === "Schemer" || o.secondary === "Schemer" ? 1 : 0));
+});
+
+test("save 13 loads as 14 with the mutiny fields", function () {
+  var s = m7("sv14"); var old = JSON.parse(PC.state.serialize(s)); old.saveVersion = 13; delete old.mutiny;
+  var t = PC.state.deserialize(JSON.stringify(old));
+  eq(t.saveVersion, 14); eq(t.mutiny, null);
 });
 
 test("the build label reads Build 0.9 · Milestone 8", function () {

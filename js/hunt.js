@@ -35,6 +35,12 @@
     opts = opts || {};
     var c = canHunt(state);
     if (!c.ok) throw new Error(c.why);
+    // Departing a port: desertion, then the mutiny (§24.10, §24.13; M9 PR 2).
+    var dep = null;
+    if (!opts.departed && PC.mutiny && !PC.node.isOcean(state.location.node)) {
+      dep = PC.mutiny.depart(state, { kind: "hunt", opts: opts });
+      if (dep.mutiny || dep.blocked) return null;
+    }
     var waters = H().HOME_WATERS[state.location.node] || PC.node.nodeData(state.location.node).waters || "north";
     var game = {
       kind: "hunt", key: "hunt-" + (state.rolls.hunt = (state.rolls.hunt || 0) + 1), waters: waters,
@@ -42,6 +48,7 @@
       prizesTaken: 0, prizeMorale: 0, captives: 0, force: opts.force || null, home: state.location.node,
     };
     M().start(state, game, "node");
+    if (dep) dep.lines.forEach(function (l) { M().say(state, game, l); });
     M().say(state, game, L().setOut);
     // Read Weather rolls itself before a port hunt (§42.6); its result
     // rides on the hunt's storm check (voyage events, §44.7).

@@ -454,7 +454,7 @@
     if (screen !== jailScreen) { if (jailScreen === "jail" || jailScreen === "shipless") jailSay = null; jailScreen = screen; }
     if (screen === "end") return drawEnd();
     var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() :
-      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "jail" ? jailPanel() : screen === "shipless" ? shiplessPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
+      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "jail" ? jailPanel() : screen === "shipless" ? shiplessPanel() : screen === "mutiny" && PC.mutiny ? mutinyPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
@@ -465,6 +465,50 @@
   var jailSay = null; // the last step's lines and chips, shown above the choices
   var jailSeq = 0;
   var jailScreen = null;
+
+  // ---- The mutiny (§24.13, §25.14; M9 PR 2) ----
+  // The crew's demand, the five approaches, then (on a setback) the plea,
+  // the crew's verdict and the last stand. Lines are PLACEHOLDERs (PH33).
+  function mutinyResult(r) {
+    if (!r) return "";
+    var inner = badge(r.outcome) + '<div class="say">' + r.lines.map(function (l) { return inline(l); }).join("<br>") + "</div>" + chips(r.chips);
+    return rbox(r.outcome, inner, "mutiny-" + r.approach + "-" + r.outcome);
+  }
+  function mutinyPanel() {
+    var v = PC.mutiny.view(state);
+    if (!v) return "";
+    var html = '<div class="where">' + esc(PC.state.seasonName(state) + " " + state.time.year + " · " + state.ship.name) + '</div>' + banner("the crew massed at the mainmast, the officers apart") +
+      '<h2 class="title">Mutiny</h2><div class="prose">' + prose(v.log.join("\n\n")) + "</div>";
+    var side = '<p class="small">' + (v.loyal.length ? "With you: " + esc(v.loyal.join(", ")) + " (+" + Math.min(2, v.loyal.length) + " on your roll). " : "No officer stands with you. ") +
+      (v.ringleader ? (v.ringleader.known ? "Leading them: <b>" + esc(v.ringleader.name) + "</b>." : "One of your officers is behind this, but you don't know which.") : "") + "</p>";
+    if (v.stage === "approach") {
+      return html + side + opts(v.approaches.map(function (a) {
+        return opt({ act: "mutapproach", attrs: 'data-id="' + a.id + '"', label: a.label, check: a.lock ? null : PC.checks.assess(state, a.check, { conditions: [] }), meta: a.note, lock: a.lock });
+      }));
+    }
+    html += mutinyResult(v.result);
+    if (v.stage === "ringleaderFate") {
+      return html + "<p>" + esc(v.ringleader ? v.ringleader.name : "He") + " is at your mercy.</p>" + opts([
+        opt({ act: "mutfate", attrs: 'data-how="kill"', label: "Kill him", meta: "Dread +" + PC.data.mutiny.RINGLEADER_KILL_DREAD + "." }),
+        opt({ act: "mutfate", attrs: 'data-how="ashore"', label: "Put him ashore at the next port", meta: "He leaves with nothing. Dread +" + PC.data.mutiny.RINGLEADER_ASHORE_DREAD + "." }),
+        opt({ act: "mutfate", attrs: 'data-how="plank"', label: "Make him walk the plank", meta: "Dread +" + PC.data.mutiny.PLANK_DREAD + "." })]);
+    }
+    if (v.stage === "quelled") {
+      var go = v.when === "departure" ? "Carry on" : "Back to work";
+      return html + '<div class="actions"><button class="primary" data-act="mutcarry" data-top="1">' + go + "</button></div>";
+    }
+    if (v.stage === "plea" || v.stage === "lastStand" || v.stage === "over") html += mutinyResult(v.plea);
+    if (v.stage === "plea") {
+      return html + opts([opt({ act: "mutplea", label: "Plead your case", check: PC.checks.assess(state, v.pleaCheck, { conditions: [] }),
+        meta: state.crew.morale < 15 ? "Clean: put ashore. Partial: marooned. Setback: they come for you." : "Clean or partial: put ashore. Setback: marooned." })]);
+    }
+    if (v.stage === "lastStand" || v.stage === "over") html += mutinyResult(v.stand);
+    if (v.stage === "lastStand") {
+      return html + opts([opt({ act: "mutstand", label: "Fight for your life", check: PC.checks.assess(state, v.standCheck, { conditions: [] }),
+        meta: "Clean: you cut your way to a boat, Wounded. Partial: marooned, Wounded. Setback: killed, unless a friend gives his life for yours." })]);
+    }
+    return html + '<div class="actions"><button class="primary" data-act="mutafter" data-top="1">' + (v.ending === "marooned" ? "Alone on the sand" : "Continue") + "</button></div>";
+  }
 
   function jailPanel() {
     var v = PC.prison.view(state);
@@ -3077,7 +3121,7 @@
         '<p class="small">Add a fleet ship (generated officer-captain): ' + ["Sloop", "Schooner", "Brigantine", "Brig"].map(function (c) { return b("devfleet", c, ' data-cls="' + c + '"'); }).join("") + "</p>" +
         // P8: the crew's hidden numbers.
         '<p class="small">Crew: morale ' + state.crew.morale + " (" + esc(PC.crew.band(state.crew.morale)) + ") · Pressure " + (state.crew.pressure || 0) + " of 5 (mutiny fires at 4 on departure, 5 at season end; not built yet) · set Pressure: " +
-          [0, 2, 3, 4].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + "</p>" +
+          [0, 2, 3, 4, 5].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + " " + b("devmutiny", "Fire a mutiny now") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Run log", '<p class="small">Every choice, roll (with its seed), screen and change this run, and any error: ' + (PC.runlog ? PC.runlog.count() : 0) + " entries. Export it and attach the file in the playtest chat.</p>" +
@@ -4329,6 +4373,13 @@
     "devjail": function (el) { PC.devtools.jail(state, el.dataset.charge); menu = null; },
     "devcaptured": function (el) { PC.devtools.captured(state, el.dataset.flag); menu = null; },
     "devsecret": function () { state.flags.fenceUsed_bobby = true; },
+    "devmutiny": function () { menu = null; PC.mutiny.devFire(state); },
+    "mutapproach": function (el) { PC.mutiny.choose(state, el.dataset.id); },
+    "mutfate": function (el) { PC.mutiny.ringleaderFate(state, el.dataset.how); },
+    "mutplea": function () { PC.mutiny.plea(state); },
+    "mutstand": function () { PC.mutiny.lastStand(state); },
+    "mutcarry": function () { mgMark = 0; PC.mutiny.carryOn(state); },
+    "mutafter": function () { PC.mutiny.afterLoss(state); },
     "devpressure": function (el) { state.crew.pressure = Number(el.dataset.v); if (state.crew.pressure < 3) state.crew.qmWarned = false; },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {

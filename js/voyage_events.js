@@ -334,6 +334,8 @@
     var e = byId(card.id);
     if (!e) return;
     if (e.trigger) noteOfficerEvent(state);
+    // A Pressure-triggered event opens Strike First (§24.13; M9 PR 2).
+    if (e.grumbling && (state.crew.pressure || 0) >= 1 && PC.mutiny) PC.mutiny.noteWarning(state);
     if (e.trigger === "qmOpinion") state.used.qmOpinion = stamp(state);
     if (card.officer) {
       var o = (state.officers || []).filter(function (x) { return x.id === card.officer; })[0];
@@ -671,6 +673,17 @@
     if ("heatZone" in f) { var fz = factionOfZone(v.zone); PC.meters.addHeat(state, fz, f.heatZone); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
     if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; PC.meters.addHeat(state, hf, f.heatHere); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
     if ("pressure" in f) { state.crew.pressure = clamp((state.crew.pressure || 0) + f.pressure, 0, 5); chips.push({ icon: "pressure", text: f.pressure > 0 ? "The crew's grievances grow" : "The talk dies down", ink: f.pressure > 0 ? "bad" : "good" }); }
+    // Read People in a Pressure event (§24.13, §25.14; M9 PR 2): a clean
+    // result reveals how close the crew is and names an officer ringleader;
+    // a partial only the level.
+    if ("reveal" in f && PC.mutiny) {
+      var pr = state.crew.pressure || 0;
+      chips.push({ icon: "pressure", text: "How close the crew is to mutiny: " + pr + " of 5", ink: pr >= 3 ? "bad" : "mid" });
+      if (f.reveal === "full") {
+        var rl = PC.mutiny.noteWarning(state, { name: true });
+        chips.push({ icon: "officer", text: rl ? "Behind it: " + (rl.first + " " + (rl.last || "")).trim() : "No officer is behind it", ink: rl ? "bad" : null });
+      }
+    }
     if ("rumor" in f) {
       var weights = RUMOR_WEIGHTS[f.rumor] || RUMOR_WEIGHTS.C;
       var rec = state.location ? PC.rumors.draw(state, weights, [state.world.seed, stamp(state), v.key, "rumor", v.i].join("|"), "at sea", null, { noA: true }) : null;

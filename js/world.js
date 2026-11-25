@@ -172,9 +172,16 @@
     var from = opts.from || here(state);
     var c = canSail(state, to, opts);
     if (!c.ok) throw new Error(c.why);
+    // Departing a port (§24.10, §24.13): desertion, then the mutiny at
+    // Pressure 4 or more (M9 PR 2). The voyage resumes after a quelled one.
+    var dep = { lines: [], chips: [] };
+    if (!opts.departed && !opts.from && PC.mutiny) {
+      dep = PC.mutiny.depart(state, { kind: "sail", to: to, opts: opts });
+      if (dep.mutiny || dep.blocked) return null;
+    }
     var cost = opts.free ? 0 : apCost(from, to);
-    var lines = [fill(W().lines.sailFor, { Place: placeName(to) })];
-    var chips = [];
+    var lines = dep.lines.concat([fill(W().lines.sailFor, { Place: placeName(to) })]);
+    var chips = dep.chips.slice();
     if (cost) { PC.crew.spendAP(state, cost); chips.push({ icon: "ap", text: plural(cost, "action") + " at sea" }); }
     var b = burn(state, Math.max(1, cost), {});
     lines = lines.concat(b.lines);
@@ -245,6 +252,8 @@
     // Mutiny Pressure drifts by the morale band at season end (§24.13).
     var band = PC.crew.band(state.crew.morale);
     var dp = band === "Mutinous" ? 2 : band === "Sullen" ? 1 : band === "Eager" || band === "Devoted" ? -1 : 0;
+    // Each mutinous officer +1, a Schemer at Wary or below +1 (§24.13, §25.14).
+    if (PC.mutiny) dp += PC.mutiny.seasonPressure(state);
     state.crew.pressure = clamp((state.crew.pressure || 0) + dp, 0, 5);
     // A crew line at Sullen and Mutinous (P7d), and the Quartermaster's
     // warning at Pressure 3 or more (P7c).
@@ -282,6 +291,8 @@
     if (state.location) state.location.place = null;
     state.current = { screen: "node" };
     if (seasonName(state) === "Winter") out.winter = startWinter(state);
+    // The mutiny at Pressure 5 (§24.13; M9 PR 2), after the turn.
+    if (PC.mutiny && PC.mutiny.seasonCheck(state)) out.mutiny = true;
     return out;
   }
 
