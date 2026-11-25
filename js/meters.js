@@ -219,6 +219,19 @@
     return b;
   }
 
+  // The No Quarter tag's lag (§26.8): active from the season after the
+  // Article is selected, and for one season after it is dropped. Read at
+  // each season's end: the tag is on next season if the Article stood at
+  // the end of this season or the one before.
+  function noQuarterLag(state) {
+    var inForce = !!(state.articles && state.articles.terms && state.articles.terms.quarter === "no_quarter");
+    var h = (state.noQuarterEnds = state.noQuarterEnds || []);
+    h.unshift(inForce); h.length = Math.min(h.length, 2);
+    var on = h.some(Boolean), tags = state.captain.tags, i = tags.indexOf("No Quarter");
+    if (on && i < 0) tags.push("No Quarter");
+    if (!on && i >= 0) tags.splice(i, 1);
+  }
+
   function seasonEnd(state) {
     var rec = seasonRec(state), lines = [], chips = [];
     var NAME = { avalon: "Avalon", frisia: "Frisian", pirates: "Pirate" };
@@ -249,7 +262,17 @@
       if (b1 !== b0) lines.push(R().lines.standingBand.replace("{faction}", NAME[f]).replace("{band}", b1));
     });
     var floor = liftToFloor(state);
-    if (!rec.deed && state.meters.dread > floor) {
+    // The No Quarter tag (§26.8, §28.8; the 3-32 check): Dread +2 each season
+    // it is in force, which also holds off the decay.
+    var nq = (state.captain.tags || []).indexOf("No Quarter") >= 0;
+    if (nq) {
+      var q0 = state.meters.dread;
+      state.meters.dread = clamp(q0 + R().NO_QUARTER_DREAD, 0, 100);
+      chips.push({ icon: "dread", text: "Dread +" + (state.meters.dread - q0) + " (No Quarter)", ink: "bad" });
+      if (bonus(state.meters.dread) !== bonus(q0)) lines.push(R().lines.dreadBand.replace("{bonus}", String(bonus(state.meters.dread))));
+    }
+    noQuarterLag(state);
+    if (!rec.deed && !nq && state.meters.dread > floor) {
       var d0 = state.meters.dread, nd = Math.max(floor, d0 - R().DREAD_DECAY);
       state.meters.dread = nd;
       chips.push({ icon: "dread", text: "Dread −" + (d0 - nd) + " (no fear deeds this season)" });

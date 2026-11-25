@@ -249,6 +249,23 @@
     afterBattle(state, game);
   }
 
+  // Prize Taker's four rungs (3-24 of the build 0.9 pins). A higher rung
+  // replaces the one below and keeps its effects (§5.4). Earning one is an
+  // achievement: a big popup with its name, the capture count and its
+  // effect (§5.8). Returns the rung earned, or null.
+  function prizeLadder(state) {
+    var ladder = H().PRIZE_LADDER, n = (state.records || {}).prizes || 0, tags = state.captain.tags;
+    var have = PC.combat.prizeRung(state), reach = 0;
+    ladder.forEach(function (r, i) { if (n >= r.at) reach = i + 1; });
+    if (reach <= have) return null;
+    ladder.forEach(function (r) { var i = tags.indexOf(r.tag); if (i >= 0) tags.splice(i, 1); });
+    var rung = ladder[reach - 1];
+    tags.push(rung.tag);
+    PC.state.addLog(state, "Tag earned: " + rung.tag + " (" + n + " ships taken).");
+    if (state.location) state.location.popup = { title: rung.tag, achievement: true, text: plural(n, "ship") + " taken.\n\n" + rung.effect, chips: [{ icon: "tag", text: "Tag earned: " + rung.tag, ink: "oxblood" }] };
+    return rung;
+  }
+
   // ---- After the battle (§21.15, §22.7) -------------------------------------------
 
   // The after-battle chips (A10 of the M5 playtest): chips with a merge key
@@ -305,11 +322,12 @@
       });
       if (up) battleChips.push({ icon: "morale", text: plural(up, "hand") + " seasoned a step", ink: "good" });
     }
-    // Records: Prize Taker at 5 captures, Duelist at 3 duels won (§14.4).
+    // Records: Prize Taker's ladder (3-24), Duelist at 3 duels won (§14.4).
     var rec = (state.records = state.records || { prizes: 0, duels: 0 });
     rec.duels += game.duelsWon || 0; game.duelsWon = 0;
     rec.prizes += captured.length;
-    if (rec.prizes >= H().PRIZE_TAKER_AT && state.captain.tags.indexOf("Prize Taker") < 0) { state.captain.tags.push("Prize Taker"); chips.push({ icon: "tag", text: "New tag: Prize Taker", ink: "oxblood" }); }
+    var rungUp = prizeLadder(state);
+    if (rungUp) { chips.push({ icon: "tag", text: "New tag: " + rungUp.tag, ink: "oxblood" }); battleChips.push({ icon: "tag", text: "New tag: " + rungUp.tag + " (" + rec.prizes + " ships taken)", ink: "oxblood" }); }
     if (rec.duels >= H().DUELIST_AT && state.captain.tags.indexOf("Duelist") < 0) { state.captain.tags.push("Duelist"); chips.push({ icon: "tag", text: "New tag: Duelist", ink: "oxblood" }); }
     if (b.over === "fled") { battleChips.push({ icon: "morale", text: "Morale −15 for running", ink: "bad" }); chips.push(mchip("morale", "morale", H().FLEE_MORALE, "Crew morale {+n}")); }
     var hpLost = Math.max(0, b.startHull.flagship - state.ship.hull);
@@ -481,6 +499,8 @@
     if (ch.hull === "replace") {
       var sw = replacePrize(state, e, ch.replace, ch.oldFate);
       shipRec = sw.rec;
+      // 3-22: the old prize, let go or scuttled, leaves "what you took".
+      if (game.after.names) game.after.names = game.after.names.filter(function (n) { return String(n).indexOf(sw.oldName) < 0; });
       chips.push({ icon: "ship", text: "Prize ship: " + (e.name || e.cls) + " in place of the " + sw.oldName + (sw.oldFate === "scuttle" ? " (scuttled)" : " (let go)") });
       if (sw.thrown.length) chips.push({ icon: "cond", text: "Over the side, for want of room: " + sw.thrown.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions" : x.what); }).join(", "), ink: "bad" });
     } else if (ch.hull === "prize" || ch.hull === "fleet") {
@@ -517,10 +537,13 @@
     var gain = Math.min(loot.level >= 3 ? H().PRIZE_MORALE.big : H().PRIZE_MORALE.small, H().PRIZE_MORALE.cap - game.prizeMorale);
     if (gain > 0 && !e.hunter) { game.prizeMorale += gain; PC.crew.addMorale(state, gain); chips.push(mchip("morale", "morale", gain, "Crew morale {+n}")); }
     game.prizesTaken += 1;
-    PC.state.addLog(state, "Took " + name + " (" + e.flag + " " + e.cls + ").");
+    // 3-22 of the build 0.9 pins: a ship scuttled or let go isn't one you
+    // took; she leaves "what you took" and the log says what became of her.
+    var kept = ch.hull !== "scuttle" && ch.hull !== "release";
+    PC.state.addLog(state, (kept ? "Took " : ch.hull === "scuttle" ? "Plundered and scuttled " : "Plundered and let go ") + name + " (" + e.flag + " " + e.cls + ").");
     game.after.chips = game.after.chips.concat(chips);
     game.after.battleSeen = true;
-    game.after.names = (game.after.names || []).concat([name]);
+    if (kept) game.after.names = (game.after.names || []).concat([name]);
     game.after.lastPrize = { name: name, chips: chips };
     game.after.current = null;
     return chips;
@@ -988,6 +1011,7 @@
   }
 
   PC.hunt = {
+    prizeLadder: prizeLadder,
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     takeHands: takeHands, doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
     canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck, repairShares: repairShares,

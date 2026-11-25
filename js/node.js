@@ -393,13 +393,13 @@
     if (q && q.status === "done") return null;
     var lead = loss === "B" ? "bald_man" : "trident";
     if (PC.quests.hasLead(state, "what_was_lost", lead) || (lead === "trident" && flag(state, "lead_trident_heard"))) return null;
-    return { label: L.label, line: L[loss] };
+    return { label: (L.labels && L.labels[loss]) || L.label, line: L[loss], then: loss === "B" && !flag(state, F.underworld) ? "ocr_uw_1" : null };
   }
 
   function askKeeperQuestion(state, qid) {
     var id = here(state), who = slotNpc(id, "keeper");
     var q = (nodeData(id).lines.keeper.questions || []).filter(function (x) { return x.id === qid; })[0];
-    if (!q && qid === "loss_lead") { var ll = lossLeadQuestion(state); if (ll) q = { id: qid, label: PC.text.render(ll.label, state), line: ll.line }; }
+    if (!q && qid === "loss_lead") { var ll = lossLeadQuestion(state); if (ll) q = { id: qid, label: PC.text.render(ll.label, state), line: ll.line, then: ll.then }; }
     if (!q) throw new Error("He has nothing to say about that.");
     if (greeting(state, id, who, "keeper").refuse) return { refuse: true, line: nodeData(id).lines.keeper.refuse };
     state.npcs[who] = state.npcs[who] || {};
@@ -407,7 +407,7 @@
     (state.flags.keeperAsked = state.flags.keeperAsked || {})[qid] = state.location ? state.location.visit || true : true;
     if (q.meets) (state.npcs[q.meets] = state.npcs[q.meets] || {}).met = true;
     tavernActionDone(state); // a question counts as the first Tavern action (Bug Log B4)
-    return { label: q.label, line: PC.text.render(q.line.replace(/\{keeper\}/g, PC.npcs.get(state, who).first), state) };
+    return { label: q.label, line: PC.text.render(q.line.replace(/\{keeper\}/g, PC.npcs.get(state, who).first), state), then: q.then || null };
   }
 
   function talkToKeeper(state) {
@@ -1194,6 +1194,7 @@
       var fall = pre.concat(lines);
       if (!fall.length && !(opts.voyage && opts.voyage.chips.length)) { state.location.popup = null; PC.scenes.enterScene(state, nextQueued(state)); return null; }
       state.location.popup = { title: "Arrival at " + nd.name, lines: fall, chips: fall.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), ok: "popupscene" };
+      PC.world.placeRead(state.location.popup.chips, opts.voyage);
       return state.location.popup;
     }
     var fee = payPortFee(state, id);
@@ -1206,12 +1207,13 @@
       state.location.queue = (state.location.queue || []).concat([insp.scene]);
       var all0 = pre.concat(lines);
       state.location.popup = { title: "Arrival at " + nd.name, lines: all0, chips: all0.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), ok: "popupscene" };
+      PC.world.placeRead(state.location.popup.chips, opts.voyage);
       return state.location.popup;
     }
     // P16: the lines carry which pot paid in brackets, so the old pay chips
     // under them (which repeated the lines) are gone.
     var all = pre.concat(lines);
-    var chips = all.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []);
+    var chips = PC.world.placeRead(all.map(function (l) { return { icon: "port", text: l }; }).concat(opts.voyage ? opts.voyage.chips : []), opts.voyage);
     state.location.popup = { title: "Arrival at " + nd.name, lines: all, chips: chips };
     return state.location.popup;
   }

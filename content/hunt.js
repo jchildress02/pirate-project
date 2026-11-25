@@ -209,7 +209,17 @@
     PRIZE_MORALE: { small: 5, big: 10, cap: 10 },
     FLEE_MORALE: -15,
     PRIZE_SHIP_CAP: 3,
-    PRIZE_TAKER_AT: 5, DUELIST_AT: 3,
+    // Prize Taker's four rungs (3-24 of the build 0.9 pins): a higher rung
+    // replaces the one below and keeps its effects (§5.4). Counts are
+    // placeholders (Tuning Table). All four built now, past §5.4's tier II
+    // Slice cap (ruled).
+    PRIZE_LADDER: [
+      { at: 10, tag: "Prize Taker", effect: "Before a ship strikes, you may try a show of force: +1 on the strike roll on a clean result." },
+      { at: 50, tag: "Sea Wolf", effect: "Your show of force also gives +1 on a partial." },
+      { at: 100, tag: "Scourge of the Coast", effect: "+1 on every strike-colors roll before battle. Your name has become a legend in the taverns." },
+      { at: 500, tag: "Terror of the Seas", effect: "Trade ships strike on a partial as well as a clean. Dread floor +10." },
+    ],
+    PRIZE_TAKER_AT: 10, DUELIST_AT: 3,
     EXECUTE_DREAD: 3,
     // Standing and Heat per prize (§28.3, §28.6), as the simulator: [Heat, Standing]
     UNCOVERED: { "own merchant": [6, -2], "own navy": [12, -10], "ally merchant": [2, -1], "ally navy": [2, -1] },

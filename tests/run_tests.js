@@ -1382,8 +1382,8 @@ test("crew actions: Rally (1 action, once a season), Drill, Give, the stores", f
   PC.crew.drill(s); ok(PC.crew.drilled(s));
   s.money.purse = 300;
   var m = s.crew.morale;
-  eq(PC.crew.give(s, 300), 5); // 300 / 12 hands / 5 = 5
-  eq(s.crew.morale, m + 5); eq(s.money.purse, 0);
+  eq(PC.crew.give(s, 300), 8); // 300 / 12 hands / 3 = 8 (3-38)
+  eq(s.crew.morale, m + 8); eq(s.money.purse, 0);
   // One unit per 5 hands, rounded up: 12 hands need 3 (Playtest Pins 0.8, #24).
   eq(PC.crew.storesNeeded(s), 3);
   PC.node.buyGood(s, "Kill-devil rum", 2);
@@ -2542,16 +2542,16 @@ test("a forced split at Pressure 4 can't be declined", function () {
   ok(threw);
 });
 
-test("the split: 10% carried over, the captain's share to the purse, prize ships sold, morale 50, Pressure 0", function () {
+test("the split: 25% carried over (3-39), the captain's share to the purse, prize ships sold, morale halfway to 50 (3-40), Pressure 0", function () {
   var s = m7("split"); s.time.season = 2; s.money.crew = 1000; s.money.purse = 0; s.crew.pressure = 3; s.crew.morale = 80;
   s.fleet.push({ id: "p1", kind: "prize", cls: "Barque", name: "Hope", size: 2, hull: 45, hullMax: 45, guns: 0, crew: 8, crewMin: 8, crewTiers: { Green: 8 }, cargo: 250, dirty: false });
   PC.world.endSeason(s);
   var pay = PC.world.doSplit(s);
   ok(pay.sold.length === 1 && pay.sold[0].gold > 0);
-  eq(pay.carry, Math.round(pay.pool * 0.1));
+  eq(pay.carry, Math.round(pay.pool * 0.25));
   eq(s.money.crew, pay.carry);
   eq(s.money.purse, pay.captain);
-  eq(s.crew.morale, 50); eq(s.crew.pressure, 0); eq(s.ap.left, 0);
+  eq(s.crew.morale, 65 + (s.crew.floor || 0), "80 settles halfway to 50"); eq(s.crew.pressure, 0); eq(s.ap.left, 0);
   eq(s.fleet.filter(function (f) { return f.kind === "prize"; }).length, 0);
   ok(!PC.world.canSail(s, "norfolk").ok, "no voyage in a split Winter");
   ok(PC.node.places(s).filter(function (p) { return p.id === "tavern"; })[0].locked, "no port business");
@@ -3233,12 +3233,12 @@ test("Standing's drift: +2 a season with no offense, stopping at -9; an offense 
   s.meters.standing.pirates = -20; PC.meters.addStanding(s, "pirates", -1); PC.meters.seasonEnd(s); eq(s.meters.standing.pirates, -21);
 });
 
-test("Dread: -2 a season with no fear deed, never below the floor; One Eye lifts the floor to 10 at once", function () {
+test("Dread: -1 a season with no fear deed (3-32), never below the floor; One Eye lifts the floor to 10 at once", function () {
   var s = atNorfolk("mt5");
-  s.meters.dread = 20; PC.meters.seasonEnd(s); eq(s.meters.dread, 18);
+  s.meters.dread = 20; PC.meters.seasonEnd(s); eq(s.meters.dread, 19);
   var bs = s.meters.standing.pirates;
-  PC.meters.fearDeed(s); eq(s.meters.dread, 20); eq(s.meters.standing.pirates, bs + 1);
-  PC.meters.seasonEnd(s); eq(s.meters.dread, 20, "a fear deed stops the decay");
+  PC.meters.fearDeed(s); eq(s.meters.dread, 21); eq(s.meters.standing.pirates, bs + 1);
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 21, "a fear deed stops the decay");
   s.meters.dread = 4;
   PC.scenes.applyEffect(s, { tag: "One Eye" });
   eq(PC.meters.dreadFloor(s), 10); eq(s.meters.dread, 10);
@@ -4089,6 +4089,90 @@ test("#49: an empty horizon on the batch's last roll goes straight to the batch'
   try { var guard = 0; g.batch.found = 1; while (g.phase === "empty" && guard++ < 10) PC.hunt.next(s, g); } finally { PC.huntGen.density = real; }
   ok(g.phase === "batchEnd" || g.phase === "scout" || g.phase === "hunter", "never an empty screen after the last roll: " + g.phase);
   ok(g.phase !== "empty");
+});
+
+// ---- PR 1E: playthrough 3 of the build 0.9 pins ----
+
+test("3-24: Prize Taker's four rungs at 10/50/100/500; a higher rung replaces the one below, with an achievement popup", function () {
+  var s = m7("pt1"); s.records = { prizes: 9, duels: 0 };
+  eq(PC.hunt.prizeLadder(s), null, "9 captures: no rung yet (was 5)");
+  s.records.prizes = 10; eq(PC.hunt.prizeLadder(s).tag, "Prize Taker");
+  ok(s.location.popup && s.location.popup.achievement && /10 ships taken/.test(s.location.popup.text), "the achievement popup");
+  eq(PC.combat.prizeRung(s), 1);
+  s.records.prizes = 50; s.location.popup = null; eq(PC.hunt.prizeLadder(s).tag, "Sea Wolf");
+  ok(s.captain.tags.indexOf("Prize Taker") < 0 && s.captain.tags.indexOf("Sea Wolf") >= 0, "Sea Wolf replaces Prize Taker");
+  eq(PC.hunt.prizeLadder(s), null, "no popup twice");
+  s.records.prizes = 500; eq(PC.hunt.prizeLadder(s).tag, "Terror of the Seas");
+  eq(PC.combat.prizeRung(s), 4);
+  ok(PC.meters.dreadFloor(s) >= 10, "Terror of the Seas: Dread floor +10");
+  ok(PC.rumors && PC.data.rumors.pool.some(function (l) { return l.id === "legend_scourge" && PC.scenes.test(s, l.when); }), "a Legend rumor about the captain");
+});
+
+test("3-32: No Quarter's tag lags a season, adds Dread +2 a season and holds off the decay; it stays one season after it's dropped", function () {
+  var s = atNorfolk("nq1"); s.meters.dread = 20;
+  s.articles.terms.quarter = "no_quarter";
+  PC.meters.seasonEnd(s);
+  eq(s.meters.dread, 19, "Spring: not yet in force (the decay, -1)");
+  ok(s.captain.tags.indexOf("No Quarter") >= 0, "the tag from the next season");
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 21, "Summer: +2, no decay");
+  s.articles.terms.quarter = "quarter_asked";
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 23, "dropped: still in force one more season");
+  ok(s.captain.tags.indexOf("No Quarter") >= 0);
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 25);
+  ok(s.captain.tags.indexOf("No Quarter") < 0, "then gone");
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 24);
+});
+
+test("3-29: Held costs 3 actions in all; the cell's actions count toward them, and the season's other actions stay", function () {
+  var s = atNorfolk("h29"); s.meters.heat.avalon = 10; s.money.crew = 1000; s.ap.left = 6;
+  PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+  eq(s.ap.left, 6, "no actions lost on jailing");
+  eq(PC.prison.view(s).left, 3);
+  withDice([6, 6], function () { PC.escape.plan(s, "study"); });
+  eq(PC.prison.view(s).left, 2, "a plan counts");
+  PC.prison.wait(s); PC.prison.wait(s);
+  ok(!s.jail, "out after three"); eq(s.ap.left, 3);
+});
+
+test("3-28: a cell plan's result carries its outcome for the result chip", function () {
+  var s = jailedAt("c28", 50);
+  var r; withDice([6, 6], function () { r = PC.escape.plan(s, "study"); });
+  eq(r.outcome, "clean");
+});
+
+test("3-5: the keeper's loss-lead questions are the author's; Variant B's answer leads straight into Bobby's scene", function () {
+  var s = ocr("k35"); s.captain.loss = "B"; playOpening(s);
+  PC.node.enter(s, "tavern");
+  var q = PC.node.keeperQuestions(s).filter(function (x) { return x.id === "loss_lead"; })[0];
+  eq(q.label, "I'm looking for my family's valuables. Do you know anything?");
+  var r = PC.node.askKeeperQuestion(s, "loss_lead");
+  ok(!/PLACEHOLDER/.test(r.line)); eq(r.then, "ocr_uw_1");
+  var a = ocr("k35a"); a.captain.loss = "A"; playOpening(a); PC.node.enter(a, "tavern");
+  var ra = PC.node.askKeeperQuestion(a, "loss_lead");
+  eq(ra.then, null); ok(/someone like that/.test(ra.line));
+});
+
+test("3-35: after an escape on his own ship, a mandatory voyage event comes before the ocean node", function () {
+  ve("e35", function (s) {
+  PC.voyageEvents.afterEscape(s, "hatteras", null);
+  eq(s.current.screen, "event"); eq(PC.voyageEvents.view(s).id, "ve_escape_crew");
+  PC.voyageEvents.choose(s, 0); PC.voyageEvents.next(s);
+  eq(s.current.screen, "node"); ok(!s.voyage);
+  var o = s.officers[0];
+  PC.voyageEvents.afterEscape(s, "hatteras", o.id);
+  eq(PC.voyageEvents.view(s).id, "ve_escape_officer");
+  ok(PC.voyageEvents.view(s).text.indexOf(o.first) >= 0, "the new officer by name");
+  });
+});
+
+test("3-34: Read Weather sits above the passage line in the arrival popup", function () {
+  var chip = { text: "Read Weather" }, v = { readChip: chip, readAt: 1 };
+  var out = PC.world.placeRead([{ text: "sail" }, { text: "passage" }, { text: "prov" }, chip], v);
+  eq(out.map(function (c) { return c.text; }).join(","), "sail,Read Weather,passage,prov");
+});
+
+test("3-22 and the hurricane log: no \"the the\"", function () {
+  ok(!/the \[Waters\]/.test(JSON.stringify(PC.data.weather.lines)));
 });
 
 test("the build label reads Build 0.9 · Milestone 8", function () {

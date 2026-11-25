@@ -348,6 +348,24 @@
 
   // ---- Officer events (§25.15; the §25 appendix). Each fires only when
   // its trigger is met (§44.4). The priority order (§44.12.9).
+  // After an escape on the captain's own ship (3-35 of the build 0.9 pins):
+  // a mandatory event before the ocean node. Two versions; the author
+  // writes both (PLACEHOLDER lines until then).
+  var afterEscape = [
+    { id: "ve_escape_officer", reg: "VE-X01", name: "Away with a New Officer", mandatory: true,
+      setup: "PLACEHOLDER: The harbor lights fall away astern. [Name], who shared your cell only hours ago, joins you at the rail.",
+      choices: [
+        { label: "PLACEHOLDER: Welcome [Name] aboard properly", result: { text: "PLACEHOLDER: [Name] grins and shakes your hand.", fx: [] } },
+        { label: "PLACEHOLDER: Ask [Name] what landed them in that cell", result: { text: "PLACEHOLDER: [Name] tells you, and you listen.", fx: [] } },
+      ] },
+    { id: "ve_escape_crew", reg: "VE-X02", name: "Away with the Crew", mandatory: true,
+      setup: "PLACEHOLDER: The harbor lights fall away astern. The crew gather on deck, waiting to hear from their captain.",
+      choices: [
+        { label: "PLACEHOLDER: Thank them for waiting", result: { text: "PLACEHOLDER: A cheer goes up from the deck.", fx: [] } },
+        { label: "PLACEHOLDER: Tell them to make sail and keep quiet", result: { text: "PLACEHOLDER: The crew go to their work without a word.", fx: [] } },
+      ] },
+  ];
+
   var officerAtSea = [
     { id: "vo_vote", reg: "VE-O03", name: "The Vote", trigger: "vote",
       setup: "As the crew prepares to vote on a new Quartermaster, a few men glance your way, waiting to see if you'll weigh in.", vote: true },
@@ -520,7 +538,7 @@
     STORM_SETBACK: { hull: [0.10, 0.15], hands: [1, 3], hurricaneHull: [0.15, 0.25], hurricaneHands: [2, 5] },
     FOUNDER: { fleetCrewLost: [0.25, 0.50], fleetOfficerLost: 0.10, aloneOfficerSurvive: 0.50, aloneCrewSurvive: [0.10, 0.30] },
     written: written, hurricane: hurricane, breakingUp: breakingUp, encounters: encounters, approved: approved,
-    officerAtSea: officerAtSea, officerInPort: officerInPort, fearLines: fearLines, voteReact: voteReact,
+    officerAtSea: officerAtSea, officerInPort: officerInPort, afterEscape: afterEscape, fearLines: fearLines, voteReact: voteReact,
     lines: {
       founderedFleet: "PLACEHOLDER: She goes down at last. Your men scramble across to the [Ship] as the sea takes your flagship.",
       founderedAlone: "PLACEHOLDER: She goes down, and you go into the sea with her.",

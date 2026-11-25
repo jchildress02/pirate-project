@@ -28,11 +28,14 @@
       // Legend
       { id: "legend_lantern", node: "ocracoke", type: "Legend", text: "\"They say that you can see a lantern burning out on the wrecks at night. I don't know who could be lighting it.\"" },
       { id: "legend_voice", node: "ocracoke", type: "Legend", text: "\"Fisherman swears he heard a voice coming from the Graveyard last night. Said it kept saying the same thing over and over again. Wouldn't tell me what.\"" },
+      // Scourge of the Coast starts a Legend rumor about the captain (3-24, §30). PLACEHOLDER: the author's line.
+      { id: "legend_scourge", type: "Legend", when: { any: [{ tag: "Scourge of the Coast" }, { tag: "Terror of the Seas" }] }, tier: "B",
+        text: "\"PLACEHOLDER: They say [Player] has taken a hundred ships, and that merchantmen strike their colors at the sight of the [Ship]'s topsails.\"" },
       { id: "legend_giant_shark", node: "ocracoke", type: "Legend", text: "\"Heard some sailors say they saw a shark the length of a frigate. Sharks can't grow that big, can they?\"" },
 
       // Danger (they name a real danger spot this season, §30.9)
       { id: "danger_patrol", type: "Danger", spot: "Patrol", text: "\"They're saying the guards at [Node] are cracking down on smuggling. Best not to have any dirty goods in your hold when you dock there.\"" },
-      { id: "danger_hunters", type: "Danger", spot: "Hunter's Waters", text: "\"[Faction] has their hunters out in force near the [Waters].\"" },
+      { id: "danger_hunters", type: "Danger", spot: "Hunter's Waters", text: "\"[Faction] has their hunters out in force near [Waters].\"" },
 
       // World State: the posture, true about last season (two lines each), and the loyalists
       { id: "ws_distracted_1", type: "World State", posture: "Distracted", text: "\"Heard the Frisians lost a big battle in Sweden. Now they're putting out a call for more reinforcements.\"" },
