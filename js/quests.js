@@ -118,7 +118,10 @@
     // A Wanted Man (Norfolk Scene Records §3): assigned at Key's introduction.
     // D2: Freddy isn't at sea until Milestone 9 (PH29).
     var wm = S.a_wanted_man;
-    if (wm && f.a_wanted_man_assigned) out.push(f.a_wanted_man_done ? entry("a_wanted_man", "done", wm.doneLine) : entry("a_wanted_man", "open", wm.steps.assigned));
+    if (wm && f.a_wanted_man_assigned) {
+      var wl = PC.wanted ? PC.wanted.journalLine(state) : wm.steps.assigned;
+      out.push(f.a_wanted_man_done && !f.turnin_unfinished ? entry("a_wanted_man", "done", wl || wm.doneLine) : entry("a_wanted_man", "open", wl));
+    }
     var rr = S.restless;
     if (rr && PC.officers) {
       var aboard = PC.officers.aboard ? PC.officers.aboard(state).some(function (o) { return o.id === "davey"; }) : false;

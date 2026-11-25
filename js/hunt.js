@@ -99,6 +99,8 @@
     // A taken Admiralty bounty in these waters (§17.4.8; M9 PR 3): its own
     // seeded draw, so the batch's other rolls don't shift.
     if (PC.bounties && !game.encounter) { var bt = PC.bounties.batchTarget(state, game.waters, PC.rng.fromKey(M().key(state, game, "bounty"))); if (bt) game.batch.bounty = bt.id; }
+    // A Wanted Man's target in the Hatteras Banks (Norfolk Scene Records §3; M9 PR 4).
+    if (PC.wanted && !game.encounter && PC.wanted.batchTarget(state, game.waters, PC.rng.fromKey(M().key(state, game, "wanted")))) game.batch.wanted = true;
     game.force = null;
     // #42 of the build 0.9 pins: no "The weather: …" line; the batch's weather chip says it.
     if (cond === "Storm") stormBatch(state, game);
@@ -194,7 +196,12 @@
     if (b.next >= b.n) { game.phase = "batchEnd"; game.sighting = null; if (canReadAhead(state, game)) readAhead(state, game); return; }
     var i = b.next; b.next += 1;
     var grp = null;
-    if (b.bounty && !b.bountyShown && i === (b.hunter ? 1 : 0) && PC.bounties.notice(state, b.bounty) && PC.bounties.notice(state, b.bounty).status === "taken") {
+    var firstFree = b.hunter ? 1 : 0;
+    if (b.wanted && !b.wantedShown && i === firstFree && PC.wanted.atLarge(state)) {
+      b.wantedShown = true;
+      grp = PC.wanted.ship(state, PC.rng.fromKey(M().key(state, game, "wanted-ship")));
+    }
+    else if (b.bounty && !b.bountyShown && i === firstFree + (b.wanted ? 1 : 0) && PC.bounties.notice(state, b.bounty) && PC.bounties.notice(state, b.bounty).status === "taken") {
       b.bountyShown = true;
       grp = PC.bounties.targetShip(state, PC.bounties.notice(state, b.bounty), PC.rng.fromKey(M().key(state, game, "bounty-ship")));
     }
@@ -328,6 +335,7 @@
     var captured = b.captured.map(function (id) { return b.enemies.filter(function (e) { return e.id === id; })[0]; });
     // A bounty target who went down with his ship (§17.4.8).
     if (PC.bounties) b.enemies.forEach(function (e) { if (e.bounty && e.out === "sunk") PC.bounties.sunk(state, e.bounty); });
+    if (PC.wanted) b.enemies.forEach(function (e) { if (e.wanted && e.out === "sunk") PC.wanted.sunk(state, e); });
     // Seasoning after a won battle (§24.3): not when she struck before any fighting.
     if (fought && captured.length) {
       var sr = M().rand(state, game, "season");
@@ -411,7 +419,8 @@
       var e = game.battle.enemies.filter(function (x) { return x.id === id; })[0];
       var loot = G().rollLoot(state, e, M().rand(state, game, "loot"));
       // A bounty target: Poor loot, and a 10% chance of an Uncommon item (§17.4.8).
-      if (e.bounty) { var bn = PC.bounties.notice(state, e.bounty); loot.item = bn && bn.item ? "Shark-Tooth Necklace" : null; } // DEFAULT: a stand-in Uncommon until the item catalog (PR 5)
+      if (e.bounty) { var bn = PC.bounties.notice(state, e.bounty); loot.item = bn && bn.item ? "Shark-Tooth Necklace" : null; }
+      if (e.wanted) loot.item = null; // his own item comes with the surrender scene (§3) // DEFAULT: a stand-in Uncommon until the item catalog (PR 5)
       // Porcelain broke on her heavy hits (§21.11).
       if (loot.goods["Ming porcelain"]) loot.goods["Ming porcelain"] = Math.round(loot.goods["Ming porcelain"] * Math.pow(1 - H().PORCELAIN_BREAK, e.heavyHits || 0));
       var vr = M().rand(state, game, "volunteers");
@@ -510,7 +519,8 @@
       else chips.push({ icon: "cond", text: "No berths for her volunteers" });
     }
     // Her captain (§17.4.8, §17.4.4): a bounty target or a French straggler.
-    if (PC.bounties) PC.bounties.settleCaptain(state, e, ch.captain).forEach(function (c) { chips.push(c); });
+    if (e.wanted && PC.wanted) PC.wanted.settleCaptain(state, e, ch.captain).forEach(function (c) { chips.push(c); });
+    else if (PC.bounties) PC.bounties.settleCaptain(state, e, ch.captain).forEach(function (c) { chips.push(c); });
     // Standing and Heat (§28.3, §28.6): no letter, so every prize but a
     // pirate is uncovered. An executed crew costs no Heat.
     meterChips(state, e, crewChoice === "execute").forEach(function (c) { chips.push(c); });
@@ -830,7 +840,8 @@
           gunsRange: G().range(s.guns), crewRange: G().range(s.crew), hull: G().hullWord(s),
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
-          draft: s.draft, cue: s.cue, bounty: s.bounty ? (PC.bounties.notice(state, s.bounty) || {}).name || null : null, french: !!s.french, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
+          draft: s.draft, cue: s.cue, bounty: s.bounty ? (PC.bounties.notice(state, s.bounty) || {}).name || null : null, wanted: s.wanted ? s.captain : null,
+          rating: (state.captain.items || []).indexOf("Key's Spyglass") >= 0 ? s.rating : null, french: !!s.french, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
           legit: legitLine(state, s) };
       }),
     };
@@ -930,7 +941,7 @@
       id: e.id, cls: e.cls, name: e.name, flag: e.flag, role: e.role, captain: e.captain, title: e.title, level: H().LEVELS[l.level],
       hull: Math.round(e.hull), hullMax: e.hullMax, guns: e.guns, crew: e.crew, crewMin: e.crewMin, cargo: e.cargo,
       treasure: l.treasure, goods: l.goods, provisions: l.provisions, chest: l.chest, captives: l.captives,
-      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), captainFate: PC.bounties ? PC.bounties.captainOptions(state, e) : null, hullOptions: hullOptions(state, game).map(function (o) {
+      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), captainFate: e.wanted && PC.wanted ? PC.wanted.captainOptions(state, e) : PC.bounties ? PC.bounties.captainOptions(state, e) : null, hullOptions: hullOptions(state, game).map(function (o) {
         // Keeping her hull adds her hold to the pool before her cargo comes across (A7).
         o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
         if (o.id === "replace" && !o.lock && o.olds && o.olds[0]) o.addsHold = (e.cargo || 0) - o.olds[0].cargo; // with the first old prize picked

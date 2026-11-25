@@ -155,6 +155,8 @@
       // A taken Admiralty bounty's rumor (§17.4.8; M9 PR 3): one candidate
       // per taken notice still without its rumor, at any port.
       if (l.bounty) { bountyCands(state, l).forEach(function (c) { out.push(c); }); return; }
+      // A Wanted Man's rumor, while he's at large (§3; M9 PR 4).
+      if (l.wanted) { if (PC.wanted && PC.wanted.rumorOpen(state) && !live(state, l.id)) out.push({ line: Object.assign({}, l, { node: null }), extra: { wanted: true } }); return; }
       if (l.node && l.node !== node) return; // a node's own lines stay at that node
       if (l.posture && l.posture !== state.world.posture) return;
       if (l.when && !PC.scenes.test(state, l.when)) return;
@@ -187,6 +189,7 @@
   function tell(state, c, source) {
     var text = c.ctx && c.ctx.bounty ? PC.bounties.render(state, c.line.text, PC.bounties.notice(state, c.ctx.bounty)) : render(state, c.line, c.ctx);
     if (c.ctx && c.ctx.bounty) PC.bounties.heardRumor(state, c.ctx.bounty);
+    if (c.line.wanted && PC.wanted) PC.wanted.heardRumor(state);
     var rec = remember(state, c.line, text, source, c.extra);
     if (c.line.type === "Node") {
       var d = (state.npcs[c.extra.npc] = state.npcs[c.extra.npc] || {});

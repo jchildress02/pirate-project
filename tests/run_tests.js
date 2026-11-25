@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js", "content/wanted_man.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -4342,7 +4342,7 @@ test("season Pressure: +1 for each mutinous officer and a Schemer at Wary or bel
 test("save 13 loads as 14 with the mutiny fields", function () {
   var s = m7("sv14"); var old = JSON.parse(PC.state.serialize(s)); old.saveVersion = 13; delete old.mutiny;
   var t = PC.state.deserialize(JSON.stringify(old));
-  eq(t.saveVersion, 15); eq(t.mutiny, null); eq(t.prisoners.length, 0);
+  eq(t.saveVersion, 16); eq(t.mutiny, null); eq(t.prisoners.length, 0);
 });
 
 // ---- M9 PR 3: Admiralty Bounties and French stragglers (§17.4.8, §17.4.4, §22.5) ----
@@ -4462,6 +4462,125 @@ test("the journal lists a taken bounty and a French prisoner", function () {
   var s = bountyReady("bo11"); PC.bounties.devOpen(s);
   var n = s.bounties.notices[0]; PC.bounties.take(s, n.id);
   ok(PC.quests.journal(s).some(function (j) { return j.id === "bounty_" + n.id && j.objective.indexOf(n.name) >= 0; }));
+});
+
+// ---- M9 PR 4: A Wanted Man (Norfolk Scene Records §3; D2, D9) ----
+
+function wantedReady(seed) {
+  var s = atNorfolk(seed); s.flags.a_wanted_man_assigned = true; s.flags.admiralty_board_open = true; PC.letters.meet(s, "key");
+  s.seen.nor_lounge = true; s.seen.nor_key_again = true; s.ap.left = 7;
+  return s;
+}
+// Play the battle with every roll clean, stopping at the clash.
+function toClash(s, g) {
+  for (var i = 0; i < 40 && g.battle && g.battle.step !== "clash" && !g.battle.over; i++) {
+    if (g.pending) { PC.minigames.settle(s); continue; }
+    var st = g.battle.step;
+    if (st === "setup") PC.hunt.battle(s, g, "engage");
+    else if (st === "position") PC.hunt.battle(s, g, "doPosition");
+    else if (st === "posChoice") PC.hunt.battle(s, g, "choosePosition", "close");
+    else if (st === "exchange") PC.hunt.battle(s, g, "doExchange", "grape");
+    else if (st === "decision") PC.hunt.battle(s, g, "decide", "board");
+    else if (st === "grapple") PC.hunt.battle(s, g, "doGrapple");
+    else if (st === "strikeFirst" && g.pending) PC.minigames.settle(s);
+    else break;
+  }
+}
+
+test("Freddy: 50% a batch in the Hatteras Banks while he's at large, certain after his rumor; his ship as the record says", function () {
+  var s = wantedReady("wm1");
+  ok(PC.wanted.atLarge(s));
+  eq(PC.wanted.batchTarget(s, "south", function () { return 0; }), false, "the Hatteras Banks only");
+  ok(PC.wanted.batchTarget(s, "north", function () { return 0.4; })); ok(!PC.wanted.batchTarget(s, "north", function () { return 0.6; }));
+  var r = PC.rumors.draw(s, { "Quest": 1 }, "w|1", "a drinking match", "Quest");
+  ok(r && /Freddy Fearless/.test(r.text), r && r.text);
+  ok(PC.wanted.batchTarget(s, "north", function () { return 0.99; }), "the rumor guarantees him");
+  var g = PC.wanted.ship(s, PC.rng.fromKey("t")), sh = g.ships[0];
+  eq(sh.name, "Deadly Delight"); eq(sh.guns, sh.gunsMax); eq(sh.resolve, 4); ok(sh.noStrikePre && sh.neverRuns && sh.forceDuel);
+});
+
+test("the fight: no strike-colors roll at the outset, he never runs, and the first clash is a forced duel; won, he yields alive", function () {
+  var s = wantedReady("wm2");
+  var g = PC.hunt.start(s); g.sighting = PC.wanted.ship(s, PC.rng.fromKey("t2")); g.phase = "scout";
+  forced("clean", function () { withDice([6, 6], function () {
+    PC.hunt.engage(s, g);
+    ok(!g.battle.preStrike, "no strike-colors roll at the outset");
+    ok(g.log.some(function (l) { return /leave an impression/.test(l); }), "the hail");
+    toClash(s, g);
+  }); });
+  eq(g.battle.step, "clash");
+  var acts = PC.combat.actions(s, g.battle);
+  ok(acts.filter(function (a) { return a.id !== "duel"; }).every(function (a) { return a.lock; }), "only the duel");
+  ok(g.log.some(function (l) { return /frighten you/.test(l); }), "the challenge");
+  forced("clean", function () { withDice([6, 6], function () { PC.hunt.battle(s, g, "doAction", "duel"); for (var i = 0; i < 6 && g.pending; i++) PC.minigames.settle(s); }); });
+  var e = g.battle.enemies[0];
+  ok(e.yielded && e.out === "captured", "he yields: " + e.out);
+  ok(g.log.some(function (l) { return /I yield/.test(l); }));
+});
+
+test("the surrender scene: bring him in (a prisoner), let him go (Pirate +5, at Ocracoke) or kill him (Dread, Pirate -5, the trophy); his cutlass either way", function () {
+  var s = wantedReady("wm3"), e = { id: "x", wanted: "freddy" };
+  eq(PC.wanted.captainOptions(s, e).options.length, 5);
+  PC.wanted.settleCaptain(s, e, "bring");
+  ok(s.flags.wanted_alive); ok(PC.bounties.prisoners(s).some(function (p) { return p.kind === "wanted"; }));
+  ok(s.captain.items.indexOf("Freddy's Cutlass") >= 0);
+  var t = wantedReady("wm4"), p0 = t.meters.standing.pirates;
+  PC.wanted.settleCaptain(t, e, "release"); ok(t.flags.wanted_spared && t.flags.freddy_at_ocracoke); eq(t.meters.standing.pirates, p0 + 5);
+  var u = wantedReady("wm5"); u.meters.dread = 0; var q0 = u.meters.standing.pirates;
+  PC.wanted.settleCaptain(u, e, "killHead"); ok(u.flags.wanted_dead && u.flags.trophy_head); eq(u.meters.dread, 5); eq(u.meters.standing.pirates, q0 - 5);
+});
+
+function playTurnin(s, picks) {
+  var fire = PC.node.enter(s, "admiralty");
+  eq(fire, "nor_wm_turnin");
+  PC.scenes.enterScene(s, fire);
+  picks.forEach(function (re) {
+    var v = PC.scenes.viewScene(s);
+    var c = v.choices.filter(function (x) { return x.status !== "hidden" && re.test(x.label); })[0];
+    ok(c, "a choice " + re + " in " + s.current.sceneId + ": " + v.choices.map(function (x) { return x.label + "(" + x.status + ")"; }).join(", "));
+    PC.scenes.choose(s, c.index); PC.scenes.commit(s, "purse");
+  });
+}
+
+test("the turn-in, alive: Freddy handed over, the plan and Finch, the invitation; 1,500 and Key's regard +1; the letter handed over", function () {
+  var s = wantedReady("wm6"); PC.wanted.settleCaptain(s, { wanted: "freddy" }, "bring");
+  var p0 = s.money.purse, r0 = PC.letters.regard(s, "key");
+  playTurnin(s, [/^Continue/, /^Yes, please/, /^Of course/, /^Continue/]);
+  eq(s.money.purse, p0 + 1500); eq(PC.letters.regard(s, "key"), r0 + 1);
+  ok(s.flags.a_wanted_man_done && s.flags.ocracoke_invited && s.flags.key_letter_accepted);
+  eq(PC.bounties.prisoners(s).length, 0, "Freddy handed over");
+  ok(PC.bounties.posting(s), "the board's bounties begin posting");
+});
+
+test("the turn-in, a spared Freddy: the lie; caught, paid the dead rate, regard -2 and Key's side locked", function () {
+  var s = wantedReady("wm7"); PC.wanted.settleCaptain(s, { wanted: "freddy" }, "release");
+  var p0 = s.money.purse, r0 = PC.letters.regard(s, "key");
+  forced("setback", function () { playTurnin(s, [/^He's dead/, /^Leave/]); });
+  eq(s.money.purse, p0 + 750); eq(PC.letters.regard(s, "key"), r0 - 2);
+  ok(s.flags.key_side_locked_ocracoke && s.flags.a_wanted_man_done);
+});
+
+test("the turn-in, killed: a true answer; leaving before the plan pays, and the return finishes the conversation", function () {
+  var s = wantedReady("wm8"); PC.wanted.settleCaptain(s, { wanted: "freddy" }, "kill");
+  var p0 = s.money.purse;
+  playTurnin(s, [/^He's dead/, /^Actually/]);
+  eq(s.money.purse, p0 + 750); ok(s.flags.turnin_unfinished);
+  s.location.place = null; s.current = { screen: "node" };
+  var fire = PC.node.enter(s, "admiralty");
+  eq(fire, "nor_wm_return");
+  PC.scenes.enterScene(s, fire);
+  var v = PC.scenes.viewScene(s);
+  ok(!v.choices.some(function (c) { return c.status !== "hidden" && /^Actually/.test(c.label); }), "no leaving twice");
+});
+
+test("Key's Spyglass at Trusted: given once; +1 Keep Watch and her captain's rating on the scouting card", function () {
+  var s = wantedReady("wm9"); s.flags.a_wanted_man_done = true; PC.letters.addRegard(s, "key", 5);
+  eq(PC.letters.band(s, "key"), "Trusted");
+  var fire = PC.node.enter(s, "admiralty"); eq(fire, "nor_key_spyglass");
+  PC.scenes.enterScene(s, fire); PC.scenes.choose(s, 1); PC.scenes.commit(s);
+  ok(s.captain.items.indexOf("Key's Spyglass") >= 0);
+  var a = PC.checks.assess(s, { type: "Keep Watch", dr: 2 }, { conditions: [] });
+  ok(a.parts.some(function (p) { return /Spyglass/.test(p.label); }), JSON.stringify(a.parts));
 });
 
 test("the build label reads Build 0.9 · Milestone 8", function () {

@@ -61,8 +61,8 @@
   PC.data.startupQuests = {
     a_wanted_man: {
       name: "A Wanted Man",
-      steps: { assigned: "Bring in Freddy Fearless, dead or alive. He was last seen near Ocracoke. [PLACEHOLDER: Freddy isn't at sea yet. He arrives in a later update.]" },
-      doneLine: "Return to the Admiralty House in Norfolk for your reward.",
+      steps: { assigned: "Bring in Freddy Fearless, dead or alive. He was last seen near Ocracoke." },
+      doneLine: "Freddy Fearless is dealt with, and the Admiral has paid.", // PLACEHOLDER: the done line
     },
     dying_wish: {
       name: "A Dying Pirate's Wish",

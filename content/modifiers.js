@@ -149,6 +149,10 @@
   add("Marsh Fever", { note: "Fever Flares fire more often and last two seasons (§11.9)." });
 
   // ---- Earned physical tags the prototype can already reach (§14.5) ----
+  // Key's Spyglass (§17.4.7, §32.8; M9 PR 4): +1 Keep Watch; the scouting card shows her captain's rating.
+  add("Key's Spyglass", { edge: plus(["Keep Watch"], 1), note: "The scouting card shows the enemy captain's rating." });
+  // Freddy's Cutlass (§32.8): a clean Lead the Charge kills one extra enemy (js/combat.js).
+  add("Freddy's Cutlass", { note: "A clean Lead the Charge kills one extra enemy." });
   // Prize Taker's top rung (3-24): Dread floor +10, inside the cap of 40 (§28.8).
   add("Terror of the Seas", { dreadFloor: 10, note: "Dread floor +10 (3-24)." });
   add("One Eye", { dreadFloor: 10, edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
