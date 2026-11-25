@@ -723,3 +723,28 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .panel.achievement .ach-kicker { font-variant: small-caps; letter-spacing: .15em; color: var(--oxblood, #7a1f1f); font-size: .95rem; }
 .panel.achievement .ach-title { font-size: 2.2rem; margin: .2em 0 .4em; }
 .panel.achievement .actions { justify-content: center; }
+
+/* Rule 6 of the scroll rule (3-36, 3-37): compact the minigames' pictures so
+   the header, the game and its buttons fit on one desktop screen. */
+.mg-dive .hotframe, .mg-drink .hotframe { max-width: 460px; }
+.dicetable .felt { max-width: 420px; flex-basis: 320px; }
+
+/* 3-11 of the build 0.9 pins: a check's odds always open downward. The
+   browser's scroll anchoring could shift the page when a box opened near
+   the sticky bar, so the odds seemed to open upward over the click. The
+   game places the page itself (the scroll rule), so anchoring is off. */
+html, body { overflow-anchor: none; }
+
+/* Battle buttons, playthrough 3 of the build 0.9 pins: no shading (3-14:
+   it read as greyed out), the red text and outlines kept; a little smaller
+   (3-17), so the row shows at a glance with the ships; icons (3-15, 3-18). */
+.bchoices .choice { background: transparent; box-shadow: none; }
+.bchoices .choice:hover { background: rgba(122,36,22,.06); }
+.bchoices .choice .pick { font-size: 17.5px; padding: 8px 12px; min-height: 38px; }
+.bchoices .choice .meta { font-size: 13.5px; padding: 0 12px 7px; }
+.bchoices .choice .oddsbtn { padding: 0 12px 6px; }
+.bchoices .choice .oddsbtn .tier { font-size: 16px; }
+.bchoices ol.choices { gap: 8px; }
+.bicon { width: 20px; height: 20px; vertical-align: -4px; margin-right: 6px; color: var(--oxblood); flex: none; }
+/* 3-16: the Quartermaster beside the result box on a wide screen. */
+.beside.bres .bmain .rbox { margin-top: 0; }

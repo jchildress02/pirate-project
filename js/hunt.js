@@ -499,6 +499,8 @@
     if (ch.hull === "replace") {
       var sw = replacePrize(state, e, ch.replace, ch.oldFate);
       shipRec = sw.rec;
+      // 3-22: the old prize, let go or scuttled, leaves "what you took".
+      if (game.after.names) game.after.names = game.after.names.filter(function (n) { return String(n).indexOf(sw.oldName) < 0; });
       chips.push({ icon: "ship", text: "Prize ship: " + (e.name || e.cls) + " in place of the " + sw.oldName + (sw.oldFate === "scuttle" ? " (scuttled)" : " (let go)") });
       if (sw.thrown.length) chips.push({ icon: "cond", text: "Over the side, for want of room: " + sw.thrown.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions" : x.what); }).join(", "), ink: "bad" });
     } else if (ch.hull === "prize" || ch.hull === "fleet") {
@@ -535,10 +537,13 @@
     var gain = Math.min(loot.level >= 3 ? H().PRIZE_MORALE.big : H().PRIZE_MORALE.small, H().PRIZE_MORALE.cap - game.prizeMorale);
     if (gain > 0 && !e.hunter) { game.prizeMorale += gain; PC.crew.addMorale(state, gain); chips.push(mchip("morale", "morale", gain, "Crew morale {+n}")); }
     game.prizesTaken += 1;
-    PC.state.addLog(state, "Took " + name + " (" + e.flag + " " + e.cls + ").");
+    // 3-22 of the build 0.9 pins: a ship scuttled or let go isn't one you
+    // took; she leaves "what you took" and the log says what became of her.
+    var kept = ch.hull !== "scuttle" && ch.hull !== "release";
+    PC.state.addLog(state, (kept ? "Took " : ch.hull === "scuttle" ? "Plundered and scuttled " : "Plundered and let go ") + name + " (" + e.flag + " " + e.cls + ").");
     game.after.chips = game.after.chips.concat(chips);
     game.after.battleSeen = true;
-    game.after.names = (game.after.names || []).concat([name]);
+    if (kept) game.after.names = (game.after.names || []).concat([name]);
     game.after.lastPrize = { name: name, chips: chips };
     game.after.current = null;
     return chips;

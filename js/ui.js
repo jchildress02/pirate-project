@@ -235,6 +235,17 @@
   //  3. Back to the town menu returns to where the town menu was left.
   //  4. Menus: opening or closing one leaves the page where it was; inside a
   //     menu, a new line scrolls into view within the menu.
+  // Four exceptions (playthrough 3 of the build 0.9 pins, ruled November 25):
+  //  5. The creator never jumps inside a step: picks, the age slider and the
+  //     mentor screen leave the page where it is, even when new text
+  //     appears. Only a new step goes to the top.
+  //  6. Minigames (the dive, Liar's Dice, the drinking match) land on the
+  //     game's header ("Ocracoke · The Tavern · Liar's Dice"), never on the
+  //     new text, so the wrecks or the table stay in view.
+  //  7. In a place with several boxes (the Merchant's provisioner and
+  //     fence, the Docks' shipwright and hiring), the landing goes to the
+  //     top of the box that changed, with its name header showing.
+  //  8. Battle stays anchored on the side-by-side ships.
   var townScroll = 0;
 
   // What counts as a change of setting (rule 2). Scenes, voyage events and a
@@ -330,8 +341,20 @@
       if (mNew) scrollToAnchor(mNew);
       return;
     }
+    var same = landKey() === snap.land;
+    // 5. The creator, inside a step: stay exactly where it was.
+    if (same && !state && creating) return scrollToY(snap.y);
+    // 6. Minigames: the game's header.
+    if (same && state && state.current && state.current.screen === "minigame") {
+      var mg = root.querySelector(".stage .mg-dive, .stage .mg-dice, .stage .mg-drink");
+      var head = mg && mg.querySelector(".where");
+      if (head) return scrollToAnchor(head);
+      // 8. Battle: the two sides' ships.
+      var ships = state.minigame && state.minigame.phase === "battle" && root.querySelector('.stage [data-land="battle"]');
+      if (ships) return scrollToAnchor(ships);
+    }
     // 2 and 3. A change of setting.
-    if (landKey() !== snap.land) {
+    if (!same) {
       var placeNow = state && state.current && state.current.screen === "node" && state.location ? state.location.place : undefined;
       if (state && state.current && state.current.screen === "node" && !placeNow && snap.place !== undefined) return scrollToY(townScroll);
       var spots = root.querySelectorAll(".stage [data-land]");
@@ -339,7 +362,31 @@
     }
     // 1. The story: the first new line of text, or stay put.
     var fresh = firstNewLine(root.querySelector(".stage"), snap.lines);
-    if (fresh) scrollToAnchor(withHeader(fresh));
+    if (!fresh) return;
+    // 7. A place with several boxes: the top of the box that changed (the
+    // one the click came from), its name header showing.
+    if (snap.box && state && state.current && state.current.screen === "node") {
+      var box = findBox(snap.box);
+      if (box) return scrollToAnchor(box);
+    }
+    scrollToAnchor(withHeader(fresh));
+  }
+
+  // The box a click came from (rule 7): its name header and place among the
+  // place's boxes, so it can be found again after the redraw.
+  function boxOf(el) {
+    var stage = root.querySelector(".stage");
+    var box = el && el.closest && el.closest(".svc");
+    if (!stage || !box || !stage.contains(box)) return null;
+    var all = Array.prototype.slice.call(stage.querySelectorAll(".svc"));
+    if (all.length < 2) return null;
+    var h = box.querySelector("h4");
+    return { head: h ? lineText(h) : null, i: all.indexOf(box) };
+  }
+  function findBox(b) {
+    var all = Array.prototype.slice.call(root.querySelectorAll(".stage .svc"));
+    if (b.head) { var m = all.filter(function (x) { var h = x.querySelector("h4"); return h && lineText(h) === b.head; })[0]; if (m) return m; }
+    return all[b.i] || null;
   }
 
   // When the new text opens a scene step, its header comes with it: the
@@ -362,7 +409,7 @@
       var modal = root.querySelector(".modal:not(.popup)");
       var onNode = state && state.current && state.current.screen === "node" && state.location;
       var snap = { land: landKey(), menu: menu, panelTop: modal ? modal.scrollTop : 0, place: onNode ? state.location.place : undefined,
-        lines: snapLines(root.querySelector(".stage")), modalLines: modal ? snapLines(modal) : {} };
+        lines: snapLines(root.querySelector(".stage")), modalLines: modal ? snapLines(modal) : {}, y: globalThis.scrollY || 0, box: onNode && state.location.place ? boxOf(el) : null };
       if (onNode && !state.location.place && !menu) townScroll = globalThis.scrollY || 0;
       // The run log (Playtest Pins 0.9, PR A): the choice, then what changed.
       var RL = PC.runlog;
@@ -1829,6 +1876,15 @@
   // author flags lines that don't work instead.
   function noPh(t) { return String(t || "").replace(/^PLACEHOLDER:\s*/, "").replace(/\[PLACEHOLDER\]\s*/g, ""); }
 
+  // A check's name beside its line (3-19, 3-20 of the build 0.9 pins): no
+  // leading "The" ("Clean Clash", not "Clean The clash"), and a strike roll
+  // is just "Strike roll", so the tag stays on its line.
+  function tagName(r) {
+    var n = String(OP_NAME[r.op] || r.label || "");
+    if (/^Strike roll/.test(n)) return "Strike roll";
+    return n.replace(/^The (\w)/, function (m, c) { return c.toUpperCase(); });
+  }
+
   // The hunt's result box (#24, #29, #30, #31): each line of text with the
   // check it came from beside it ("You fire your pistol, but the shot goes
   // wide. · ◆ Partial Marksmanship"); no header over the box and no roll list
@@ -1843,8 +1899,11 @@
     if (!hasLine && !rs.length && !lr && !wb) return "";
     var tag = function (r) {
       var o = OUTCOME[r.outcome];
-      return ' <span class="rtag ' + (o ? o[1] : "t-mid") + '">· ' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + " " + esc(OP_NAME[r.op] || r.label) + "</span>";
+      return ' <span class="rtag ' + (o ? o[1] : "t-mid") + '">· ' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + " " + esc(tagName(r)) + "</span>";
     };
+    // A strike roll that ends the fight closes the list with its own short
+    // line under the clash (3-21), whatever came before it (a refused demand).
+    var strikeEnd = function (r) { return r.outcome === "clean" && /^(Strike roll|Call on her to strike)/.test(r.label || ""); };
     var byAt = {};
     rs.forEach(function (r) { (byAt[r.logAt] = byAt[r.logAt] || []).push(r); });
     var out = wb ? '<div class="winbanner">' + esc(PC.data.huntLines.winBanner[wb.how] || "She's yours!") + "</div>" : "";
@@ -1852,7 +1911,10 @@
       var here = byAt[i] || [], line = i < lines.length ? lines[i] : null;
       if (wb && i === wb.at) { line = null; } // the banner says it
       if (line) out += "<p>" + inline(noPh(line)) + here.map(tag).join("") + "</p>";
-      else here.forEach(function (r) { out += '<p class="small">' + esc((OP_NAME[r.op] || r.label) + (r.effect ? ": " + r.effect : "")) + tag(r) + "</p>"; });
+      else here.forEach(function (r) {
+        if (strikeEnd(r)) { out += "<p>She strikes her colors." + tag(r) + "</p>"; return; }
+        out += '<p class="small">' + esc(tagName(r) + (r.effect ? ": " + r.effect : "")) + tag(r) + "</p>";
+      });
     }
     if (lr && lr.chips && lr.chips.length) out += chips(lr.chips);
     var key = "mg:hunt:" + lines.length + ":" + (lr ? lr.seq : 0);
@@ -2094,7 +2156,10 @@
     if (H.phase === "battle") html += battleShips(H.battle);
     // After the battle, each step lands on its report (#48).
     if (H.phase === "after") html += '<div data-land="after"></div>';
-    html += mgLatest(v.log, v);
+    // 3-16: in a battle the Quartermaster's advice sits to the right of the
+    // result box on a wide screen, so the ships and buttons stay in view.
+    var latest = mgLatest(v.log, v);
+    if (H.phase !== "battle" || v.pending) html += latest;
     if (v.pending) return html + mgPending(v.pending) + (H.phase === "battle" ? "" : mgLog(v.log, true));
     var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
     if (H.phase === "encounterEnd") {
@@ -2114,7 +2179,7 @@
     } else if (H.phase === "vote") {
       html += votePanel(H.vote);
     } else if (H.phase === "battle") {
-      html += battlePanel(H.battle, H);
+      html += battlePanel(H.battle, H, latest);
     } else if (H.phase === "after") {
       html += afterPanel(H.after, H);
     } else if (H.phase === "batchEnd") {
@@ -2253,11 +2318,30 @@
     return '<div class="bchoices n' + list.length + '">' + opts(list) + "</div>";
   }
 
-  function battlePanel(b, H) {
-    var html = "";
+  // Icons on the battle buttons (3-15, 3-18 of the build 0.9 pins). The
+  // shots as ruled: round shot one ball, chain shot two balls on a chain,
+  // grapeshot a cluster of three. The boarding actions' icons are Claude's
+  // choice, for the author to tweak.
+  var BI = function (body) { return '<svg class="bicon" viewBox="0 0 24 24" aria-hidden="true">' + body + "</svg>"; };
+  var BICON = {
+    "doExchange:round": BI('<circle cx="12" cy="12" r="7" fill="currentColor"/>'),
+    "doExchange:chain": BI('<circle cx="5.5" cy="12" r="4" fill="currentColor"/><circle cx="18.5" cy="12" r="4" fill="currentColor"/><path d="M9.5 12h5" stroke="currentColor" stroke-width="1.6" stroke-dasharray="1.6 1.2"/>'),
+    "doExchange:grape": BI('<circle cx="8" cy="15" r="4" fill="currentColor"/><circle cx="16" cy="15" r="4" fill="currentColor"/><circle cx="12" cy="8" r="4" fill="currentColor"/>'),
+    "doExchange:rigging": BI('<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="currentColor" stroke-width="2"/>'),
+    "doExchange:rudder": BI('<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="currentColor" stroke-width="2"/>'),
+    "doAction:lead": BI('<path d="M4 20L17 7M17 7l1-4 3 3-4 1M6 15l3 3" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/>'),
+    "doAction:rally": BI('<path d="M6 21V3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M7 4h12l-3 4 3 4H7z" fill="currentColor"/>'),
+    "doAction:hold": BI('<path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" fill="currentColor"/>'),
+    "doAction:duel": BI('<path d="M4 4l16 16M20 4L4 20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M3 9l6-6M15 21l6-6M21 9l-6-6M9 21l-6-6" stroke="currentColor" stroke-width="1.4" opacity=".6"/>'),
+    "doAction:demand": BI('<path d="M6 21V3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M7 4h12v8H7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13v5M10.5 15.5L13 18l2.5-2.5" stroke="currentColor" stroke-width="1.8" fill="none"/>'),
+  };
+
+  function battlePanel(b, H, latest) {
+    var html = "", qm = "";
     var B = function (fn, arg, label, cls, extra) { return '<button class="' + (cls || "secondary") + '" data-act="hb" data-fn="' + fn + '"' + (arg != null ? ' data-arg="' + esc(arg) + '"' : "") + (extra || "") + ">" + label + "</button>"; };
     var O = function (fn, arg, label, check, meta, lock, extra) {
-      return opt({ act: "hb", attrs: 'data-fn="' + fn + '"' + (arg != null ? ' data-arg="' + esc(arg) + '"' : "") + (extra || ""), label: label, check: check, meta: meta || null, lock: lock || null });
+      var ic = BICON[fn + ":" + arg];
+      return opt({ act: "hb", attrs: 'data-fn="' + fn + '"' + (arg != null ? ' data-arg="' + esc(arg) + '"' : "") + (extra || ""), label: label, html: ic ? ic + inline(label) : null, check: check, meta: meta || null, lock: lock || null });
     };
     var A = PC.data.huntLines.advice, me = b.mine[0], en = b.enemies.filter(function (e) { return e.id === b.target; })[0];
     switch (b.step) {
@@ -2274,10 +2358,10 @@
           '<div class="actions">' + B("engage", null, "Close and call on her to strike", "primary") + "</div>";
         break;
       case "showOfForce":
-        html += bopts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
+        html += bopts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), PC.combat.prizeRung(state) >= 2 ? "Sea Wolf. Clean or partial: +1 on the strike roll. A setback: no harm done." : "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
         break;
       case "hunterChoice":
-        html += qmSays(A.hunter, H) + bopts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
+        qm = qmSays(A.hunter, H); html += bopts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
           O("hunterChoice", "flee", "Run for it", chk({ type: "Outrun", dr: en ? 3 : 3 }), "Morale −15. Clean: escaped. Partial: escaped with a parting hit. Setback: she catches you, +1 to her Position.")]);
         break;
       case "chase": case "press":
@@ -2299,11 +2383,11 @@
         var shots = [["round", "Round shot", "Full damage. Sink or cripple her."], ["chain", "Chain shot", "Half damage; a heavy hit costs her 1 Speed. Stops a runner."], ["grape", "Grapeshot", "Quarter damage, double crew losses. Thins her crew before boarding and keeps the prize whole."]];
         if (b.gunnersEye) { shots.push(["rigging", "Called shot: her rigging", "Gunner's Eye. Half damage; a heavy hit costs her 1 Speed."]); shots.push(["rudder", "Called shot: her rudder", "Gunner's Eye. Half damage; a heavy hit costs her −1 on her next Position."]); }
         html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + bopts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
-        html += qmSays(me && en && me.crew >= 0.75 * en.crew ? A.grape : en && en.speed >= me.speed ? A.chain : A.fire, H);
+        qm = qmSays(me && en && me.crew >= 0.75 * en.crew ? A.grape : en && en.speed >= me.speed ? A.chain : A.fire, H);
         break;
       case "decision":
         var hurt = me.hull < 0.6 * me.hullMax;
-        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + bopts([
+        qm = qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H); html += bopts([
           O("decide", "fire", "Fire again", null, "A new round, starting with Position."),
           O("decide", "board", "Board her", chk(b.grappleCheck), "The grapple rolls at once. Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples. Then up to three clashes."),
           O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun."))]) +
@@ -2330,7 +2414,9 @@
     }
     if (state.settings.showDice && b.lastExchange) html += '<div class="dice">Last Exchange: dice ' + b.lastExchange.dice.join(" + ") + ", edge " + signed(b.lastExchange.edge) + " · " + b.lastExchange.outcome + "</div>";
     if (state.settings.showDice && b.lastClash) html += '<div class="dice">Last clash: dice ' + b.lastClash.dice.join(" + ") + ", edge " + signed(b.lastClash.edge) + " · " + b.lastClash.outcome + "</div>";
-    return html;
+    latest = latest || "";
+    if (qm) return (latest ? '<div class="beside bres"><div class="bmain">' + latest + '</div><div class="bside2">' + qm + "</div></div>" : qm) + html;
+    return latest + html;
   }
 
   // After the battle (§21.15, §22.7; A7, A10, A11 of the M5 playtest).
