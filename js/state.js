@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 15;
+  var SAVE_VERSION = 16;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -288,6 +288,11 @@
       data.prisoners = data.prisoners || [];
       if (data.world) data.world.segments = data.world.segments || {};
       data.saveVersion = 15;
+    }
+    if (data.saveVersion === 15) {
+      // M9 PR 4: A Wanted Man at sea (the rumor's guarantee).
+      data.wanted = data.wanted || null;
+      data.saveVersion = 16;
     }
     return data;
   }

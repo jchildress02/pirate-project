@@ -1773,7 +1773,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 15;
+  var SAVE_VERSION = 16;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -2053,6 +2053,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       data.prisoners = data.prisoners || [];
       if (data.world) data.world.segments = data.world.segments || {};
       data.saveVersion = 15;
+    }
+    if (data.saveVersion === 15) {
+      // M9 PR 4: A Wanted Man at sea (the rumor's guarantee).
+      data.wanted = data.wanted || null;
+      data.saveVersion = 16;
     }
     return data;
   }
@@ -5157,7 +5162,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // A Wanted Man (Norfolk Scene Records §3): assigned at Key's introduction.
     // D2: Freddy isn't at sea until Milestone 9 (PH29).
     var wm = S.a_wanted_man;
-    if (wm && f.a_wanted_man_assigned) out.push(f.a_wanted_man_done ? entry("a_wanted_man", "done", wm.doneLine) : entry("a_wanted_man", "open", wm.steps.assigned));
+    if (wm && f.a_wanted_man_assigned) {
+      var wl = PC.wanted ? PC.wanted.journalLine(state) : wm.steps.assigned;
+      out.push(f.a_wanted_man_done && !f.turnin_unfinished ? entry("a_wanted_man", "done", wl || wm.doneLine) : entry("a_wanted_man", "open", wl));
+    }
     var rr = S.restless;
     if (rr && PC.officers) {
       var aboard = PC.officers.aboard ? PC.officers.aboard(state).some(function (o) { return o.id === "davey"; }) : false;
@@ -5753,6 +5761,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       // A taken Admiralty bounty's rumor (§17.4.8; M9 PR 3): one candidate
       // per taken notice still without its rumor, at any port.
       if (l.bounty) { bountyCands(state, l).forEach(function (c) { out.push(c); }); return; }
+      // A Wanted Man's rumor, while he's at large (§3; M9 PR 4).
+      if (l.wanted) { if (PC.wanted && PC.wanted.rumorOpen(state) && !live(state, l.id)) out.push({ line: Object.assign({}, l, { node: null }), extra: { wanted: true } }); return; }
       if (l.node && l.node !== node) return; // a node's own lines stay at that node
       if (l.posture && l.posture !== state.world.posture) return;
       if (l.when && !PC.scenes.test(state, l.when)) return;
@@ -5785,6 +5795,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function tell(state, c, source) {
     var text = c.ctx && c.ctx.bounty ? PC.bounties.render(state, c.line.text, PC.bounties.notice(state, c.ctx.bounty)) : render(state, c.line, c.ctx);
     if (c.ctx && c.ctx.bounty) PC.bounties.heardRumor(state, c.ctx.bounty);
+    if (c.line.wanted && PC.wanted) PC.wanted.heardRumor(state);
     var rec = remember(state, c.line, text, source, c.extra);
     if (c.line.type === "Node") {
       var d = (state.npcs[c.extra.npc] = state.npcs[c.extra.npc] || {});
@@ -8608,7 +8619,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     b.lastStrike = { ship: e.id, outcome: r.outcome, why: why, dice: r.dice, edge: r.edge };
     noteRaw(game, (why === "consort" ? "Strike roll, " : "Strike roll, ") + (e.name || e.cls), r,
       { clean: "she strikes her colors", partial: "she wavers but fights on (Shaken)", setback: "she fights on" }[r.outcome]);
-    if (r.outcome === "clean") { knockOut(state, game, b, e, "struck"); return true; }
+    if (r.outcome === "clean") { if (e.named && !e.yielded) namedBark(state, game, b, "crewStrike"); knockOut(state, game, b, e, "struck"); return true; }
     if (r.outcome === "partial") { shake(e, 1); say(state, game, L().wavers); }
     return false;
   }
@@ -8622,6 +8633,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // #31: the win banner shows with this step's result (the first ship taken in a battle).
     if ((how === "struck" || how === "captured") && !game.winBanner) game.winBanner = { at: Math.max(0, game.log.length - 1), how: how };
     if (how === "sunk") say(state, game, L().knockedOut.sunk);
+    if (how === "sunk" && e.named && PC.wanted) { var kb = PC.wanted.bark(state, e, "killed"); if (kb) say(state, game, kb); }
     var taken = how === "struck" || how === "captured" || how === "sunk";
     if (!taken) return;
     var others = fightingEnemies(b);
@@ -8713,6 +8725,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     game.battle = b; game.winBanner = null; // #31: one banner a battle
     // Pirates fly a black flag, and the battle opens saying so (P6).
     if (enemies[0] && enemies[0].flag === "Pirate" && PC.minigames) PC.minigames.say(state, game, (PC.data.huntLines.blackFlag || "PLACEHOLDER: She runs up the black flag."));
+    // A Named opponent's hail (the boarding-dialogue slots, §3).
+    if (PC.wanted && enemies[0] && enemies[0].named) { var hb = PC.wanted.bark(state, enemies[0], "hail"); if (hb) PC.minigames.say(state, game, hb); }
     // Default pairings: the flagship takes the escort or the first ship.
     var first = enemies.filter(function (e) { return e.escort; })[0] || enemies[0];
     autoPair(state, b, first.id);
@@ -8762,6 +8776,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   // Takers may first try a show of force (Intimidate vs her Resolve).
   function startStrike(state, game) {
     var b = game.battle;
+    // A Named opponent skips the strike-colors roll at the outset (§21.12;
+    // Norfolk Scene Records §3): Freddy never runs; Gauthier tries to.
+    var nm = fightingEnemies(b).filter(function (x) { return x.noStrikePre; })[0];
+    if (nm) return nm.triesToRun ? enemyFleePre(state, game) : startRound(state, game);
     b.step = prizeRung(state) >= 1 ? "showOfForce" : "strikePre";
     if (b.step === "strikePre") return strikePre(state, game, 0);
   }
@@ -8798,7 +8816,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function enemyFleePre(state, game) {
     var b = game.battle;
     var foes = fightingEnemies(b);
-    if (foes.some(function (e) { return e.hunter || e.escort; })) return startRound(state, game);
+    if (foes.some(function (e) { return e.hunter || e.escort || e.neverRuns; })) return startRound(state, game);
     if (b.condition === "Fog") return startRound(state, game); // a ship met in fog gets no pre-battle flee roll (§42.4)
     var theirSpeed = Math.min.apply(null, foes.map(function (e) { return ship(state, b, e.id).speed; }));
     var p = fleeChance(theirSpeed - fleetSpeed(state, b), fleetCA(state, b));
@@ -9015,6 +9033,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var hl = hullLost(s), lost = (e.role === "Trade" || e.role === "Hybrid") && !e.hunter && e.flag !== "Pirate" ? Math.max(hl, crewLost(s)) : hl;
     var adv = caBand(s.crew / Math.max(1, me.crew)), myLost = hullLost(me);
     var row = { board: false, flee: false, strike: 0 };
+    if (e.neverRuns) { row.board = true; return row; } // Freddy never runs (§3)
     if (e.hunter) { row.board = adv >= 1 || myLost >= 0.5; row.flee = !row.board && hl >= 0.75; }
     else if (e.flag === "Pirate") { row.board = adv >= 0; row.flee = !row.board && hl >= 0.5 && s.speed >= fleetSpeed(state, b); }
     else if (e.role === "War") { row.board = adv >= 1 && myLost >= 0.25; if (!row.board && hl >= 0.75) { row.flee = true; row.strike = 0.25; } }
@@ -9185,6 +9204,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (p.outcome === "setback") { hit(state, game, b, en.id, "flagship", false, "grape"); afterBeat(state, game); if (!b.over && b.step !== "retarget") startRound(state, game); return; }
     if (p.outcome === "partial") hit(state, game, b, en.id, "flagship", false, "grape");
     b.board = newBoard(state, b, true);
+    namedBark(state, game, b, "grapple");
     afterBeat(state, game, true);
     if (b.over) return;
     toStrikeFirst(state, game);
@@ -9203,6 +9223,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (p.outcome === "clean") { hit(state, game, b, "flagship", en.id, false, "grape"); afterBeat(state, game); if (!b.over && b.step !== "retarget") startRound(state, game); return; }
     if (p.outcome === "partial") hit(state, game, b, "flagship", en.id, false, "grape");
     b.board = newBoard(state, b, false);
+    namedBark(state, game, b, "repel");
     afterBeat(state, game, true);
     if (b.over) return;
     toStrikeFirst(state, game);
@@ -9220,10 +9241,18 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     b.board.sf = p.outcome === "clean" ? 1 : p.outcome === "setback" ? -1 : 0;
     b.board.sfOutcome = p.outcome;
     say(state, game, L().strikeFirst[p.outcome]);
+    // He calls you out: the forced duel opens the first clash (§21.12, §3).
+    if (lead(b) && lead(b).forceDuel && !b.dueled && !wounded(state)) namedBark(state, game, b, "challenge");
     b.step = "clash";
   }
 
   function wounded(state) { return hasTag(state, "Wounded"); }
+  function namedBark(state, game, b, slot) {
+    var e = lead(b);
+    if (!PC.wanted || !e || !e.named) return;
+    var line = PC.wanted.bark(state, e, slot);
+    if (line) say(state, game, line);
+  }
   function meleeType(state) {
     var items = state.captain.items || [];
     return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
@@ -9248,16 +9277,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var en = lead(b), bd = b.board, list = [];
     var dr = clamp(en.rating, 0, 8);
     var w = wounded(state);
-    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : null,
+    // A Named opponent forces a duel in the first clash (§21.12, §3).
+    var forced = en.forceDuel && !b.dueled && !w && bd && bd.clash === 0;
+    var fl = forced ? "He calls you out: the duel comes first" : null;
+    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : fl,
       note: "Clean: +2 on this clash, partial +1. A setback means you're Wounded." });
-    list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, note: "+1 on the next clash on a partial or better." });
-    list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, note: "Halves your losses this clash on a partial or better." });
+    list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, lock: fl, note: "+1 on the next clash on a partial or better." });
+    list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, lock: fl, note: "Halves your losses this clash on a partial or better." });
     list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
     // Dread joins Intimidate through the meter modifiers now (§11.8.5).
     list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8) },
-      note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
+      lock: fl, note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
     return list;
   }
 
@@ -9310,6 +9342,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (bd.shotHit) { loseCrew(state, game, b, e.id, 1); bd.shotHit = false; }
       if (p.outcome === "clean") mod = 2; else if (p.outcome === "partial") mod = 1;
       else woundCaptain(state, game);
+      // Freddy's Cutlass: a clean Lead the Charge kills one extra enemy (§32.8).
+      if (p.outcome === "clean" && (state.captain.items || []).indexOf("Freddy's Cutlass") >= 0) loseCrew(state, game, b, e.id, 1);
     } else if (id === "rally") {
       say(state, game, L().rally[p.outcome]);
       if (p.outcome !== "setback") bd.rallyNext = 1;
@@ -9318,6 +9352,15 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       hold = p.outcome !== "setback";
     } else if (id === "duel") {
       b.dueled = true;
+      if (p.outcome === "clean" && e.named) {
+        // He yields, alive (§3): the ship is taken, and the surrender scene follows.
+        game.duelsWon = (game.duelsWon || 0) + 1;
+        namedBark(state, game, b, "duelWon"); namedBark(state, game, b, "crewBreak");
+        e.yielded = true;
+        knockOut(state, game, b, e, "captured", true);
+        return afterBoardingOut(state, game);
+      }
+      if (p.outcome === "setback" && e.named) { say(state, game, L().duel.setback); namedBark(state, game, b, "duelLost"); woundCaptain(state, game); bd.enemyNext += 1; return clash(state, game, mod, hold); }
       if (p.outcome === "clean") {
         say(state, game, L().duel.clean);
         game.duelsWon = (game.duelsWon || 0) + 1;
@@ -9660,6 +9703,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // A taken Admiralty bounty in these waters (§17.4.8; M9 PR 3): its own
     // seeded draw, so the batch's other rolls don't shift.
     if (PC.bounties && !game.encounter) { var bt = PC.bounties.batchTarget(state, game.waters, PC.rng.fromKey(M().key(state, game, "bounty"))); if (bt) game.batch.bounty = bt.id; }
+    // A Wanted Man's target in the Hatteras Banks (Norfolk Scene Records §3; M9 PR 4).
+    if (PC.wanted && !game.encounter && PC.wanted.batchTarget(state, game.waters, PC.rng.fromKey(M().key(state, game, "wanted")))) game.batch.wanted = true;
     game.force = null;
     // #42 of the build 0.9 pins: no "The weather: …" line; the batch's weather chip says it.
     if (cond === "Storm") stormBatch(state, game);
@@ -9755,7 +9800,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (b.next >= b.n) { game.phase = "batchEnd"; game.sighting = null; if (canReadAhead(state, game)) readAhead(state, game); return; }
     var i = b.next; b.next += 1;
     var grp = null;
-    if (b.bounty && !b.bountyShown && i === (b.hunter ? 1 : 0) && PC.bounties.notice(state, b.bounty) && PC.bounties.notice(state, b.bounty).status === "taken") {
+    var firstFree = b.hunter ? 1 : 0;
+    if (b.wanted && !b.wantedShown && i === firstFree && PC.wanted.atLarge(state)) {
+      b.wantedShown = true;
+      grp = PC.wanted.ship(state, PC.rng.fromKey(M().key(state, game, "wanted-ship")));
+    }
+    else if (b.bounty && !b.bountyShown && i === firstFree + (b.wanted ? 1 : 0) && PC.bounties.notice(state, b.bounty) && PC.bounties.notice(state, b.bounty).status === "taken") {
       b.bountyShown = true;
       grp = PC.bounties.targetShip(state, PC.bounties.notice(state, b.bounty), PC.rng.fromKey(M().key(state, game, "bounty-ship")));
     }
@@ -9889,6 +9939,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var captured = b.captured.map(function (id) { return b.enemies.filter(function (e) { return e.id === id; })[0]; });
     // A bounty target who went down with his ship (§17.4.8).
     if (PC.bounties) b.enemies.forEach(function (e) { if (e.bounty && e.out === "sunk") PC.bounties.sunk(state, e.bounty); });
+    if (PC.wanted) b.enemies.forEach(function (e) { if (e.wanted && e.out === "sunk") PC.wanted.sunk(state, e); });
     // Seasoning after a won battle (§24.3): not when she struck before any fighting.
     if (fought && captured.length) {
       var sr = M().rand(state, game, "season");
@@ -9972,7 +10023,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var e = game.battle.enemies.filter(function (x) { return x.id === id; })[0];
       var loot = G().rollLoot(state, e, M().rand(state, game, "loot"));
       // A bounty target: Poor loot, and a 10% chance of an Uncommon item (§17.4.8).
-      if (e.bounty) { var bn = PC.bounties.notice(state, e.bounty); loot.item = bn && bn.item ? "Shark-Tooth Necklace" : null; } // DEFAULT: a stand-in Uncommon until the item catalog (PR 5)
+      if (e.bounty) { var bn = PC.bounties.notice(state, e.bounty); loot.item = bn && bn.item ? "Shark-Tooth Necklace" : null; }
+      if (e.wanted) loot.item = null; // his own item comes with the surrender scene (§3) // DEFAULT: a stand-in Uncommon until the item catalog (PR 5)
       // Porcelain broke on her heavy hits (§21.11).
       if (loot.goods["Ming porcelain"]) loot.goods["Ming porcelain"] = Math.round(loot.goods["Ming porcelain"] * Math.pow(1 - H().PORCELAIN_BREAK, e.heavyHits || 0));
       var vr = M().rand(state, game, "volunteers");
@@ -10071,7 +10123,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       else chips.push({ icon: "cond", text: "No berths for her volunteers" });
     }
     // Her captain (§17.4.8, §17.4.4): a bounty target or a French straggler.
-    if (PC.bounties) PC.bounties.settleCaptain(state, e, ch.captain).forEach(function (c) { chips.push(c); });
+    if (e.wanted && PC.wanted) PC.wanted.settleCaptain(state, e, ch.captain).forEach(function (c) { chips.push(c); });
+    else if (PC.bounties) PC.bounties.settleCaptain(state, e, ch.captain).forEach(function (c) { chips.push(c); });
     // Standing and Heat (§28.3, §28.6): no letter, so every prize but a
     // pirate is uncovered. An executed crew costs no Heat.
     meterChips(state, e, crewChoice === "execute").forEach(function (c) { chips.push(c); });
@@ -10391,7 +10444,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           gunsRange: G().range(s.guns), crewRange: G().range(s.crew), hull: G().hullWord(s),
           speed: s.speed > fs ? "faster than you" : s.speed === fs ? "your equal" : "slower than you",
           handling: s.handling > (C().ship(state, null, "flagship").handling) ? "nimbler" : s.handling < C().ship(state, null, "flagship").handling ? "clumsier" : "as nimble",
-          draft: s.draft, cue: s.cue, bounty: s.bounty ? (PC.bounties.notice(state, s.bounty) || {}).name || null : null, french: !!s.french, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
+          draft: s.draft, cue: s.cue, bounty: s.bounty ? (PC.bounties.notice(state, s.bounty) || {}).name || null : null, wanted: s.wanted ? s.captain : null,
+          rating: (state.captain.items || []).indexOf("Key's Spyglass") >= 0 ? s.rating : null, french: !!s.french, lootTypes: lt, loot: H().LEVELS[s.lootLevel], warship: s.role === "War" || s.hunter,
           legit: legitLine(state, s) };
       }),
     };
@@ -10491,7 +10545,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       id: e.id, cls: e.cls, name: e.name, flag: e.flag, role: e.role, captain: e.captain, title: e.title, level: H().LEVELS[l.level],
       hull: Math.round(e.hull), hullMax: e.hullMax, guns: e.guns, crew: e.crew, crewMin: e.crewMin, cargo: e.cargo,
       treasure: l.treasure, goods: l.goods, provisions: l.provisions, chest: l.chest, captives: l.captives,
-      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), captainFate: PC.bounties ? PC.bounties.captainOptions(state, e) : null, hullOptions: hullOptions(state, game).map(function (o) {
+      volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), captainFate: e.wanted && PC.wanted ? PC.wanted.captainOptions(state, e) : PC.bounties ? PC.bounties.captainOptions(state, e) : null, hullOptions: hullOptions(state, game).map(function (o) {
         // Keeping her hull adds her hold to the pool before her cargo comes across (A7).
         o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
         if (o.id === "replace" && !o.lock && o.olds && o.olds[0]) o.addsHold = (e.cargo || 0) - o.olds[0].cargo; // with the first old prize picked
@@ -15014,8 +15068,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     state.prisoners = list.filter(function (x) { return x !== p; });
     var out = { lines: [], chips: [] };
     var fake = { name: p.name, gender: p.gender };
+    if (p.kind === "wanted" && PC.wanted) PC.wanted.prisonerFate(state, p, kill); // A Wanted Man's quest prisoner
     if (kill) {
-      var dd = PC.meters.addDread(state, p.kind === "bounty" ? D().KILL_DREAD : D().STRAGGLER_KILL_DREAD);
+      var dd = PC.meters.addDread(state, p.kind === "straggler" ? D().STRAGGLER_KILL_DREAD : D().KILL_DREAD);
       out.lines.push(render(state, L().prisonerKilled, fake));
       out.chips.push({ icon: "dread", text: "Dread +" + dd, ink: "bad" });
       if (p.bounty) { var n = noticeOf(state, p.bounty); if (n) n.outcome = "dead"; }
@@ -15151,6 +15206,160 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     rumorTargets: rumorTargets, heardRumor: heardRumor, batchTarget: batchTarget, targetShip: targetShip, maybeFrench: maybeFrench, sunk: sunk,
     captainOptions: captainOptions, settleCaptain: settleCaptain, prisoners: prisoners, releasePrisoner: releasePrisoner,
     reward: reward, reportable: reportable, report: report, isLie: isLie, lieCheck: lieCheck, journal: journal, devOpen: devOpen,
+  };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — A Wanted Man at sea (Keychain #1; Norfolk Scene
+ * Records §3; Milestone 9, PR 4).
+ *
+ * Freddy Fearless and the *Deadly Delight*: 50% a batch in the Hatteras
+ * Banks while the quest is open (his rumor guarantees him in the next
+ * batch); he never runs, skips the strike-colors roll at the outset,
+ * carries Resolve 4 and forces a duel in the first clash. Beaten, he
+ * yields: bring him in, let him go, or kill him (with the trophy). The
+ * turn-in is a scene (content/wanted_man.js) when the captain next enters
+ * the Admiralty House. D2: Freddy only; Gauthier's record is data.
+ *
+ * Quest state lives in flags (the record's names): a_wanted_man_assigned,
+ * wanted_alive / wanted_dead / wanted_spared / wanted_sunk, trophy_head /
+ * trophy_hand, freddy_at_ocracoke, a_wanted_man_done. state.wanted keeps
+ * the rumor's guarantee. Nothing here touches the screen.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function W() { return PC.data.wantedMan; }
+  function f(state) { return state.flags; }
+  function rec(state) { return (state.wanted = state.wanted || { rumor: false, rumorFresh: false, met: 0 }); }
+  function targetId(state) { return "freddy"; } // D2: Freddy only (Gauthier after the Battle of Ocracoke, M10)
+  function target(state) { return W().targets[targetId(state)]; }
+
+  // Still at large: assigned, and not yet taken, killed, spared or sunk.
+  function atLarge(state) {
+    var F = f(state);
+    return !!F.a_wanted_man_assigned && !F.a_wanted_man_done && !F.wanted_alive && !F.wanted_dead && !F.wanted_spared && !F.wanted_sunk;
+  }
+
+  // ---- The rumor (§3 stage 1) -----------------------------------------------------
+  function rumorOpen(state) { return atLarge(state) && !rec(state).rumorFresh; }
+  function heardRumor(state) { var r = rec(state); r.rumor = true; r.rumorFresh = true; }
+
+  // ---- The spawn ---------------------------------------------------------------------
+  // Every batch in the Hatteras Banks while he's at large: 50%, or certain
+  // after his rumor.
+  function batchTarget(state, waters, r) {
+    if (!atLarge(state) || waters !== W().WATERS) return false;
+    if (rec(state).rumorFresh) return true;
+    return r() < W().SPAWN;
+  }
+
+  function ship(state, r) {
+    var t = target(state);
+    var s = PC.huntGen.makeShip(state, { cls: t.cls, role: "Raider", flag: "Pirate", full: true, rating: t.rating, gunnery: t.gunnery, resolve: t.resolve }, r);
+    s.name = t.ship; s.captain = t.name; s.title = null; s.captainNick = true;
+    s.wanted = targetId(state); s.named = targetId(state); s.lootLevel = 0;
+    s.noStrikePre = true; s.forceDuel = true; s.neverRuns = !!t.neverRuns; s.triesToRun = !!t.triesToRun;
+    s.cue = t.cue;
+    var w = rec(state); w.rumorFresh = false; w.met += 1;
+    return { ships: [s], shape: "single", hunter: false, wanted: true };
+  }
+
+  function bark(state, e, slot) {
+    var t = e && e.named && W().targets[e.named];
+    return t && t.barks[slot] || null;
+  }
+
+  // He went down with his ship.
+  function sunk(state, e) {
+    if (!e || !e.wanted || !atLarge(state)) return;
+    f(state).wanted_sunk = true;
+    PC.state.addLog(state, target(state).name + " went down with the " + target(state).ship + ".");
+  }
+
+  // ---- The surrender scene (§3 stage 3), on the prize screen --------------------------
+  function captainOptions(state, e) {
+    if (!e || !e.wanted) return null;
+    var t = W().targets[e.wanted], D = W();
+    return { kind: "wanted", name: t.name, setup: t.irons, options: [
+      { id: "bring", label: "Bring him in alive.", note: "He's a prisoner until Norfolk: " + D.ALIVE + " gold." },
+      { id: "release", label: "Let him go.", note: "Pirate Standing +" + D.RELEASE_STANDING + ". The Admiral will want an answer." },
+      { id: "kill", label: "Kill him.", note: "Dread +" + D.KILL_DREAD + (e.wanted === "freddy" ? ", Pirate Standing " + D.KILL_STANDING : "") + ". Dump the body over the side." },
+      { id: "killHead", label: "Kill him, and take his head.", note: "Dread +" + (D.KILL_DREAD + D.TROPHY_DREAD.head) + ". Proof for the Admiral." },
+      { id: "killHand", label: "Kill him, and take his hand.", note: "Dread +" + (D.KILL_DREAD + D.TROPHY_DREAD.hand) + ". Proof for the Admiral." },
+    ] };
+  }
+
+  function settleCaptain(state, e, choice) {
+    var chips = [], t = W().targets[e.wanted], D = W(), F = f(state);
+    choice = choice || "bring";
+    if (choice === "bring") {
+      F.wanted_alive = true;
+      PC.bounties.prisoners(state).push({ id: "p_" + e.wanted, kind: "wanted", name: t.name, gender: "m", wanted: e.wanted });
+      chips.push({ icon: "person", text: t.outcomes.bring });
+    } else if (choice === "release") {
+      F.wanted_spared = true;
+      if (e.wanted === "freddy") F.freddy_at_ocracoke = true; // read by the Battle of Ocracoke (M10)
+      PC.meters.addStanding(state, "pirates", D.RELEASE_STANDING);
+      chips.push({ icon: "person", text: t.outcomes.release });
+      chips.push({ icon: "standing", text: "Pirate Standing +" + D.RELEASE_STANDING, ink: "pirates" });
+    } else {
+      F.wanted_dead = true;
+      var trophy = choice === "killHead" ? "head" : choice === "killHand" ? "hand" : null;
+      if (trophy) F["trophy_" + trophy] = true;
+      var dd = PC.meters.addDread(state, D.KILL_DREAD + (trophy ? D.TROPHY_DREAD[trophy] : 0));
+      if (e.wanted === "freddy") PC.meters.addStanding(state, "pirates", D.KILL_STANDING);
+      chips.push({ icon: "person", text: t.outcomes.kill });
+      chips.push({ icon: "person", text: t.outcomes[trophy || "nothing"] });
+      chips.push({ icon: "dread", text: "Dread +" + dd, ink: "bad" });
+      if (e.wanted === "freddy") chips.push({ icon: "standing", text: "Pirate Standing " + D.KILL_STANDING + " (one of Jack's men executed)", ink: "pirates" });
+    }
+    // His item, on every path where his ship is taken (§3).
+    if (t.item) { state.captain.items.push(t.item); chips.push({ icon: "item", text: "Found aboard: " + t.item, ink: "oxblood" }); }
+    PC.state.addLog(state, "A Wanted Man: " + t.name + " " + ({ bring: "taken alive", release: "let go" }[choice] || "killed") + ".");
+    return chips;
+  }
+
+  // The prisoner, from the Crew tab: let go, or killed.
+  function prisonerFate(state, p, kill) {
+    var F = f(state);
+    F.wanted_alive = false;
+    if (kill) F.wanted_dead = true;
+    else { F.wanted_spared = true; if (p.wanted === "freddy") F.freddy_at_ocracoke = true; }
+  }
+
+  // ---- The journal ----------------------------------------------------------------
+  function journalLine(state) {
+    var J = W().journal, F = f(state);
+    if (F.turnin_unfinished) return J.unfinished;
+    if (F.a_wanted_man_done) return F.ocracoke_invited ? J.invited : F.ocracoke_declined ? J.declined : null;
+    if (F.wanted_spared) return J.spared;
+    if (F.wanted_alive || F.wanted_dead || F.wanted_sunk) return J.taken;
+    return rec(state).rumorFresh ? J.rumor : J.assigned;
+  }
+
+  // ---- Scene tests and hooks --------------------------------------------------------
+  var SF = PC.sceneFns;
+  if (SF) {
+    SF.addCond("wmTurninReady", function (state) {
+      var F = f(state);
+      if (!F.a_wanted_man_assigned || F.a_wanted_man_done) return false;
+      if (F.wanted_alive) return PC.bounties.prisoners(state).some(function (p) { return p.kind === "wanted"; });
+      return !!(F.wanted_dead || F.wanted_sunk || F.wanted_spared);
+    });
+    SF.addCond("keyTrusted", function (state) {
+      return PC.letters.band(state, "key") === "Trusted" && (state.captain.items || []).indexOf("Key's Spyglass") < 0;
+    });
+    SF.addHook("wm_hand_over", {
+      apply: function (state) { state.prisoners = PC.bounties.prisoners(state).filter(function (p) { return p.kind !== "wanted"; }); return null; },
+      chip: function () { return { icon: "person", text: "Freddy Fearless handed over" }; },
+    });
+  }
+
+  PC.wanted = {
+    atLarge: atLarge, rumorOpen: rumorOpen, heardRumor: heardRumor, batchTarget: batchTarget, ship: ship, bark: bark, sunk: sunk,
+    captainOptions: captainOptions, settleCaptain: settleCaptain, prisonerFate: prisonerFate, journalLine: journalLine, target: target,
   };
 })();
 </script>
@@ -15517,6 +15726,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   add("Marsh Fever", { note: "Fever Flares fire more often and last two seasons (§11.9)." });
 
   // ---- Earned physical tags the prototype can already reach (§14.5) ----
+  // Key's Spyglass (§17.4.7, §32.8; M9 PR 4): +1 Keep Watch; the scouting card shows her captain's rating.
+  add("Key's Spyglass", { edge: plus(["Keep Watch"], 1), note: "The scouting card shows the enemy captain's rating." });
+  // Freddy's Cutlass (§32.8): a clean Lead the Charge kills one extra enemy (js/combat.js).
+  add("Freddy's Cutlass", { note: "A clean Lead the Charge kills one extra enemy." });
   // Prize Taker's top rung (3-24): Dread floor +10, inside the cap of 40 (§28.8).
   add("Terror of the Seas", { dreadFloor: 10, note: "Dread floor +10 (3-24)." });
   add("One Eye", { dreadFloor: 10, edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
@@ -19623,8 +19836,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   PC.data.startupQuests = {
     a_wanted_man: {
       name: "A Wanted Man",
-      steps: { assigned: "Bring in Freddy Fearless, dead or alive. He was last seen near Ocracoke. [PLACEHOLDER: Freddy isn't at sea yet. He arrives in a later update.]" },
-      doneLine: "Return to the Admiralty House in Norfolk for your reward.",
+      steps: { assigned: "Bring in Freddy Fearless, dead or alive. He was last seen near Ocracoke." },
+      doneLine: "Freddy Fearless is dealt with, and the Admiral has paid.", // PLACEHOLDER: the done line
     },
     dying_wish: {
       name: "A Dying Pirate's Wish",
@@ -22732,6 +22945,267 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — A Wanted Man (Keychain #1; Norfolk Scene Records §3;
+ * Milestone 9, PR 4), and Key's Spyglass at Trusted (Part 4 §10, D9).
+ *
+ * D2 (ruled): Freddy only. Gauthier's record is here as data, untested.
+ * The turn-in plays the version before the Battle of Ocracoke (the plan,
+ * Finch) and sets the flags M10's invitation reads. The author's language
+ * is final; the rules are in js/wanted.js.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+  PC.data.scenes = PC.data.scenes || {};
+
+  PC.data.wantedMan = {
+    SPAWN: 0.50,              // a batch in the Hatteras Banks (placeholder)
+    WATERS: "north",
+    ALIVE: 1500, DEAD: 750,   // placeholders
+    RELEASE_STANDING: 5,      // Pirate Standing for letting Freddy go
+    KILL_DREAD: 3,            // a captain who has yielded
+    KILL_STANDING: -5,        // Freddy only: one of Jack's men executed
+    TROPHY_DREAD: { head: 2, hand: 1 },
+    targets: {
+      freddy: {
+        name: "Freddy Fearless", full: "Frederick Kane", short: "Freddy", formal: "Mr. Kane", ship: "Deadly Delight", cls: "Sloop",
+        rating: 3, resolve: 4, gunnery: 2, neverRuns: true, item: "Freddy's Cutlass",
+        rumor: "\"Freddy Fearless has apparently been on a tear up and down the Hatteras Banks. They say he never runs from a fight.\"",
+        cue: "She flies a black flag and you spy a large bald captain barking orders to his crew.",
+        barks: {
+          hail: "\"So you're the one that the Admiral sent after me! I'll be sure to leave an impression.\"",
+          grapple: "\"Good, come closer! Let Freddy gut you up close!\"",
+          repel: "\"Follow me! Rip them apart, boys!\"",
+          challenge: "\"Do I frighten you? Because you don't scare me.\"",
+          duelWon: "\"Alright, alright, calm down! I yield.\"",
+          duelLost: "\"I knew you were going to be a pushover.\"",
+          crewBreak: "A cry rings out. \"Freddy's down! Strike the colors!\"",
+          crewStrike: "\"Cowards! Get back here and fight!\"",
+          killed: "\"Tell Jack... I never ran.\"",
+        },
+        irons: "Freddy sits in irons on your deck, grinning through a split lip. \"Go on then, Captain. Finish it.\"",
+        outcomes: {
+          bring: "Freddy clenches his jaw. \"I see. You're too weak to do what needs to be done.\"",
+          release: "You unshackle him and escort him to the ship's boat. \"I won't forget this,\" Freddy says, looking you dead in the eye. He rows for Ocracoke without looking back.",
+          kill: "\"Tell Jack... I never ran,\" he whispers with his last breath, before you slice his throat.",
+          head: "Your crew watches on as you separate his head from his neck. When you're finished, you wrap your trophy in sailcloth.",
+          hand: "A hand should be sufficient. You wrap it in sailcloth and store it in your cabin.",
+          nothing: "You dump the body over the side and watch it sink into the depths. Not worth wasting a perfectly good hammock.",
+        },
+      },
+      // Untested (D2): the target after the Battle of Ocracoke.
+      gauthier: {
+        name: "Philippe Gauthier", full: "Philippe Gauthier", short: "Gauthier", formal: "Monsieur Gauthier", ship: "Sardine", cls: "Sloop",
+        rating: 3, resolve: 4, gunnery: 1, triesToRun: true, item: "Gauthier's Plumed Hat",
+        rumor: "\"That French pirate Gauthier has been spotted around the Hatteras Banks. They say he always tries to avoid a fight.\"",
+        cue: "A captain with a large mustache and a white-plumed hat strides nervously up and down the deck.",
+        barks: {
+          hail: "\"Avalon swine! I will take your ship and throw you into la mer!\"",
+          grapple: "\"I will run you through with my sword!\"",
+          repel: "\"I am coming to kill you, Captain!\"",
+          challenge: "\"Come. See what French steel tastes like.\"",
+          duelWon: "\"Sacrebleu! You are too strong.\"",
+          duelLost: "\"You are weak! I spit on you!\"",
+          crewBreak: "\"Amenez le pavillon !\"",
+          crewStrike: "\"Enough! We strike our colors!\"",
+          killed: "\"I am defeated! A travesty!\"",
+        },
+        irons: "Gauthier sits in irons on your deck, chin held high in defiance. \"Do what you must, Capitaine.\"",
+        outcomes: {
+          bring: "The Frenchman lets out a deep sigh. \"Better a cell than the bottom of the sea, I suppose.\"",
+          release: "You unshackle him and escort him to the ship's boat. He sweeps off his white-plumed hat and presents it to you with a deep bow. \"Merci, Capitaine. You are a true gentleman. Adieu.\" He rows toward land without looking back.",
+          kill: "\"I am defeated! A travesty!\" he cries, before you slice his throat.",
+          head: "Your crew watches on as you separate his head from his neck. When you're finished, you wrap your trophy in sailcloth.",
+          hand: "A hand should be sufficient. You wrap it in sailcloth and store it in your cabin.",
+          nothing: "You dump the body over the side and watch it sink into the depths. Not worth wasting a perfectly good hammock.",
+        },
+      },
+    },
+    // Journal objectives (Norfolk Scene Records §3, drafted for approval).
+    journal: {
+      assigned: "Bring in Freddy Fearless, dead or alive. He was last seen near Ocracoke.",
+      rumor: "Freddy Fearless is raiding the Hatteras Banks. Hunt him there.",
+      taken: "Return to the Admiralty House in Norfolk for your reward.",
+      spared: "Return to the Admiralty House in Norfolk. Key will want an answer.",
+      invited: "Return to the Admiralty House in Norfolk during Hurricane season to join the attack on Ocracoke.",
+      declined: "If you change your mind, return to the Admiralty House in Norfolk during Hurricane season.",
+      unfinished: "The Admiral wasn't finished with you. Return to the Admiralty House in Norfolk.",
+    },
+  };
+
+  // His rumor (§3 stage 1): a Quest rumor at any port while he's at large;
+  // heard, it guarantees him in the next batch in the Hatteras Banks.
+  if (PC.data.rumors && PC.data.rumors.pool) PC.data.rumors.pool.push({ id: "wm_freddy", type: "Quest", tier: "B", wanted: true, text: PC.data.wantedMan.targets.freddy.rumor });
+
+  // ---- The scenes (Norfolk Scene Records §3, stage 4: before the Battle of Ocracoke) ----
+
+  var scenes = {};
+  function S(id, o) {
+    o.id = id; o.ap = o.ap || 0; o.repeat = o.repeat || "once"; o.kind = o.kind || "choice";
+    o.where = o.where || "Norfolk, the Admiralty House lounge"; o.title = o.title || "A Wanted Man";
+    o.choices.forEach(function (c, i) { c.id = c.id || "c" + i; c.approval = c.approval || []; });
+    scenes[id] = o;
+  }
+  function R(text, effects, exit, more) { return Object.assign({ text: text || "", effects: effects || [], exit: exit || "hub" }, more || {}); }
+  function K(label, approval, check, clean, partial, setback, more) {
+    return Object.assign({ label: label, approval: approval, check: check, outcomes: { clean: clean, partial: partial, setback: setback } }, more || {});
+  }
+  function C(label, approval, result, more) { return Object.assign({ label: label, approval: approval, result: result }, more || {}); }
+  var ON; // no carry: the next scene shows its own setup under this result
+  var ALIVE = { flag: "wanted_alive" }, SPARED = { flag: "wanted_spared" };
+  var TROPHY = { any: [{ flag: "trophy_head" }, { flag: "trophy_hand" }] };
+  var LIE = { check: { type: "Bluff & Disguise", dr: 2 } }; // DR 2: DEFAULT (the record names none)
+
+  // The claims (§3 stage 4): a lie only when he was spared; the engine knows.
+  function claim(label) {
+    return [
+      C(label, [], R("\"Excellent work,\" he responds, peering deeply into your eyes. \"I'm sure we won't be seeing him again.\"", [], "nor_wm_shared", ON), { hiddenUnless: { all: [{ not: ALIVE }, { not: SPARED }] } }),
+      K(label, ["Deceit"], LIE.check,
+        R("\"Good. I'm sure we won't be seeing him again.\"", [], "nor_wm_shared", ON),
+        R("\"Good.\" He holds your gaze for a moment longer than is comfortable.", [{ flag: "key_suspects" }], "nor_wm_shared", ON),
+        R("He purses his lips. \"I see.\"", [], "nor_wm_setback", ON),
+        { hiddenUnless: SPARED }),
+    ];
+  }
+
+  S("nor_wm_turnin", {
+    kind: "check", // one Bluff & Disguise roll on a lie
+    firesWhen: { fn: "wmTurninReady" },
+    setup: [
+      { when: ALIVE, text: "You haul Freddy Fearless into the Admiralty House and find the lounge is as bright and spacious as you remembered.\n\n" },
+      { when: { not: ALIVE }, text: "You enter the Admiralty House and find the lounge is as bright and spacious as you remembered.\n\n" },
+      "You notice three gold-uniformed men sitting in the center of the room on those plush armchairs. You immediately recognize Admiral Key among them, wearing his coat and appearing slightly more distinguished this time, although his short brown ponytail is still tied somewhat haphazardly. Across from him is a burly man with broad shoulders and thick black mutton chops, and to the Admiral's left, a tall blonde officer with beady eyes that seem too close together. Lieutenant Howe is standing at attention behind the Admiral.\n\n" +
+      "\"Ah, what a pleasant surprise!\" Key exclaims, setting down his coffee as the three men rise to their feet. \"Gentlemen, this is the captain I was telling you about.\"",
+      { when: ALIVE, text: "\n\n\"And you must be Freddy Fearless,\" he says, peering at the prisoner, seemingly bemused. \"I've been looking forward to meeting you.\"\n\n" +
+        "\"I'm not scared of you,\" Freddy spits, meeting the Admiral's gaze.\n\n" +
+        "\"Oh, I don't intend to scare you,\" the Admiral responds. \"You are Freddy Fearless, after all. But I do intend to make you talk.\"\n\n" +
+        "\"Lieutenant, would you please escort our guest to his accommodations downstairs?\" The Lieutenant does as he's ordered, grabbing the pirate by the arm roughly and leading him out of the lounge." },
+      { when: { not: ALIVE }, text: "\n\n\"And what of our friend Mr. Kane?\"" },
+    ],
+    choices: [
+      C("Continue", [], R("", [{ hook: "wm_hand_over" }], "nor_wm_shared", ON), { hiddenUnless: ALIVE }),
+    ].concat(claim("He's dead."), claim("He went down with his ship."), [
+      C("Throw the head onto the table.", ["Cruelty"], R("Admiral Key and the burly officer don't seem to react. The younger blonde officer appears to startle. Lieutenant Howe looks positively horrified.\n\n" +
+        "\"Well then,\" says the Admiral, seemingly amused. \"I suppose that settles it. Lieutenant Howe, would you be so kind as to dispose of this?\" The Lieutenant wastes no time in delicately whisking the head away to a back room.", [], "nor_wm_shared", ON), { hiddenUnless: { flag: "trophy_head" } }),
+      C("Throw the hand onto the table.", ["Cruelty"], R("Admiral Key and the burly officer don't seem to react. The younger blonde officer appears to startle. Lieutenant Howe looks positively horrified.\n\n" +
+        "\"Well then,\" says the Admiral, seemingly amused. \"I suppose that settles it. Lieutenant Howe, would you be so kind as to dispose of this?\" The Lieutenant wastes no time in delicately whisking the hand away to a back room.", [], "nor_wm_shared", ON), { hiddenUnless: { flag: "trophy_hand" } }),
+      C("He's dead. I have proof, if you require it.", [], R("\"That won't be necessary,\" responds the Admiral, peering deeply into your eyes. \"I trust you.\"", [], "nor_wm_shared", ON), { hiddenUnless: TROPHY }),
+    ]),
+  });
+
+  // SETBACK: the lie is caught.
+  S("nor_wm_setback", {
+    setup: "\"Thank you for your service, Captain,\" he says through gritted teeth as the Lieutenant steps forward with your gold. \"Keep an eye on the notice board for other tasks that are...less challenging. I bid you good day.\" The Admiral motions toward the front door. You depart without another word.",
+    choices: [C("Leave the Admiralty House", [], R("", [
+      { gold: 750, pot: "purse" }, { hook: "key_regard", delta: -2 }, { flag: "key_side_locked_ocracoke" }, { flag: "key_suspects" },
+      { flag: "wm_paid" }, { flag: "a_wanted_man_done" }]))],
+  });
+
+  // SHARED: Brady and Finch, then coffee.
+  var HOWE_BACK = { any: [ALIVE, TROPHY] }; // Howe left the room (the alive and trophy paths)
+  function coffee(withLeave) {
+    var out = [
+      C("You already know I'm quite keen on your Arabica.", [], R("The Admiral flashes a knowing smile.", [{ flag: "wm_coffee" }], "nor_wm_plan", ON), { hiddenUnless: { flag: "coffee_love" } }),
+      C("Certainly. You've won me over.", [], R("The Admiral appears proud of himself.", [{ flag: "wm_coffee" }], "nor_wm_plan", ON), { hiddenUnless: { flag: "coffee_new" } }),
+      C("Yes, please.", [], R("", [{ flag: "wm_coffee" }], "nor_wm_plan", ON)),
+      C("No, thank you.", [], R("", [], "nor_wm_plan", ON)),
+    ];
+    if (withLeave) out.push(C("Actually, I've got somewhere else I need to be.", [], R("The Admiral seems taken aback. \"Ah, well, I won't keep you.\" The Lieutenant brings your reward and you leave without another word.", [
+      { gold: 1500, pot: "purse", when: ALIVE }, { gold: 750, pot: "purse", when: { not: ALIVE } }, { hook: "key_regard", delta: 1 },
+      { flag: "wm_regard" }, { flag: "wm_paid" }, { flag: "turnin_unfinished" }, { flag: "a_wanted_man_done" }])));
+    return out;
+  }
+  S("nor_wm_shared", {
+    setup: "\"Captain, this is Vice-Admiral Brady, my second in command,\" Admiral Key says, as the whiskered, burly officer bows his head.\n\n" +
+      "\"And this,\" he gestures to the younger, blonde-haired man, \"is Commodore Finch.\" The Commodore nods curtly.\n\n" +
+      "\"The Vice-Admiral was just leaving, unfortunately.\" As his subordinate turns to leave, Key grabs him by the arm and whispers something in his ear. You only make out a few words: \"...if you find him, don't engage yet...\" before the Vice-Admiral nods dutifully and departs.\n\n" +
+      "The Admiral turns back to you and the Commodore.\n\n\"Please, sit,\" he encourages you. \"Coffee?\"\n\nThe Commodore shakes his head.",
+    choices: coffee(true),
+  });
+
+  // RETURN: the next entry, before the squadron sails.
+  S("nor_wm_return", {
+    firesWhen: { all: [{ flag: "turnin_unfinished" }, { maxYear: 1754 }, { season: ["Spring", "Summer", "Hurricane"] }] },
+    setup: "As you enter the Admiralty House, you find Admiral Key sitting in one of the plush armchairs beside Commodore Finch, a fresh pot of coffee between them.\n\n" +
+      "\"Ah, there you are,\" Key says with a smile. \"We didn't get to finish our conversation.\" The Commodore looks displeased.\n\n\"Please, sit,\" he encourages you. \"Coffee?\"",
+    choices: coffee(false),
+  });
+
+  // The plan, and the ask.
+  S("nor_wm_plan", {
+    setup: [
+      { when: { flag: "wm_coffee" }, text: "As you take a seat in one of the soft armchairs, the Admiral pours you a cup of coffee himself, before topping off his own and sinking into the chair opposite you, next to the Commodore. He lets out a deep sigh.\n\n" },
+      { when: { not: { flag: "wm_coffee" } }, text: "As you take a seat in one of the soft armchairs, the Admiral refills his coffee and sinks into the chair opposite you, next to the Commodore. He lets out a deep sigh.\n\n" },
+      "\"I don't know about you, but I think these might just be the most comfortable chairs I've ever sat in. I can't spend too much time out here, otherwise I'd never get anything done!\" He laughs to himself. \"Lord knows I've caught the lieutenant napping out here on more than one occasion.\" The Commodore does not appear amused.",
+      { when: { any: [{ flag: "turnin_unfinished" }, { not: HOWE_BACK }] }, text: " The Lieutenant shifts uncomfortably." },
+      "\n\n\"Regardless,\" the Admiral addresses you, \"I'm glad you were able to track down our good friend Freddy. And I'm glad you came back. I'm dispatching Commodore Finch here on an assignment, and I think you could be of some service.\"\n\n" +
+      "Next to the Admiral, Commodore Finch's already curdled face turns fully sour. The Admiral is looking directly at you, and doesn't seem to notice.\n\n" +
+      "\"I've commanded Commodore Finch to lead a squadron to seize the pirate haven at Ocracoke,\" says the Admiral, taking a sip of coffee. \"Those brigands have threatened our people for too long.\"\n\n" +
+      "\"We don't expect the island to be particularly well-defended,\" he continues, setting down his cup, \"but the pirates have seen their fair share of battle, and they tend to be crafty.\"\n\n" +
+      "\"The Commodore will command the *Resolute* into battle—she's our third-biggest ship, and just the sight of her may be enough to break the pirates' will to resist. But if not, the squadron sails with two hundred trained marines, ready to storm the beach and capture the harbor.\"\n\n" +
+      "\"I'd like you to join that attack.\"\n\n" +
+      "The Commodore, who has been silent since you arrived, finally speaks up. His voice is softer than you would have expected for a man of his height.\n\n" +
+      "\"Admiral, the squadron is surely sufficient already,\" he protests. \"We have no need for an unproven privateer.\" He shoots you a suspicious glance.\n\n" +
+      "\"It's an order,\" the Admiral responds coldly, without even looking at him. A tense, silent moment passes before the Commodore, chastened, casts his eyes downward.\n\n" +
+      "\"In any case,\" the Admiral finally says, the soft smile returning to his face, \"Captain {captain.last} has indeed proven {captain.himself} to be dependable.\"\n\n" +
+      "\"So, Captain, can I count on you once again? Will you join the attack on Ocracoke?\"",
+    ],
+    choices: [
+      C("Of course. It would be an honor.", ["Honor"], R("\"You continue to surprise me, Captain. I assure you that you'll be well compensated for your trouble.\"", [{ flag: "ocracoke_invited" }], "nor_wm_close", ON)),
+      C("Only if there's gold behind it.", ["Plunder"], R("\"I admire your focus. Yes, you will be well compensated.\"", [{ flag: "ocracoke_invited" }], "nor_wm_close", ON)),
+      C("I'll need to think about it.", ["Caution"], R("\"I understand. It's a lot to ask of a privateer, and not exactly what you signed up for.\"", [{ flag: "ocracoke_declined" }], "nor_wm_close", ON)),
+      C("Find somebody else.", ["Defiance"], R("\"I understand,\" he says, disappointed. The Commodore, however, looks relieved.", [{ flag: "ocracoke_declined" }], "nor_wm_close", ON)),
+    ],
+  });
+
+  var INVITED = { flag: "ocracoke_invited" }, HURRICANE = { season: "Hurricane" };
+  S("nor_wm_close", {
+    setup: [
+      "The Admiral smiles and rises to his feet, prompting you and the Commodore to do the same.",
+      { when: { all: [{ not: { flag: "wm_paid" } }, HOWE_BACK] }, text: "\n\nAt that moment, Lieutenant Howe reappears with a hefty pouch of gold. \"Your reward for the bounty,\" he says. You accept it quickly." },
+      { when: { all: [{ not: { flag: "wm_paid" } }, { not: HOWE_BACK }] }, text: "\n\nAt that moment, Lieutenant Howe steps forward with a hefty pouch of gold. \"Your reward for the bounty,\" he says. You accept it quickly." },
+      { when: { not: { flag: "key_letter_accepted" } }, text: "\n\nThe Lieutenant also hands you a sealed envelope. \"And here's the Admiral's letter of marque. We thought you might reconsider.\"" },
+      { when: { all: [INVITED, { not: HURRICANE }] }, text: "\n\n\"Come back after the end of summer, once we have the plans and necessary provisions in place,\" says the Admiral. \"I look forward to your return.\"" },
+      { when: { all: [INVITED, HURRICANE] }, text: "\n\n\"Come back shortly, once we have the plans and necessary provisions in place,\" says the Admiral. \"I look forward to your return.\"" },
+      { when: { all: [{ not: INVITED }, { not: HURRICANE }] }, text: "\n\n\"Come back after the end of summer if you change your mind,\" the Admiral says. \"I wish you good fortune.\"" },
+      { when: { all: [{ not: INVITED }, HURRICANE] }, text: "\n\n\"Come back shortly if you change your mind,\" the Admiral says. \"I wish you good fortune.\"" },
+      "\n\nHe nods, and you leave the Admiralty House.",
+    ],
+    choices: [C("Continue", [], R("", [
+      { gold: 1500, pot: "purse", when: { all: [ALIVE, { not: { flag: "wm_paid" } }] } },
+      { gold: 750, pot: "purse", when: { all: [{ not: ALIVE }, { not: { flag: "wm_paid" } }] } },
+      { hook: "key_regard", delta: 1, when: { not: { flag: "wm_regard" } } },
+      // The letter: accepted (binding) on Choices 1-2; Howe's standing offer on 3-4.
+      { hook: "key_letter", when: { all: [INVITED, { not: { flag: "key_letter_accepted" } }] } },
+      { flag: "key_letter_accepted", when: INVITED },
+      { flag: "key_letter_pending", when: { all: [{ not: INVITED }, { not: { flag: "key_letter_accepted" } }] } },
+      { flag: "wm_regard" }, { flag: "wm_paid" }, { flag: "a_wanted_man_done" }, { flag: "turnin_unfinished", value: false }]))],
+  });
+
+  // ---- Key's Spyglass at Trusted (Part 4 §10; D9) ---------------------------------
+  S("nor_key_spyglass", {
+    title: "Key's Spyglass", where: "Norfolk, the Admiralty House",
+    firesWhen: { fn: "keyTrusted" },
+    setup: "Lieutenant Howe catches you in the lounge. \"The Admiral asked for you, Captain. He said it's personal.\"\n\n" +
+      "You meet the Admiral in his office, where he holds out a battered glass spyglass. \"This went to sea with me on my very first voyage. She's seen the world with me. I'd like you to have it.\"",
+    choices: [
+      C("I can't take this.", ["Honor"], R("\"You can, and you will. Consider it an order.\"", [{ item: "Key's Spyglass" }])),
+      C("I'll take good care of it.", ["Honor"], R("\"I know you will.\"", [{ item: "Key's Spyglass" }])),
+      C("Why me?", [], R("\"Because you've earned it. Few have.\"", [{ item: "Key's Spyglass" }])),
+    ],
+  });
+
+  Object.keys(scenes).forEach(function (id) { PC.data.scenes[id] = scenes[id]; });
+  var P = PC.data.nodes.norfolk.present.scenes;
+  Object.keys(scenes).forEach(function (id) { P[id] = { place: "admiralty", person: "key" }; });
+  // Entering the Admiralty House: the turn-in, the return and the Spyglass
+  // after the lounge and Key's introduction (the first that can play).
+  var FE = PC.data.nodes.norfolk.firstEntry = PC.data.nodes.norfolk.firstEntry || {};
+  FE.admiralty = (FE.admiralty || []).concat(["nor_wm_turnin", "nor_wm_return", "nor_key_spyglass"]);
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -25373,6 +25847,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<p class="small" style="margin:0">' + esc(s.legit) + "</p>" +
       // M9 PR 3: an Admiralty bounty's target, or one of Deadman's French stragglers.
       (s.bounty ? '<p class="small" style="margin:4px 0 0"><b class="sc">Wanted</b> · ' + esc(s.bounty) + ", on the Admiralty's notice.</p>" : "") +
+      (s.wanted ? '<p class="small" style="margin:4px 0 0"><b class="sc">Wanted</b> · ' + esc(s.wanted) + ", assigned to you by the Admiral.</p>" : "") +
+      (s.rating != null ? '<p class="small" style="margin:4px 0 0">Key\'s Spyglass: her captain\'s rating is ' + s.rating + ".</p>" : "") +
       (s.french ? '<p class="small" style="margin:4px 0 0"><b class="sc">A French straggler</b> · Lieutenant Howe pays ' + PC.data.bounties.STRAGGLER_REWARD + " for her captain.</p>" : "") + "</div></div>";
   }
 
@@ -25922,7 +26398,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (pris.length || state.captives) html += '<div class="svc"><h4>Prisoners and captives</h4>' +
       (state.captives ? '<p class="small">' + plural(state.captives, "captive") + " aboard, to be freed at a free port for a reward.</p>" : "") +
       pris.map(function (p) {
-        return '<p class="small" style="margin:4px 0"><b>' + esc(p.name) + "</b> · " + (p.kind === "bounty" ? "wanted by the Admiralty: Lieutenant Howe pays the alive rate" : "a French straggler: Lieutenant Howe pays " + PC.data.bounties.STRAGGLER_REWARD) +
+        return '<p class="small" style="margin:4px 0"><b>' + esc(p.name) + "</b> · " + (p.kind === "bounty" ? "wanted by the Admiralty: Lieutenant Howe pays the alive rate" : p.kind === "wanted" ? "the Admiral's man: bring him to the Admiralty House in Norfolk" : "a French straggler: Lieutenant Howe pays " + PC.data.bounties.STRAGGLER_REWARD) +
           ' <button class="secondary" data-act="prisrelease" data-id="' + esc(p.id) + '">Let him go</button> <button class="secondary" data-act="priskill" data-id="' + esc(p.id) + '">Kill him</button></p>';
       }).join("") + "</div>";
     html += '<div class="svc"><h4>Morale · ' + c.morale + " · " + esc(C.band(c.morale)) + '</h4><div class="hbar" style="height:12px;max-width:680px"><i style="width:' + c.morale + '%;background:#2f5a22"></i></div></div>';
@@ -26319,7 +26795,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         '<p class="small">Add a fleet ship (generated officer-captain): ' + ["Sloop", "Schooner", "Brigantine", "Brig"].map(function (c) { return b("devfleet", c, ' data-cls="' + c + '"'); }).join("") + "</p>" +
         // P8: the crew's hidden numbers.
         '<p class="small">Crew: morale ' + state.crew.morale + " (" + esc(PC.crew.band(state.crew.morale)) + ") · Pressure " + (state.crew.pressure || 0) + " of 5 (mutiny fires at 4 on departure, 5 at season end; not built yet) · set Pressure: " +
-          [0, 2, 3, 4, 5].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + " " + b("devmutiny", "Fire a mutiny now") + " " + b("devbounties", "Open the bounty board (skip A Wanted Man)") + "</p>" +
+          [0, 2, 3, 4, 5].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + " " + b("devmutiny", "Fire a mutiny now") + " " + b("devbounties", "Open the bounty board (skip A Wanted Man)") + " " + b("devfreddy", "Freddy: assign him and hear his rumor") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Run log", '<p class="small">Every choice, roll (with its seed), screen and change this run, and any error: ' + (PC.runlog ? PC.runlog.count() : 0) + " entries. Export it and attach the file in the playtest chat.</p>" +
@@ -27579,6 +28055,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     },
     "prisrelease": function (el) { var r = PC.bounties.releasePrisoner(state, el.dataset.id, false); toast(r.lines.join(" ")); },
     "priskill": function (el) { var r = PC.bounties.releasePrisoner(state, el.dataset.id, true); toast(r.lines.join(" ")); },
+    "devfreddy": function () { menu = null; state.flags.a_wanted_man_assigned = true; state.flags.admiralty_board_open = true; PC.wanted.heardRumor(state); toast("Freddy Fearless is in the next hunt batch on the Hatteras Banks."); },
     "devbounties": function () { menu = null; var n = PC.bounties.devOpen(state); toast(n.length ? n.length + " notices posted on the Norfolk board." : "The board is open; no new notices this season."); },
     "devmutiny": function () { menu = null; PC.mutiny.devFire(state); },
     "mutapproach": function (el) { PC.mutiny.choose(state, el.dataset.id); },

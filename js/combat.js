@@ -296,7 +296,7 @@
     b.lastStrike = { ship: e.id, outcome: r.outcome, why: why, dice: r.dice, edge: r.edge };
     noteRaw(game, (why === "consort" ? "Strike roll, " : "Strike roll, ") + (e.name || e.cls), r,
       { clean: "she strikes her colors", partial: "she wavers but fights on (Shaken)", setback: "she fights on" }[r.outcome]);
-    if (r.outcome === "clean") { knockOut(state, game, b, e, "struck"); return true; }
+    if (r.outcome === "clean") { if (e.named && !e.yielded) namedBark(state, game, b, "crewStrike"); knockOut(state, game, b, e, "struck"); return true; }
     if (r.outcome === "partial") { shake(e, 1); say(state, game, L().wavers); }
     return false;
   }
@@ -310,6 +310,7 @@
     // #31: the win banner shows with this step's result (the first ship taken in a battle).
     if ((how === "struck" || how === "captured") && !game.winBanner) game.winBanner = { at: Math.max(0, game.log.length - 1), how: how };
     if (how === "sunk") say(state, game, L().knockedOut.sunk);
+    if (how === "sunk" && e.named && PC.wanted) { var kb = PC.wanted.bark(state, e, "killed"); if (kb) say(state, game, kb); }
     var taken = how === "struck" || how === "captured" || how === "sunk";
     if (!taken) return;
     var others = fightingEnemies(b);
@@ -401,6 +402,8 @@
     game.battle = b; game.winBanner = null; // #31: one banner a battle
     // Pirates fly a black flag, and the battle opens saying so (P6).
     if (enemies[0] && enemies[0].flag === "Pirate" && PC.minigames) PC.minigames.say(state, game, (PC.data.huntLines.blackFlag || "PLACEHOLDER: She runs up the black flag."));
+    // A Named opponent's hail (the boarding-dialogue slots, §3).
+    if (PC.wanted && enemies[0] && enemies[0].named) { var hb = PC.wanted.bark(state, enemies[0], "hail"); if (hb) PC.minigames.say(state, game, hb); }
     // Default pairings: the flagship takes the escort or the first ship.
     var first = enemies.filter(function (e) { return e.escort; })[0] || enemies[0];
     autoPair(state, b, first.id);
@@ -450,6 +453,10 @@
   // Takers may first try a show of force (Intimidate vs her Resolve).
   function startStrike(state, game) {
     var b = game.battle;
+    // A Named opponent skips the strike-colors roll at the outset (§21.12;
+    // Norfolk Scene Records §3): Freddy never runs; Gauthier tries to.
+    var nm = fightingEnemies(b).filter(function (x) { return x.noStrikePre; })[0];
+    if (nm) return nm.triesToRun ? enemyFleePre(state, game) : startRound(state, game);
     b.step = prizeRung(state) >= 1 ? "showOfForce" : "strikePre";
     if (b.step === "strikePre") return strikePre(state, game, 0);
   }
@@ -486,7 +493,7 @@
   function enemyFleePre(state, game) {
     var b = game.battle;
     var foes = fightingEnemies(b);
-    if (foes.some(function (e) { return e.hunter || e.escort; })) return startRound(state, game);
+    if (foes.some(function (e) { return e.hunter || e.escort || e.neverRuns; })) return startRound(state, game);
     if (b.condition === "Fog") return startRound(state, game); // a ship met in fog gets no pre-battle flee roll (§42.4)
     var theirSpeed = Math.min.apply(null, foes.map(function (e) { return ship(state, b, e.id).speed; }));
     var p = fleeChance(theirSpeed - fleetSpeed(state, b), fleetCA(state, b));
@@ -703,6 +710,7 @@
     var hl = hullLost(s), lost = (e.role === "Trade" || e.role === "Hybrid") && !e.hunter && e.flag !== "Pirate" ? Math.max(hl, crewLost(s)) : hl;
     var adv = caBand(s.crew / Math.max(1, me.crew)), myLost = hullLost(me);
     var row = { board: false, flee: false, strike: 0 };
+    if (e.neverRuns) { row.board = true; return row; } // Freddy never runs (§3)
     if (e.hunter) { row.board = adv >= 1 || myLost >= 0.5; row.flee = !row.board && hl >= 0.75; }
     else if (e.flag === "Pirate") { row.board = adv >= 0; row.flee = !row.board && hl >= 0.5 && s.speed >= fleetSpeed(state, b); }
     else if (e.role === "War") { row.board = adv >= 1 && myLost >= 0.25; if (!row.board && hl >= 0.75) { row.flee = true; row.strike = 0.25; } }
@@ -873,6 +881,7 @@
     if (p.outcome === "setback") { hit(state, game, b, en.id, "flagship", false, "grape"); afterBeat(state, game); if (!b.over && b.step !== "retarget") startRound(state, game); return; }
     if (p.outcome === "partial") hit(state, game, b, en.id, "flagship", false, "grape");
     b.board = newBoard(state, b, true);
+    namedBark(state, game, b, "grapple");
     afterBeat(state, game, true);
     if (b.over) return;
     toStrikeFirst(state, game);
@@ -891,6 +900,7 @@
     if (p.outcome === "clean") { hit(state, game, b, "flagship", en.id, false, "grape"); afterBeat(state, game); if (!b.over && b.step !== "retarget") startRound(state, game); return; }
     if (p.outcome === "partial") hit(state, game, b, "flagship", en.id, false, "grape");
     b.board = newBoard(state, b, false);
+    namedBark(state, game, b, "repel");
     afterBeat(state, game, true);
     if (b.over) return;
     toStrikeFirst(state, game);
@@ -908,10 +918,18 @@
     b.board.sf = p.outcome === "clean" ? 1 : p.outcome === "setback" ? -1 : 0;
     b.board.sfOutcome = p.outcome;
     say(state, game, L().strikeFirst[p.outcome]);
+    // He calls you out: the forced duel opens the first clash (§21.12, §3).
+    if (lead(b) && lead(b).forceDuel && !b.dueled && !wounded(state)) namedBark(state, game, b, "challenge");
     b.step = "clash";
   }
 
   function wounded(state) { return hasTag(state, "Wounded"); }
+  function namedBark(state, game, b, slot) {
+    var e = lead(b);
+    if (!PC.wanted || !e || !e.named) return;
+    var line = PC.wanted.bark(state, e, slot);
+    if (line) say(state, game, line);
+  }
   function meleeType(state) {
     var items = state.captain.items || [];
     return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
@@ -936,16 +954,19 @@
     var en = lead(b), bd = b.board, list = [];
     var dr = clamp(en.rating, 0, 8);
     var w = wounded(state);
-    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : null,
+    // A Named opponent forces a duel in the first clash (§21.12, §3).
+    var forced = en.forceDuel && !b.dueled && !w && bd && bd.clash === 0;
+    var fl = forced ? "He calls you out: the duel comes first" : null;
+    list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : fl,
       note: "Clean: +2 on this clash, partial +1. A setback means you're Wounded." });
-    list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, note: "+1 on the next clash on a partial or better." });
-    list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, note: "Halves your losses this clash on a partial or better." });
+    list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, lock: fl, note: "+1 on the next clash on a partial or better." });
+    list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, lock: fl, note: "Halves your losses this clash on a partial or better." });
     list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
     // Dread joins Intimidate through the meter modifiers now (§11.8.5).
     list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8) },
-      note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
+      lock: fl, note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
     return list;
   }
 
@@ -998,6 +1019,8 @@
       if (bd.shotHit) { loseCrew(state, game, b, e.id, 1); bd.shotHit = false; }
       if (p.outcome === "clean") mod = 2; else if (p.outcome === "partial") mod = 1;
       else woundCaptain(state, game);
+      // Freddy's Cutlass: a clean Lead the Charge kills one extra enemy (§32.8).
+      if (p.outcome === "clean" && (state.captain.items || []).indexOf("Freddy's Cutlass") >= 0) loseCrew(state, game, b, e.id, 1);
     } else if (id === "rally") {
       say(state, game, L().rally[p.outcome]);
       if (p.outcome !== "setback") bd.rallyNext = 1;
@@ -1006,6 +1029,15 @@
       hold = p.outcome !== "setback";
     } else if (id === "duel") {
       b.dueled = true;
+      if (p.outcome === "clean" && e.named) {
+        // He yields, alive (§3): the ship is taken, and the surrender scene follows.
+        game.duelsWon = (game.duelsWon || 0) + 1;
+        namedBark(state, game, b, "duelWon"); namedBark(state, game, b, "crewBreak");
+        e.yielded = true;
+        knockOut(state, game, b, e, "captured", true);
+        return afterBoardingOut(state, game);
+      }
+      if (p.outcome === "setback" && e.named) { say(state, game, L().duel.setback); namedBark(state, game, b, "duelLost"); woundCaptain(state, game); bd.enemyNext += 1; return clash(state, game, mod, hold); }
       if (p.outcome === "clean") {
         say(state, game, L().duel.clean);
         game.duelsWon = (game.duelsWon || 0) + 1;

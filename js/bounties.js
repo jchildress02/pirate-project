@@ -250,8 +250,9 @@
     state.prisoners = list.filter(function (x) { return x !== p; });
     var out = { lines: [], chips: [] };
     var fake = { name: p.name, gender: p.gender };
+    if (p.kind === "wanted" && PC.wanted) PC.wanted.prisonerFate(state, p, kill); // A Wanted Man's quest prisoner
     if (kill) {
-      var dd = PC.meters.addDread(state, p.kind === "bounty" ? D().KILL_DREAD : D().STRAGGLER_KILL_DREAD);
+      var dd = PC.meters.addDread(state, p.kind === "straggler" ? D().STRAGGLER_KILL_DREAD : D().KILL_DREAD);
       out.lines.push(render(state, L().prisonerKilled, fake));
       out.chips.push({ icon: "dread", text: "Dread +" + dd, ink: "bad" });
       if (p.bounty) { var n = noticeOf(state, p.bounty); if (n) n.outcome = "dead"; }
