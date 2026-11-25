@@ -462,6 +462,8 @@
     // Scourge of the Coast and up: +1 on every pre-battle strike roll (3-24);
     // No Quarter: +1 (§26.8).
     var extra = (prizeRung(state) >= 3 ? 1 : 0) + (noQuarterOn(state, b) ? 1 : 0);
+    // A bounty target's strike-colors roll at the outset is at -1 (§17.4.8).
+    extra += Math.min(0, Math.min.apply(null, fightingEnemies(b).map(function (x) { return x.strikePre || 0; })));
     var r = rawRoll(state, game, "strikePre", dreadBonus(state) + fleetCA(state, b) + bonus + extra - resolve);
     // Terror of the Seas: trade ships strike on a partial as well (3-24).
     if (r.outcome === "partial" && prizeRung(state) >= 4 && fightingEnemies(b).every(function (x) { return x.role === "Trade" && !x.hunter && !x.escort; })) r.outcome = "clean";

@@ -1459,21 +1459,53 @@
       meta: "Clears your Avalon Heat (" + state.meters.heat.avalon + ")" + (price != null ? " for " + gold(price) + " gold from your purse" : "") + ". Avalon Standing +10, pirate Standing −10. Break it with a new offense against Avalon, and it's a betrayal.",
       lock: pc.ok ? null : pc.why }));
     if (state.pardon) list.push(opt({ act: "nop", label: "You hold the Admiral's pardon.", meta: "Any new offense against Avalon breaks it: a betrayal, and Key will hunt you for a year.", done: true }));
-    // Report a bounty: Milestone 9.
-    list.push(opt({ act: "nop", label: "Report a bounty", meta: "Nothing to report yet.", lock: "Bounties come in a later update" }));
+    // Report a bounty (§17.4.3; M9 PR 3).
+    var rep = PC.bounties ? PC.bounties.reportable(state) : [];
+    if (!rep.length) list.push(opt({ act: "bountynone", label: "Report a bounty", meta: "No action. Nothing to report yet." }));
     html += opts(list);
+    if (rep.length) {
+      html += '<p class="note" style="margin:14px 0 6px">Report a bounty</p>' + rep.map(function (x) {
+        return '<p class="small" style="margin:6px 0 2px"><b>' + esc(x.name) + "</b>" + (x.kind === "straggler" ? " · a French straggler" : "") + "</p>" + opts(x.claims.map(function (c) {
+          return opt({ act: "bountyreport", attrs: 'data-id="' + esc(x.id) + '" data-claim="' + esc(c.id) + '"', label: "“" + c.label + "”",
+            check: c.lie ? PC.checks.assess(state, PC.bounties.lieCheck(state), { conditions: ["Official"] }) : null,
+            meta: c.lie ? "A lie: Bluff & Disguise. Paid the dead rate either way; caught, the Admiral will hear of it." : x.kind === "straggler" ? PC.data.bounties.STRAGGLER_REWARD + " gold." : c.id === "alive" ? "The alive rate." : "The dead rate." });
+        }));
+      }).join("");
+    }
     // Ask Lieutenant Howe...
     html += '<p class="note" style="margin:14px 0 6px">Ask Lieutenant Howe…</p>' + opts(A.questions(state).map(function (q) {
       return opt({ act: "howeask", attrs: 'data-q="' + esc(q.id) + '"', label: "“" + q.label + "”", meta: "No action", done: q.asked });
     })) + "</div>";
     // The notice board (from the end of Key's introduction).
     if (f.admiralty_board_open) {
-      html += DIVIDER + '<div class="block"><div class="h4">The Notice Board</div><p class="small">' + esc(LA.boardBlurb) + "</p>" +
-        '<div class="svc notice"><p class="sc">Wanted · by Order of the Admiralty of Avalon</p><p><b>Frederick Kane, called “Freddy Fearless”</b></p>' +
+      html += DIVIDER + '<div class="block"><div class="h4">The Notice Board</div><p class="small">' + esc(LA.boardBlurb) + "</p>";
+      if (!f.a_wanted_man_done) html += '<div class="svc notice"><p class="sc">Wanted · by Order of the Admiralty of Avalon</p><p><b>Frederick Kane, called “Freddy Fearless”</b></p>' +
         '<p class="small">For piracy against the shipping of Avalon. A known associate of Amber Jack. Last seen near Ocracoke. Sails the <i>Deadly Delight</i>, a well-armed sloop.</p>' +
-        '<p class="small"><b>1,500 gold alive · 750 gold dead</b></p><p class="small">Key\'s wax seal · Assigned to Captain ' + esc(state.captain.last) + ' · <span class="sc">Taken</span></p></div>' +
-        '<p class="note">' + esc(LA.boardMore) + "</p></div>";
+        '<p class="small"><b>1,500 gold alive · 750 gold dead</b></p><p class="small">Key\'s wax seal · Assigned to Captain ' + esc(state.captain.last) + ' · <span class="sc">Taken</span></p></div>';
+      if (PC.bounties && PC.bounties.posting(state)) html += bountyCards();
+      else html += '<p class="note">' + esc(LA.boardMore) + "</p>";
+      html += "</div>";
     }
+    return html;
+  }
+
+  // The notice board's generated notices (§17.4.8; M9 PR 3): parchment
+  // cards with the silhouette ("Likeness unknown"), crimes, waters, ship,
+  // reward and a status stamp; Take the bounty or Leave it.
+  var STAMP = { open: "Open", taken: "Taken", captured: "Taken", collected: "Collected", deceased: "Deceased", expired: "Gone" };
+  function bountyCards() {
+    var Bn = PC.bounties, bd = Bn.board(state), BL = PC.data.bounties.lines, html = "";
+    if (bd.fresh) html += '<p class="small"><i>' + esc(BL.fresh) + "</i></p>";
+    if (bd.empty) html += '<p class="note">' + esc(BL.empty) + "</p>";
+    html += bd.cards.map(function (n) {
+      var w = PC.data.hunt.WATERS[n.waters].name;
+      return '<div class="svc notice bountycard"><div class="bsil">' + sil(44, 60) + '<span class="small">Likeness unknown</span></div><div><p class="sc">Wanted · by Order of the Admiralty of Avalon</p><p><b>' + esc(n.name) + "</b></p>" +
+        '<p class="small">For piracy near ' + esc(PC.world.placeName(n.port)) + ". Last seen in " + esc(w) + ". Sails the <i>" + esc(n.ship) + "</i>, a " + esc(n.cls.toLowerCase()) + ".</p>" +
+        '<p class="small"><b>' + Bn.reward(state, n, "alive") + " gold alive · " + Bn.reward(state, n, "dead") + ' gold dead</b></p><p class="small"><span class="sc stamp s-' + n.status + '">' + esc(STAMP[n.status] || n.status) + "</span>" +
+        (n.note ? " · " + esc(n.note) : "") + "</p>" +
+        (n.status === "open" ? '<div class="actions"><button class="primary" data-act="bountytake" data-id="' + esc(n.id) + '">Take the bounty</button></div>' : "") + "</div></div>";
+    }).join("");
+    Bn.seen(state);
     return html;
   }
 
@@ -2186,7 +2218,10 @@
     return '<div class="scout">' + shipArtHtml(s.cls) + '<div>' + flagTag(s.flag, s.role, true) + '<h4 style="margin:0">' + (s.escort ? "Her escort: " : "") + dirtyName("A " + s.cls + (s.name ? ", the " + s.name : ""), s.flag !== "Pirate") + "</h4>" +
       '<table class="ledger">' + rows.map(function (r) { return lrow(r[0], esc(r[1])); }).join("") + "</table>" +
       '<p class="small" style="margin:4px 0"><i>The lookout: ' + esc(PC.text.render(s.cue, state).replace(/^PLACEHOLDER: /, "")) + "</i></p>" +
-      '<p class="small" style="margin:0">' + esc(s.legit) + "</p></div></div>";
+      '<p class="small" style="margin:0">' + esc(s.legit) + "</p>" +
+      // M9 PR 3: an Admiralty bounty's target, or one of Deadman's French stragglers.
+      (s.bounty ? '<p class="small" style="margin:4px 0 0"><b class="sc">Wanted</b> · ' + esc(s.bounty) + ", on the Admiralty's notice.</p>" : "") +
+      (s.french ? '<p class="small" style="margin:4px 0 0"><b class="sc">A French straggler</b> · Lieutenant Howe pays ' + PC.data.bounties.STRAGGLER_REWARD + " for her captain.</p>" : "") + "</div></div>";
   }
 
   function huntPanel(v) {
@@ -2525,6 +2560,9 @@
       radio("h-crew", "release", "Release them", null, null, true) +
       radio("h-crew", "recruit", "Recruit the willing", p.volunteers ? p.volunteers + " " + p.volTier + " hands want to sign on" : null, p.volunteers ? null : "Nobody wants to", false) +
       radio("h-crew", "execute", "Execute them", "No Heat, Dread +3" + (p.execute.legal ? "" : ". " + p.execute.why), null, false);
+    // Her captain (§17.4.8, §17.4.4): a bounty target or a French straggler.
+    if (p.captainFate) html += '<div class="h4">Her captain, ' + esc(p.captainFate.name || "") + "</div>" + '<p class="small" style="margin:0 0 4px">' + inline(p.captainFate.setup) + "</p>" +
+      p.captainFate.options.map(function (o, i) { return radio("h-capt", o.id, o.label, o.note, null, i === 0); }).join("");
     if (p.captives) html += '<div class="h4">' + plural(p.captives, "captive") + " aboard her</div>" +
       radio("h-cap", "free", "Take them aboard to free them", "Freed at a free port for a reward", null, true) +
       radio("h-cap", "recruit", "Recruit the willing", "Half join as Green hands", null, false) +
@@ -2727,6 +2765,14 @@
     }).join("") + (c.wounded ? '<i title="' + c.wounded + ' wounded" style="position:static;display:inline-block;height:100%;width:' + (100 * c.wounded / sh.crewMax) + '%;background:repeating-linear-gradient(45deg,#8f2a1c 0 2px,transparent 2px 5px)"></i>' : "") + "</div>";
     var html = '<div class="svc"><h4>Hands · ' + c.count + " of " + sh.crewMax + (c.wounded ? " · " + c.wounded + " wounded" : "") + "</h4>" + bar +
       '<p class="small">' + PC.data.economy.TIER_ORDER.filter(function (t) { return c.tiers[t]; }).map(function (t) { return '<span title="' + esc(TIER_TIP[t]) + '" style="border-bottom:1px dotted">' + c.tiers[t] + " " + t + "</span>"; }).join(" · ") + "</p></div>";
+    // Prisoners and captives (§17.4.4; M9 PR 3): listed together; a prisoner can be released or killed.
+    var pris = PC.bounties ? PC.bounties.prisoners(state) : [];
+    if (pris.length || state.captives) html += '<div class="svc"><h4>Prisoners and captives</h4>' +
+      (state.captives ? '<p class="small">' + plural(state.captives, "captive") + " aboard, to be freed at a free port for a reward.</p>" : "") +
+      pris.map(function (p) {
+        return '<p class="small" style="margin:4px 0"><b>' + esc(p.name) + "</b> · " + (p.kind === "bounty" ? "wanted by the Admiralty: Lieutenant Howe pays the alive rate" : "a French straggler: Lieutenant Howe pays " + PC.data.bounties.STRAGGLER_REWARD) +
+          ' <button class="secondary" data-act="prisrelease" data-id="' + esc(p.id) + '">Let him go</button> <button class="secondary" data-act="priskill" data-id="' + esc(p.id) + '">Kill him</button></p>';
+      }).join("") + "</div>";
     html += '<div class="svc"><h4>Morale · ' + c.morale + " · " + esc(C.band(c.morale)) + '</h4><div class="hbar" style="height:12px;max-width:680px"><i style="width:' + c.morale + '%;background:#2f5a22"></i></div></div>';
     html += '<table class="ledger wide">' +
       '<tr><th><span title="The average worth of your hands (Green 0 to Veteran 3), less 1 in a season when raw hands are over a quarter of the crew." style="border-bottom:1px dotted">Skill</span></th><td>' + C.skill(state) + (c.raw > 0.25 * c.count ? ' <span class="note">(raw hands this season: −1)</span>' : "") + "</td></tr>" +
@@ -3121,7 +3167,7 @@
         '<p class="small">Add a fleet ship (generated officer-captain): ' + ["Sloop", "Schooner", "Brigantine", "Brig"].map(function (c) { return b("devfleet", c, ' data-cls="' + c + '"'); }).join("") + "</p>" +
         // P8: the crew's hidden numbers.
         '<p class="small">Crew: morale ' + state.crew.morale + " (" + esc(PC.crew.band(state.crew.morale)) + ") · Pressure " + (state.crew.pressure || 0) + " of 5 (mutiny fires at 4 on departure, 5 at season end; not built yet) · set Pressure: " +
-          [0, 2, 3, 4, 5].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + " " + b("devmutiny", "Fire a mutiny now") + "</p>" +
+          [0, 2, 3, 4, 5].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + " " + b("devmutiny", "Fire a mutiny now") + " " + b("devbounties", "Open the bounty board (skip A Wanted Man)") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Run log", '<p class="small">Every choice, roll (with its seed), screen and change this run, and any error: ' + (PC.runlog ? PC.runlog.count() : 0) + " entries. Export it and attach the file in the playtest chat.</p>" +
@@ -3285,7 +3331,7 @@
       markLog();
       var rp = document.querySelector(".hreplace");
       PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null, cargo: cargo,
-        replace: rp ? rp.value : null, oldFate: pick("h-oldfate", "release") });
+        replace: rp ? rp.value : null, oldFate: pick("h-oldfate", "release"), captain: pick("h-capt", null) });
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
@@ -4373,6 +4419,15 @@
     "devjail": function (el) { PC.devtools.jail(state, el.dataset.charge); menu = null; },
     "devcaptured": function (el) { PC.devtools.captured(state, el.dataset.flag); menu = null; },
     "devsecret": function () { state.flags.fenceUsed_bobby = true; },
+    "bountytake": function (el) { say("howe", "Lieutenant Howe", PC.bounties.take(state, el.dataset.id)); },
+    "bountynone": function () { say("howe", "Lieutenant Howe", PC.data.bounties.lines.nothing); },
+    "bountyreport": function (el) {
+      var r = PC.bounties.report(state, el.dataset.id, el.dataset.claim);
+      say("howe", "Lieutenant Howe", r.lines.join("\n\n"), null, null, r.outcome ? { chips: r.chips, outcome: r.outcome, rollType: "Bluff & Disguise" } : { chips: r.chips });
+    },
+    "prisrelease": function (el) { var r = PC.bounties.releasePrisoner(state, el.dataset.id, false); toast(r.lines.join(" ")); },
+    "priskill": function (el) { var r = PC.bounties.releasePrisoner(state, el.dataset.id, true); toast(r.lines.join(" ")); },
+    "devbounties": function () { menu = null; var n = PC.bounties.devOpen(state); toast(n.length ? n.length + " notices posted on the Norfolk board." : "The board is open; no new notices this season."); },
     "devmutiny": function () { menu = null; PC.mutiny.devFire(state); },
     "mutapproach": function (el) { PC.mutiny.choose(state, el.dataset.id); },
     "mutfate": function (el) { PC.mutiny.ringleaderFate(state, el.dataset.how); },

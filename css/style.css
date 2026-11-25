@@ -748,3 +748,11 @@ html, body { overflow-anchor: none; }
 .bicon { width: 20px; height: 20px; vertical-align: -4px; margin-right: 6px; color: var(--oxblood); flex: none; }
 /* 3-16: the Quartermaster beside the result box on a wide screen. */
 .beside.bres .bmain .rbox { margin-top: 0; }
+
+/* The notice board's generated notices (M9 PR 3, §17.4.8). */
+.bountycard { display: flex; gap: 12px; align-items: flex-start; }
+.bountycard .bsil { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
+.bountycard .bsil .small { font-size: 12px; font-style: italic; color: var(--faded); }
+.stamp { border: 1.5px solid currentColor; padding: 0 6px; border-radius: 2px; }
+.stamp.s-deceased, .stamp.s-expired { color: var(--bad, #8f2a1c); }
+.stamp.s-collected { color: var(--good, #2f5a2a); }

@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -4342,7 +4342,126 @@ test("season Pressure: +1 for each mutinous officer and a Schemer at Wary or bel
 test("save 13 loads as 14 with the mutiny fields", function () {
   var s = m7("sv14"); var old = JSON.parse(PC.state.serialize(s)); old.saveVersion = 13; delete old.mutiny;
   var t = PC.state.deserialize(JSON.stringify(old));
-  eq(t.saveVersion, 14); eq(t.mutiny, null);
+  eq(t.saveVersion, 15); eq(t.mutiny, null); eq(t.prisoners.length, 0);
+});
+
+// ---- M9 PR 3: Admiralty Bounties and French stragglers (§17.4.8, §17.4.4, §22.5) ----
+
+function bountyReady(seed) {
+  var s = atNorfolk(seed); s.flags.admiralty_board_open = true; PC.letters.meet(s, "key");
+  return s;
+}
+
+test("the board posts nothing until A Wanted Man is done; then 1-2 notices a season, at most 3 open", function () {
+  var s = bountyReady("bo1");
+  eq(PC.bounties.refresh(s).length, 0, "A Wanted Man first");
+  s.flags.a_wanted_man_done = true;
+  var n = PC.bounties.refresh(s).length;
+  ok(n >= 1 && n <= 2, "1-2 posted: " + n);
+  eq(PC.bounties.refresh(s).length, 0, "once a season");
+  for (var i = 0; i < 6; i++) { s.time.season = (s.time.season + 1) % 4; if (!s.time.season) s.time.year++; PC.bounties.refresh(s); }
+  ok(s.bounties.notices.filter(function (x) { return x.status === "open" || x.status === "taken"; }).length <= 3);
+  ok(s.bounties.notices.some(function (x) { return x.status === "expired"; }), "untaken notices come down after 2 seasons");
+  var c = s.bounties.notices[0];
+  ok(["Sloop", "Schooner", "Brigantine", "Brig"].indexOf(c.cls) >= 0); ok(PC.data.bounties.PORTS.indexOf(c.port) >= 0);
+  eq(c.alive, PC.data.bounties.REWARD[c.cls][0]);
+});
+
+test("a taken bounty: Deceased at 15% a season; its rumor guarantees him in the next batch in his waters", function () {
+  var s = bountyReady("bo2"); PC.bounties.devOpen(s);
+  var n = s.bounties.notices[0]; PC.bounties.take(s, n.id); eq(n.status, "taken");
+  var real = PC.data.bounties.SPAWN; PC.data.bounties.SPAWN = 0;
+  try {
+    eq(PC.bounties.batchTarget(s, n.waters, function () { return 0.5; }), null, "no spawn without the rumor at 0%");
+    PC.bounties.heardRumor(s, n.id);
+    eq(PC.bounties.batchTarget(s, n.waters, function () { return 0.99; }).id, n.id, "the rumor guarantees him");
+  } finally { PC.data.bounties.SPAWN = real; }
+  var g = PC.bounties.targetShip(s, n, PC.rng.fromKey("t"));
+  var sh = g.ships[0];
+  eq(sh.bounty, n.id); eq(sh.guns, sh.gunsMax); eq(sh.crew, sh.crewMax); eq(sh.resolve, 3); eq(sh.lootLevel, 0); eq(sh.strikePre, -1);
+  ok(!n.rumorFresh, "the guarantee is spent once he's met");
+  var t = bountyReady("bo3"); PC.bounties.devOpen(t); var m = t.bounties.notices[0]; PC.bounties.take(t, m.id);
+  var dead = 0;
+  for (var i = 0; i < 40 && m.status === "taken"; i++) { t.time.season = (t.time.season + 1) % 4; if (!t.time.season) t.time.year++; PC.bounties.refresh(t); }
+  eq(m.status, "deceased", "another hunter gets him in the end");
+});
+
+test("at Norfolk the keeper tells a taken bounty's rumor first, naming him and his waters", function () {
+  var s = bountyReady("bo4"); PC.bounties.devOpen(s);
+  var n = s.bounties.notices[0]; PC.bounties.take(s, n.id);
+  var r = PC.rumors.draw(s, PC.data.nodes.norfolk.rumorWeights, "k|1", "tavern keeper");
+  ok(r && r.text.indexOf(n.name) >= 0, r && r.text);
+  ok(n.rumorFresh);
+});
+
+test("brought in alive: Howe pays the alive rate, Avalon +3, a segment at the port; ×1.25 at Respected", function () {
+  var s = bountyReady("bo5"); PC.bounties.devOpen(s);
+  var n = s.bounties.notices[0]; PC.bounties.take(s, n.id);
+  PC.bounties.settleCaptain(s, { bounty: n.id }, "bring");
+  eq(PC.bounties.prisoners(s).length, 1);
+  var rep = PC.bounties.reportable(s); eq(rep[0].claims[0].id, "alive");
+  var p0 = s.money.purse, a0 = s.meters.standing.avalon;
+  PC.bounties.report(s, n.id, "alive");
+  eq(s.money.purse, p0 + n.alive); eq(s.meters.standing.avalon, a0 + 3); eq(n.status, "collected");
+  eq(s.world.segments[n.port].admiralty, 1); eq(PC.bounties.prisoners(s).length, 0);
+  PC.letters.addRegard(s, "key", 2); eq(PC.letters.band(s, "key"), "Respected");
+  eq(PC.bounties.reward(s, n, "alive"), Math.round(n.alive * 1.25));
+});
+
+test("the claims: killed is true, sunk is true for 'went down', a spared target needs a lie (paid the dead rate; caught, regard -2)", function () {
+  var s = bountyReady("bo6"); PC.bounties.devOpen(s); s.flags.a_wanted_man_done = true;
+  var n = s.bounties.notices[0]; PC.bounties.take(s, n.id);
+  PC.bounties.settleCaptain(s, { bounty: n.id }, "killHead");
+  ok(!PC.bounties.isLie(n, "dead")); ok(PC.bounties.isLie(n, "sunk"));
+  ok(PC.bounties.reportable(s)[0].claims.some(function (c) { return c.id === "trophy"; }));
+  var t = bountyReady("bo7"); PC.bounties.devOpen(t);
+  var m = t.bounties.notices[0]; PC.bounties.take(t, m.id);
+  PC.bounties.settleCaptain(t, { bounty: m.id }, "release");
+  ok(PC.bounties.isLie(m, "dead") && PC.bounties.isLie(m, "sunk"));
+  var r0 = PC.letters.regard(t, "key"), p0 = t.money.purse;
+  forced("setback", function () { PC.bounties.report(t, m.id, "dead"); });
+  eq(t.money.purse, p0 + m.dead); eq(PC.letters.regard(t, "key"), r0 - 2); ok(t.flags.key_suspects);
+  var u = bountyReady("bo8"); PC.bounties.devOpen(u);
+  var k = u.bounties.notices[0]; PC.bounties.take(u, k.id); PC.bounties.sunk(u, k.id);
+  ok(!PC.bounties.isLie(k, "sunk"));
+});
+
+test("the fifth bounty collected: Key's regard +1, once", function () {
+  var s = bountyReady("bo9"); PC.bounties.devOpen(s);
+  var r0 = PC.letters.regard(s, "key");
+  for (var i = 0; i < 6; i++) {
+    var n = { id: "x" + i, name: "Test " + i, gender: "m", cls: "Sloop", ship: "Hope", waters: "north", port: "edenton", alive: 600, dead: 300, status: "captured", outcome: "dead" };
+    s.bounties.notices.push(n);
+    PC.bounties.report(s, n.id, "dead");
+  }
+  eq(PC.letters.regard(s, "key"), r0 + 1);
+});
+
+test("French stragglers: about 20% of generated pirate ships; a prisoner delivered to Howe for 300", function () {
+  var s = bountyReady("bo10"), fr = 0, n = 0;
+  for (var i = 0; i < 400; i++) { var sh = { id: "s" + i, flag: "Pirate" }; PC.bounties.maybeFrench(s, sh); n++; if (sh.french) fr++; }
+  ok(fr / n > 0.14 && fr / n < 0.26, "French share " + fr / n);
+  PC.bounties.settleCaptain(s, { id: "sx", french: true, captain: "Jean Valjean" }, "prisoner");
+  var rep = PC.bounties.reportable(s); eq(rep[0].kind, "straggler");
+  var p0 = s.money.purse; PC.bounties.report(s, rep[0].id, "deliver");
+  eq(s.money.purse, p0 + 300); eq(PC.bounties.prisoners(s).length, 0);
+});
+
+test("a hunt with the bounty's rumor heard meets him in the first batch", function () {
+  var s = bountyReady("bo12"); PC.bounties.devOpen(s); s.ap.left = 7;
+  var n = s.bounties.notices[0]; n.waters = "north"; PC.bounties.take(s, n.id); PC.bounties.heardRumor(s, n.id);
+  var g = PC.hunt.start(s);
+  eq(g.batch.bounty, n.id);
+  var guard = 0;
+  while (!(g.sighting && g.sighting.ships.some(function (x) { return x.bounty === n.id; })) && guard++ < 6) { if (g.phase === "hunter") break; PC.hunt.next(s, g); }
+  ok(g.sighting && g.sighting.ships[0].bounty === n.id, "the target on the scouting card");
+  eq(PC.minigames.view(s).scout.ships[0].bounty, n.name);
+});
+
+test("the journal lists a taken bounty and a French prisoner", function () {
+  var s = bountyReady("bo11"); PC.bounties.devOpen(s);
+  var n = s.bounties.notices[0]; PC.bounties.take(s, n.id);
+  ok(PC.quests.journal(s).some(function (j) { return j.id === "bounty_" + n.id && j.objective.indexOf(n.name) >= 0; }));
 });
 
 test("the build label reads Build 0.9 · Milestone 8", function () {

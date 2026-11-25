@@ -125,6 +125,10 @@
       if (aboard) out.push(entry("restless", "done", rr.doneLine));
       else if (f.davey_at_tavern) out.push(entry("restless", "open", (state.seen || {}).ocr_rr_tab && !f.rr_paid ? rr.steps.tab : rr.steps.waiting));
     }
+    // Admiralty bounties and French prisoners (§17.4.8; M9 PR 3).
+    if (PC.bounties) PC.bounties.journal(state).forEach(function (j) {
+      out.push({ id: j.id, name: j.title, status: j.status, leads: 0, needed: 0, summary: "", objective: j.line, entries: [], beyond: null, deadline: null });
+    });
     return out;
   }
 

@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 14;
+  var SAVE_VERSION = 15;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -153,6 +153,7 @@
     cr.rationing = !!cr.rationing;
     state.articles = state.articles || null;
     state.mutiny = state.mutiny || null; // while a mutiny plays (M9 PR 2)
+    state.prisoners = state.prisoners || []; // bounty targets and French captains held for Howe (M9 PR 3)
     state.nodes = state.nodes || {};
     state.generated = state.generated || {};
     state.world.names = state.world.names || [];
@@ -279,6 +280,14 @@
       data.mutiny = data.mutiny || null;
       if (data.crew) { data.crew.mutinySigns = !!data.crew.mutinySigns; data.crew.ringleaderKnown = data.crew.ringleaderKnown || null; }
       data.saveVersion = 14;
+    }
+    if (data.saveVersion === 14) {
+      // M9 PR 3: the notice board's notices, prisoners aboard, and the
+      // Admiralty segments the bounties record (D3).
+      data.bounties = data.bounties || null;
+      data.prisoners = data.prisoners || [];
+      if (data.world) data.world.segments = data.world.segments || {};
+      data.saveVersion = 15;
     }
     return data;
   }
