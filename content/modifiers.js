@@ -149,6 +149,8 @@
   add("Marsh Fever", { note: "Fever Flares fire more often and last two seasons (§11.9)." });
 
   // ---- Earned physical tags the prototype can already reach (§14.5) ----
+  // Prize Taker's top rung (3-24): Dread floor +10, inside the cap of 40 (§28.8).
+  add("Terror of the Seas", { dreadFloor: 10, note: "Dread floor +10 (3-24)." });
   add("One Eye", { dreadFloor: 10, edge: plus(["Keep Watch"], -1), note: "Dread floor +10. Swaps the portrait for its eyepatch twin." });
 
   PC.data.modifiers = M;

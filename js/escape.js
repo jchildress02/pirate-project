@@ -54,12 +54,12 @@
     var p = planList(state).filter(function (x) { return x.id === id; })[0];
     if (!p) throw new Error("Not a plan here.");
     var j = state.jail;
-    state.ap.left -= 1;
+    PC.prison.cellAction(state);
     var r = PC.checks.resolve(state, p.check, key(state, "plan-" + id), { conditions: id === "grease" ? ["Official"] : [] });
     var out = { lines: [E().lines.plan[id][r.outcome]], chips: [], outcome: r.outcome };
     if (r.outcome !== "setback") { j.plans = j.plans || {}; if (!j.plans[id]) out.chips.push({ icon: "rumor", text: "Unlocked: " + p.unlocks, ink: "good" }); j.plans[id] = true; }
     tick(state, r.outcome === "clean" ? 2 : r.outcome === "partial" ? 1 : -1, out);
-    return PC.prison.finishStep(state, out);
+    return PC.prison.afterCellAction(state, out);
   }
 
   function tick(state, n, out) {
@@ -99,9 +99,9 @@
       out.lines.push(E().lines.cellmatesOfficer.replace("[Name]", o.first + " " + (o.last || "")).replace("[Type]", o.type));
       out.chips.push({ icon: "officer", text: o.first + " (" + o.type + ") will join you if you get out", ink: "good" });
     }
-    state.ap.left -= 1;
+    PC.prison.cellAction(state);
     j.used[what] = stamp(state);
-    return PC.prison.finishStep(state, out);
+    return PC.prison.afterCellAction(state, out);
   }
 
   // ---- The break-out (§43.9) ---------------------------------------------------------------
@@ -146,7 +146,7 @@
   function breakOut(state) {
     var c = canBreakOut(state);
     if (!c.ok) throw new Error(c.why);
-    state.ap.left -= 1;
+    PC.prison.cellAction(state);
     var j = state.jail;
     j.breakout = { beat: 1, mode: null, spent: false, log: [] };
     var out = { lines: [beatOneText(state)], chips: [] };
@@ -288,6 +288,8 @@
       out.lines.push(E().lines.ownShip);
       state.location.popup = { title: "Away", text: out.lines.join("\n\n"), lines: out.lines, chips: out.chips };
       state.current = { screen: "node" };
+      // 3-35: a mandatory voyage event before the ocean node.
+      if (PC.voyageEvents && PC.voyageEvents.afterEscape) PC.voyageEvents.afterEscape(state, sea, rec.officers.length ? rec.officers[0].id : null);
       return out;
     }
     // The stolen cutter: her crew are the escapees, officers first, then

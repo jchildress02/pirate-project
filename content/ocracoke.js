@@ -100,14 +100,18 @@
           { id: "amber_jack", label: "Who is Amber Jack?", after: "beach_captain",
             line: "{keeper} stares at you blankly. \"Oh, you're serious?\"\n\n\"He's only the greatest archpirate in a generation. Was a privateer for Avalon for a long time, but he went missing before the French fleet sacked Savannah and Charleston. Some say he tucked tail and ran away, but I suspect there's more to the story.\"" },
         ],
-        // The loss lead (Playtest Pins 0.9, #13; PH36): shown until the
-        // variant's Ocracoke lead is heard. The answers are PLACEHOLDERS for
-        // the author (A/C is the author's draft).
+        // The loss lead (Playtest Pins 0.9, #13): shown until the variant's
+        // Ocracoke lead is heard. The author's lines (3-5; PH36 closed). For
+        // B, Bobby's scene follows at once.
         lossLead: {
-          label: "Heard anything about [Loss Target]?",
-          A: "[PLACEHOLDER] \"Oh, I heard that one-armed pirate talking about something like that.\"",
-          C: "[PLACEHOLDER] \"Oh, I heard that one-armed pirate talking about something like that.\"",
-          B: "[PLACEHOLDER] \"Jewels? If anyone's bought or sold them, Bobby Rats knows about it. He's in here most nights.\"",
+          labels: {
+            A: "I'm looking for my brother. He has a prominent birthmark on his face. Do you know anything?",
+            B: "I'm looking for my family's valuables. Do you know anything?",
+            C: "I'm looking for a Frenchman with a half-burned face. Do you know anything?",
+          },
+          A: "\"Oh, I heard that one-armed pirate talking about someone like that.\"",
+          C: "\"Oh, I heard that one-armed pirate talking about someone like that.\"",
+          B: "\"Your best bet would be to speak to Bobby Rats over there.\"",
         },
       },
       shipwright: {

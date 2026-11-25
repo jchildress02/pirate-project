@@ -45,10 +45,10 @@
 
     lines: {
       // §42.7 (PLACEHOLDER, PH4: the author writes them).
-      hit: "PLACEHOLDER: A hurricane tore through the [Waters] as the season turned. The [Ship] rode it out at anchor, but she'll need the shipwright.",
-      spared: "PLACEHOLDER: A hurricane tore through the [Waters]. Snug in the shallows, the [Ship] barely felt it.",
-      elsewhere: "PLACEHOLDER: Word comes of a hurricane in the [Waters].",
-      hitStart: "PLACEHOLDER: A hurricane tore through the [Waters] as the season opened. The [Ship] rode it out at anchor, but she'll need the shipwright.",
+      hit: "PLACEHOLDER: A hurricane tore through [Waters] as the season turned. The [Ship] rode it out at anchor, but she'll need the shipwright.",
+      spared: "PLACEHOLDER: A hurricane tore through [Waters]. Snug in the shallows, the [Ship] barely felt it.",
+      elsewhere: "PLACEHOLDER: Word comes of a hurricane in [Waters].",
+      hitStart: "PLACEHOLDER: A hurricane tore through [Waters] as the season opened. The [Ship] rode it out at anchor, but she'll need the shipwright.",
       stormBatch: { clean: "PLACEHOLDER: The storm howls, but she rides it out.", partial: "PLACEHOLDER: A sea comes aboard and stoves in part of the rail.", setback: "PLACEHOLDER: The storm batters her for hours. The crew are soaked, sick and sullen." },
       // Ollie's line, the first Graveyard visit each Winter (§42.8; the author's line, final).
       ollieWinter: "Some new wrecks washed up with the latest storm. Should be some good finds out there.",

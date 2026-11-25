@@ -416,6 +416,7 @@
 
   // ---- Imprisonment (§43; Milestone 8, PR 6) ----
   var jailSay = null; // the last step's lines and chips, shown above the choices
+  var jailSeq = 0;
   var jailScreen = null;
 
   function jailPanel() {
@@ -456,6 +457,8 @@
     var escapeHtml = ev && ev.inCell ? escapeBlock(ev) : "";
     if (v.stage === "held" || v.stage === "awaitTrial") {
       var what = v.stage === "held" ? plural(v.left, "more action") + " here, then a fine of " + J.FINE_FEES + "× the port fee and you're out." : plural(v.left, "more action") + " until your trial.";
+      // 3-29: Held's line counts down every cell action; at 0, pay the fine and go.
+      if (v.stage === "held" && v.left <= 0) return html + opts([opt({ act: "jwait", label: "Pay the fine and go", meta: J.FINE_FEES + "× the port fee." })]);
       return html + '<p class="small">' + esc(what) + "</p>" + opts([v.ap > 0 ? opt({ act: "jwait", label: "Wait", meta: "One cell action." }) : turn]) + escapeHtml;
     }
     if (v.stage === "trial") {
@@ -528,6 +531,8 @@
   function jailResult() {
     if (!jailSay) return "";
     var h = (jailSay.lines || []).length ? '<div class="say">' + (jailSay.lines || []).map(inline).join("<br>") + "</div>" : "";
+    // 3-28 of the build 0.9 pins: a cell action's roll gets the same result box and chip as everywhere else.
+    if (OUTCOME[jailSay.outcome]) return rbox(jailSay.outcome, badge(jailSay.outcome) + h + chips(jailSay.chips), "jail-" + (jailSeq++));
     return h + chips(jailSay.chips);
   }
 
@@ -1181,7 +1186,7 @@
       html += '<div class="prose dropcap">' + prose(S.ask) + "</div>";
       var rd = PC.world.qmReading(state), share = PC.world.impliedShare(state);
       html += '<div class="svc"><h4>The Quartermaster</h4>' + (rd ? '<p><b>' + esc(rd.who) + ":</b> " + inline(rd.line) + "</p>" : '<p class="note">No Quartermaster to read the crew\'s mood.</p>') +
-        '<p class="small">If they split today, each share would be about <b>' + gold(share) + " gold</b> of crew gold (" + gold(state.money.crew) + " in the chest, less the 10% carried over).</p></div>";
+        '<p class="small">If they split today, each share would be about <b>' + gold(share) + " gold</b> of crew gold (" + gold(state.money.crew) + " in the chest, less the " + Math.round(PC.data.world.CARRYOVER * 100) + "% carried over).</p></div>";
       if (sp.forced) html += '<p class="notice warn">' + inline(S.forced) + "</p>";
       var hp = PC.world.holdPressure(state);
       html += opts([
@@ -1194,7 +1199,7 @@
       var p = sp.payout;
       html += '<div class="prose">' + prose(S.payout) + "</div>";
       html += '<table class="grid">' + (p.sold.length ? p.sold.map(function (x) { return "<tr><td>Sold the " + esc(x.name) + '</td><td>+' + gold(x.gold) + "</td></tr>"; }).join("") : "") +
-        "<tr><td>The chest</td><td>" + gold(p.pool) + "</td></tr><tr><td>Held back for next time (10%)</td><td>" + gold(p.carry) + "</td></tr>" +
+        "<tr><td>The chest</td><td>" + gold(p.pool) + "</td></tr><tr><td>Held back for next time (" + Math.round(PC.data.world.CARRYOVER * 100) + "%)</td><td>" + gold(p.carry) + "</td></tr>" +
         "<tr><td>One share</td><td>" + gold(p.one) + "</td></tr><tr><td>Your share, into your purse</td><td>+" + gold(p.captain) + "</td></tr>" +
         "<tr><td>Your officers</td><td>" + gold(p.officers) + "</td></tr><tr><td>" + plural(p.handsN, "hand") + "</td><td>" + gold(p.hands) + "</td></tr></table>";
       html += '<p>' + esc(S.perHand.replace("{gold}", gold(p.one)).replace("{mood}", PC.world.handMood(p.one))) + "</p>";
@@ -2610,7 +2615,7 @@
         meta: "No action · once a season, only when the crew is Sullen or Mutinous. Clean: Pressure −2, Discipline +1 for the season, Dread up. Partial: Pressure −1, morale −5. Setback: morale −5.", lock: shipLock(false) || (ex.ok ? null : ex.why) }),
     ]);
     var giveMax = state.money.purse;
-    html += '<div class="svc"><h4>Give to the crew</h4>' + sayFor("ship:give") + '<p class="small">Move gold from your purse into crew gold: +1 morale for every 5 gold a head (at most +10 a gift, +15 a season).</p>' +
+    html += '<div class="svc"><h4>Give to the crew</h4>' + sayFor("ship:give") + '<p class="small">Move gold from your purse into crew gold: +1 morale for every " + PC.data.economy.GIFT_GOLD_PER_MORALE + " gold a head (at most +10 a gift, +15 a season).</p>' +
       // The purse beside the stepper (B33).
       (giveMax > 0 ? '<div class="buyrow"><span class="small">Your purse: <b>' + gold(state.money.purse) + "</b></span>" + qstep("q-give", Math.min(giveMax, c.count * 5 * 2), giveMax) + '<button class="secondary" data-act="give" data-for="q-give"' + lockAttr(shipLock(false)) + '>Give</button> ' +
         totalSlot(function () { var n = val("q-give"); return gold(n) + " gold · morale +" + (n > 0 ? PC.crew.giftMorale(state, n) : 0); }) + "</div>" : '<p class="note">Your purse is empty.</p>') + "</div>";
@@ -2935,6 +2940,9 @@
     var p = state.location && state.location.popup;
     if (!p) return "";
     var list = (p.chips || p.lines.map(function (l) { return { icon: "rumor", text: l }; }));
+    // 3-24: an earned rung is an achievement, shown big.
+    if (p.achievement) return '<div class="modal popup"><div class="panel achievement" style="max-width:560px"><div class="ach-kicker">Achievement</div><h2 class="ach-title">' + esc(p.title) + "</h2>" + (p.text ? '<div class="prose">' + prose(p.text) + "</div>" : "") +
+      '<div class="actions"><button class="primary" data-act="closepopup">Continue</button></div></div></div>';
     return '<div class="modal popup"><div class="panel" style="max-width:560px"><h2>' + esc(p.title) + "</h2>" + (p.text ? '<div class="prose">' + prose(p.text) + "</div>" : "") + chips(list) +
       '<div class="actions">' + (p.back ? '<button class="secondary" data-act="' + p.back + '">Go back</button>' : "") +
       '<button class="primary" data-act="' + (p.ok || "closepopup") + '">' + esc(p.okLabel || "Continue") + "</button></div></div></div>";
@@ -3233,6 +3241,14 @@
       var id = who("keeper");
       var r = N().askKeeperQuestion(state, el.dataset.q);
       if (r.refuse) { say(id, firstName(id), r.line); return; }
+      // 3-5: Variant B's answer leads straight into Bobby's scene (Welcome
+      // to the Underworld), the keeper's answer shown above it.
+      if (r.then && PC.scenes.canEnter(state, r.then).ok) {
+        state.location.queue = (state.location.queue || []).filter(function (q) { return q !== r.then; });
+        PC.scenes.enterScene(state, r.then);
+        state.current.lead = { label: "“" + r.label + "”", outcome: "result", text: r.line, chips: [] };
+        return;
+      }
       say(id, firstName(id), r.line, null, null, { ask: r.label });
     },
     "nextqueued": function () {

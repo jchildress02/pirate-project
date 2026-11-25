@@ -136,7 +136,7 @@
       out.lines.push(fill(opts.start ? D().lines.hitStart : D().lines.hit));
       hits.forEach(function (h) { out.chips.push({ icon: "hull", text: "Hurricane: the " + h.name + " loses " + h.lost + " hull", ink: "bad" }); });
       out.hurricane.push({ zone: zone, outlook: o, hit: true, hits: hits });
-      PC.state.addLog(state, "A hurricane struck the " + waters + ": " + hits.map(function (h) { return h.name + " −" + h.lost; }).join(", ") + ".");
+      PC.state.addLog(state, "A hurricane struck " + waters + ": " + hits.map(function (h) { return h.name + " −" + h.lost; }).join(", ") + ".");
     }
     return true;
   }

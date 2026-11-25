@@ -160,7 +160,9 @@
     TRUSTED_HEAT_MULT: 0.75,      // Heat gains at Standing 40+ (§28.1)
     BETRAYAL_HEAT: 10,            // an offense at 40+: +10, and gains doubled for a year (§28.6)
     DRIFT: 2, DRIFT_STOP: -9,     // negative Standing recovers +2 a season with no offense, up to -9 (§28.1)
-    DREAD_DECAY: 2,               // a season with no fear deed (§28.8)
+    DREAD_DECAY: 1,               // a season with no fear deed (§28.8; 3-32 of the build 0.9 pins, was 2)
+    NO_QUARTER_DREAD: 2,          // each season the No Quarter tag is in force (§28.8, §26.8)
+    GIFT_GOLD_PER_MORALE: 3,      // gold a head for +1 morale (§27.4; 3-38 of the build 0.9 pins, was 5)
     FEAR_DEED_DREAD: 2, FEAR_DEED_BLACK: 1,
     FLOOR_CAP: 40,                // the net Dread floor (§28.8)
     OFFICER_FLOOR: { "Bloodthirsty": 5 },  // officer traits that lift the Dread floor (§25.3)

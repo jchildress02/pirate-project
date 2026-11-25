@@ -94,7 +94,8 @@
     out.used = used;
     out.short = need - used;
     var winterNote = mult > 1 && seasonName(state) === "Winter" ? " (Winter: +50%)" : "";
-    if (took.provisions) out.chips.push({ icon: "prov", text: "−" + plural(took.provisions, "provisions lot") + winterNote, ink: "mid" });
+    // 3-33 of the build 0.9 pins: the arrival's provisions line already says what was eaten and what's left, so no "−N" chip.
+    if (took.provisions && winterNote) out.chips.push({ icon: "prov", text: "Winter: provisions burn +50%", ink: "mid" });
     if (out.short > 0) {
       // Hunger (§20.6): -10 morale and a Go Without check, DR by the shortfall.
       PC.crew.addMorale(state, -10);
@@ -199,13 +200,23 @@
     PC.node.initNode(state, to);
     if (isOcean(to)) {
       var lines = voyage.lines.concat([fill(W().lines.reachOcean, { Place: placeName(to) })]);
-      state.location.popup = { title: PC.data.nodes[to].title || placeName(to), lines: lines, chips: chipsFor(lines).concat(voyage.chips) };
+      state.location.popup = { title: PC.data.nodes[to].title || placeName(to), lines: lines, chips: placeRead(chipsFor(lines).concat(voyage.chips), voyage) };
       return state.location.popup;
     }
     return PC.node.arrive(state, to, { voyage: voyage });
   }
 
   function chipsFor(lines) { return lines.map(function (l) { return { icon: "port", text: l }; }); }
+  // 3-34 of the build 0.9 pins: Read Weather sits above the passage line
+  // ("The sky threatens the whole way…"), not at the bottom of the popup.
+  function placeRead(chips, voyage) {
+    if (!voyage || !voyage.readChip || voyage.readAt == null) return chips;
+    var i = chips.indexOf(voyage.readChip);
+    if (i < 0) return chips;
+    chips.splice(i, 1);
+    chips.splice(Math.min(voyage.readAt, chips.length), 0, voyage.readChip);
+    return chips;
+  }
 
   // The destinations the map lists, with their cost and lock.
   function destinations(state) {
@@ -384,8 +395,11 @@
     var handGold = Math.round(one * handsN);
     state.money.purse += capGold;
     state.money.crew = carry;
-    // Morale to 50 plus the floor, Pressure to 0, officers' approval (§26.9).
-    state.crew.morale = clamp(50 + (state.crew.floor || 0), 0, 100);
+    // Morale settles halfway to 50 (3-40 of the build 0.9 pins; a crew
+    // below 50 still resets to 50), plus the floor; Pressure to 0;
+    // officers' approval (§26.9).
+    var m0 = state.crew.morale;
+    state.crew.morale = clamp((m0 > 50 ? Math.round((m0 + 50) / 2) : 50) + (state.crew.floor || 0), 0, 100);
     state.crew.pressure = 0;
     (state.officers || []).forEach(function (o) { if (!o.gone) o.approval = (o.approval || 0) + W().SPLIT_APPROVAL; });
     sp.payout = { sold: sold, pool: pool, carry: carry, one: Math.round(one), captain: capGold, officers: offGold, hands: handGold, handsN: handsN };
@@ -658,6 +672,7 @@
   }
 
   PC.world = {
+    placeRead: placeRead,
     TRADE: TRADE,
     isLive: isLive, isOcean: isOcean, place: place, placeName: placeName, zoneOf: zoneOf, apCost: apCost,
     headsAtSea: headsAtSea, burn: burn, apOfFood: apOfFood,

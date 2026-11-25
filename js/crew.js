@@ -351,11 +351,12 @@
 
   function drilled(state) { return skill(state) >= 2 || usedThisSeason(state, "drill"); }
 
-  // Give to the crew (§27.4): purse gold into crew gold, +1 morale per 5
-  // gold a head, at most +10 a gift and +15 from gifts a season.
+  // Give to the crew (§27.4): purse gold into crew gold, +1 morale per 3
+  // gold a head (3-38 of the build 0.9 pins; was 5), at most +10 a gift
+  // and +15 from gifts a season.
   function giftMorale(state, gold) {
     var heads = Math.max(1, state.crew.count);
-    var raw = Math.floor(gold / heads / 5);
+    var raw = Math.floor(gold / heads / (E().GIFT_GOLD_PER_MORALE || 3));
     var seasonLeft = 15 - (state.used.giftStamp === PC.state.stamp(state) ? state.used.giftMorale || 0 : 0);
     return Math.max(0, Math.min(raw, 10, seasonLeft));
   }

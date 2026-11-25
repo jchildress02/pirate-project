@@ -717,3 +717,9 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
   .rbox .rcols .rside .h4 { margin-top: 0; }
   .rbox:has(.rcols) { max-width: 960px; }
 }
+
+/* 3-24 of the build 0.9 pins: an earned Prize Taker rung is an achievement. */
+.panel.achievement { text-align: center; border: 3px double var(--oxblood, #7a1f1f); }
+.panel.achievement .ach-kicker { font-variant: small-caps; letter-spacing: .15em; color: var(--oxblood, #7a1f1f); font-size: .95rem; }
+.panel.achievement .ach-title { font-size: 2.2rem; margin: .2em 0 .4em; }
+.panel.achievement .actions { justify-content: center; }

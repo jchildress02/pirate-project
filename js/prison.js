@@ -113,7 +113,10 @@
     state.gameOver = null;
     if (j.ship !== "port") state.shipless = true;
     if (PC.data.nodes[o.node]) { state.location = { node: o.node, place: null, queue: [] }; PC.node.initNode(state, o.node); }
-    state.ap.left = Math.min(state.ap.left, P().CELL_AP);
+    // Held costs 3 actions in all, spent as the cell's actions (3-29 of the
+    // build 0.9 pins); the season's other actions stay. A longer stay keeps
+    // the cell's 3 a season (§43.7).
+    if (charge !== "Held") state.ap.left = Math.min(state.ap.left, P().CELL_AP);
     state.current = { screen: "jail" };
     PC.state.addLog(state, "Jailed in " + info.name + " (" + charge + ").");
     return j;
@@ -229,12 +232,28 @@
   function wait(state) {
     var j = state.jail;
     if (!j || (j.stage !== "held" && j.stage !== "awaitTrial")) throw new Error("Not the moment for that.");
+    if (j.stage === "held" && j.served >= P().HELD_AP) return heldDone(state, { lines: [], chips: [] }); // the time's served: the fine, and out
     if (state.ap.left < 1) throw new Error("No actions left this season: let the season turn.");
     state.ap.left -= 1;
     j.served += 1;
     var out = { lines: [L().cellWait], chips: [] };
     if (j.stage === "held" && j.served >= P().HELD_AP) return heldDone(state, out);
     if (j.stage === "awaitTrial" && j.served >= P().TRIAL_AP) { j.stage = "trial"; out.lines.push(L().trialOpen); }
+    return finishStep(state, out);
+  }
+
+  // Any cell action (a plan, the cellmates, a break-out) costs an action,
+  // and while Held it counts toward the three (3-29 of the build 0.9 pins).
+  function cellAction(state) {
+    var j = state.jail;
+    state.ap.left -= 1;
+    if (j && j.stage === "held") j.served += 1;
+  }
+  // After a cell action: Held's three spent with no break-out under way,
+  // the fine and out.
+  function afterCellAction(state, out) {
+    var j = state.jail;
+    if (j && j.stage === "held" && j.served >= P().HELD_AP && !j.breakout) return heldDone(state, out);
     return finishStep(state, out);
   }
 
@@ -607,7 +626,7 @@
       faction: FACTION_NAME[j.faction], ship: j.ship, standIn: !!(P().JAILS[j.node] || {}).standIn };
     if (j.stage === "interrogate") { v.secrets = liveSecrets(state); v.points = secretPoints(state); v.offer = talkOffer(state); v.resist = { type: "Resist Interrogation", dr: P().INTERROGATION_DR }; }
     if (j.stage === "givePick") v.pick = (j.pick || []).map(function (id) { return { id: id, name: P().SECRETS[id].name, penalty: P().SECRETS[id].penalty }; });
-    if (j.stage === "held") v.left = P().HELD_AP - j.served;
+    if (j.stage === "held") v.left = Math.max(0, P().HELD_AP - j.served);
     if (j.stage === "awaitTrial") v.left = P().TRIAL_AP - j.served;
     if (j.stage === "trial") { v.trialCheck = trialCheck(state); var c = confidant(state, j.node); v.confidant = c ? npcName(state, c) : null; v.judgeShift = judgeShift(state, j.node); }
     if (j.stage === "gallows") v.gallowsIn = j.gallows - seasonIndex(state);
@@ -616,6 +635,7 @@
   }
 
   PC.prison = {
+    cellAction: cellAction, afterCellAction: afterCellAction,
     secrets: secrets, liveSecrets: liveSecrets, secretPoints: secretPoints, expose: expose, fenceShut: fenceShut, seasonIndex: seasonIndex,
     chargeFor: chargeFor, captorFor: captorFor, enter: enter, fromScene: fromScene, captureAtSea: captureAtSea,
     talkOffer: talkOffer, interrogate: interrogate, giveUp: giveUp, wait: wait, seasonTurn: seasonTurn,

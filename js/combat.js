@@ -82,6 +82,16 @@
     return clamp(g, 0, 4);
   }
   function hasTag(state, t) { return (state.captain.tags || []).indexOf(t) >= 0; }
+  // Prize Taker's rung (3-24): 0 none, 1 Prize Taker ... 4 Terror of the Seas.
+  function prizeRung(state) {
+    var n = 0;
+    (H().PRIZE_LADDER || []).forEach(function (r, i) { if (hasTag(state, r.tag)) n = Math.max(n, i + 1); });
+    return n;
+  }
+  // The No Quarter tag (§26.8): no effect on war fleets and pirate hunters.
+  function noQuarterOn(state, b) {
+    return hasTag(state, "No Quarter") && !fightingEnemies(b).some(function (e) { return e.hunter || e.role === "War"; });
+  }
 
   function flagshipHandling(state) {
     var c = cls(state.ship.type) || {};
@@ -281,7 +291,8 @@
   // A strike roll: 2d6 + Dread bonus + edge − effective Resolve. Clean
   // strikes; a partial shakes her (planning ruling).
   function strikeRoll(state, game, b, e, edge, why) {
-    var r = rawRoll(state, game, "strike", dreadBonus(state) + edge - effResolve(e));
+    // No Quarter: -1 on her strike rolls during the battle (§26.8).
+    var r = rawRoll(state, game, "strike", dreadBonus(state) + edge - effResolve(e) - (noQuarterOn(state, b) ? 1 : 0));
     b.lastStrike = { ship: e.id, outcome: r.outcome, why: why, dice: r.dice, edge: r.edge };
     noteRaw(game, (why === "consort" ? "Strike roll, " : "Strike roll, ") + (e.name || e.cls), r,
       { clean: "she strikes her colors", partial: "she wavers but fights on (Shaken)", setback: "she fights on" }[r.outcome]);
@@ -439,7 +450,7 @@
   // Takers may first try a show of force (Intimidate vs her Resolve).
   function startStrike(state, game) {
     var b = game.battle;
-    b.step = hasTag(state, "Prize Taker") ? "showOfForce" : "strikePre";
+    b.step = prizeRung(state) >= 1 ? "showOfForce" : "strikePre";
     if (b.step === "strikePre") return strikePre(state, game, 0);
   }
 
@@ -448,7 +459,12 @@
   function strikePre(state, game, bonus) {
     var b = game.battle, e = lead(b);
     var resolve = Math.max.apply(null, fightingEnemies(b).map(effResolve));
-    var r = rawRoll(state, game, "strikePre", dreadBonus(state) + fleetCA(state, b) + bonus - resolve);
+    // Scourge of the Coast and up: +1 on every pre-battle strike roll (3-24);
+    // No Quarter: +1 (§26.8).
+    var extra = (prizeRung(state) >= 3 ? 1 : 0) + (noQuarterOn(state, b) ? 1 : 0);
+    var r = rawRoll(state, game, "strikePre", dreadBonus(state) + fleetCA(state, b) + bonus + extra - resolve);
+    // Terror of the Seas: trade ships strike on a partial as well (3-24).
+    if (r.outcome === "partial" && prizeRung(state) >= 4 && fightingEnemies(b).every(function (x) { return x.role === "Trade" && !x.hunter && !x.escort; })) r.outcome = "clean";
     b.preStrike = { outcome: r.outcome, dice: r.dice, edge: r.edge };
     noteRaw(game, "Call on her to strike", r, { clean: "she strikes without a fight", partial: "she won't strike, but she's shaken", setback: "she won't strike" }[r.outcome]);
     if (r.outcome === "clean") {
@@ -1151,16 +1167,17 @@
     strikeFirst: { clean: "you get the jump: +1 on the first clash", partial: "neither side gets the jump", setback: "they get the jump: −1 on the first clash" },
     shot: { clean: "the shot finds its mark", partial: "a glancing hit", setback: "the shot goes wide" },
     endure: { clean: "you hold on", partial: "you hold on, barely", setback: "the sea takes you" },
-    show: { clean: "+1 on the strike roll", partial: "no harm done", setback: "no harm done" },
+    show: { clean: "+1 on the strike roll", partial: "no harm done", setback: "no harm done" }, // a Sea Wolf's partial: see rollEffect
   };
   function rollEffect(state, game, op, outcome) {
     var b = game.battle || {};
     var key = op === "chase" && b.chaseMode === "flee" ? "flee" : op;
     if (/^act_/.test(op)) return null; // a boarding action's own lines say what it did
+    if (op === "show" && outcome === "partial" && prizeRung(state) >= 2) return "+1 on the strike roll";
     return (ROLL_EFFECT[key] || {})[outcome] || null;
   }
 
-  function settleShow(state, game, p) { game.battle.step = "strikePre"; return strikePre(state, game, p.outcome === "clean" ? 1 : 0); }
+  function settleShow(state, game, p) { game.battle.step = "strikePre"; return strikePre(state, game, p.outcome === "clean" || (p.outcome === "partial" && prizeRung(state) >= 2) ? 1 : 0); }
 
   function engage(state, game) {
     var b = game.battle;
@@ -1210,7 +1227,7 @@
   }
 
   PC.combat = {
-    rollEffect: rollEffect,
+    rollEffect: rollEffect, prizeRung: prizeRung,
     _woundCaptain: woundCaptain, // for the tests (Bug Log B5)
     _knockOut: knockOut, // for the tests (#31)
     weatherParts: weatherParts,

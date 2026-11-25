@@ -1382,8 +1382,8 @@ test("crew actions: Rally (1 action, once a season), Drill, Give, the stores", f
   PC.crew.drill(s); ok(PC.crew.drilled(s));
   s.money.purse = 300;
   var m = s.crew.morale;
-  eq(PC.crew.give(s, 300), 5); // 300 / 12 hands / 5 = 5
-  eq(s.crew.morale, m + 5); eq(s.money.purse, 0);
+  eq(PC.crew.give(s, 300), 8); // 300 / 12 hands / 3 = 8 (3-38)
+  eq(s.crew.morale, m + 8); eq(s.money.purse, 0);
   // One unit per 5 hands, rounded up: 12 hands need 3 (Playtest Pins 0.8, #24).
   eq(PC.crew.storesNeeded(s), 3);
   PC.node.buyGood(s, "Kill-devil rum", 2);
@@ -2542,16 +2542,16 @@ test("a forced split at Pressure 4 can't be declined", function () {
   ok(threw);
 });
 
-test("the split: 10% carried over, the captain's share to the purse, prize ships sold, morale 50, Pressure 0", function () {
+test("the split: 25% carried over (3-39), the captain's share to the purse, prize ships sold, morale halfway to 50 (3-40), Pressure 0", function () {
   var s = m7("split"); s.time.season = 2; s.money.crew = 1000; s.money.purse = 0; s.crew.pressure = 3; s.crew.morale = 80;
   s.fleet.push({ id: "p1", kind: "prize", cls: "Barque", name: "Hope", size: 2, hull: 45, hullMax: 45, guns: 0, crew: 8, crewMin: 8, crewTiers: { Green: 8 }, cargo: 250, dirty: false });
   PC.world.endSeason(s);
   var pay = PC.world.doSplit(s);
   ok(pay.sold.length === 1 && pay.sold[0].gold > 0);
-  eq(pay.carry, Math.round(pay.pool * 0.1));
+  eq(pay.carry, Math.round(pay.pool * 0.25));
   eq(s.money.crew, pay.carry);
   eq(s.money.purse, pay.captain);
-  eq(s.crew.morale, 50); eq(s.crew.pressure, 0); eq(s.ap.left, 0);
+  eq(s.crew.morale, 65 + (s.crew.floor || 0), "80 settles halfway to 50"); eq(s.crew.pressure, 0); eq(s.ap.left, 0);
   eq(s.fleet.filter(function (f) { return f.kind === "prize"; }).length, 0);
   ok(!PC.world.canSail(s, "norfolk").ok, "no voyage in a split Winter");
   ok(PC.node.places(s).filter(function (p) { return p.id === "tavern"; })[0].locked, "no port business");
@@ -3233,12 +3233,12 @@ test("Standing's drift: +2 a season with no offense, stopping at -9; an offense 
   s.meters.standing.pirates = -20; PC.meters.addStanding(s, "pirates", -1); PC.meters.seasonEnd(s); eq(s.meters.standing.pirates, -21);
 });
 
-test("Dread: -2 a season with no fear deed, never below the floor; One Eye lifts the floor to 10 at once", function () {
+test("Dread: -1 a season with no fear deed (3-32), never below the floor; One Eye lifts the floor to 10 at once", function () {
   var s = atNorfolk("mt5");
-  s.meters.dread = 20; PC.meters.seasonEnd(s); eq(s.meters.dread, 18);
+  s.meters.dread = 20; PC.meters.seasonEnd(s); eq(s.meters.dread, 19);
   var bs = s.meters.standing.pirates;
-  PC.meters.fearDeed(s); eq(s.meters.dread, 20); eq(s.meters.standing.pirates, bs + 1);
-  PC.meters.seasonEnd(s); eq(s.meters.dread, 20, "a fear deed stops the decay");
+  PC.meters.fearDeed(s); eq(s.meters.dread, 21); eq(s.meters.standing.pirates, bs + 1);
+  PC.meters.seasonEnd(s); eq(s.meters.dread, 21, "a fear deed stops the decay");
   s.meters.dread = 4;
   PC.scenes.applyEffect(s, { tag: "One Eye" });
   eq(PC.meters.dreadFloor(s), 10); eq(s.meters.dread, 10);

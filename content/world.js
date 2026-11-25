@@ -142,7 +142,7 @@
     ],
     // Re-signers by the morale band before the split (§26.9).
     RESIGN: { Mutinous: 0, Sullen: 0.10, Steady: 0.25, Eager: 0.40, Devoted: 0.60 },
-    CARRYOVER: 0.10,
+    CARRYOVER: 0.25, // 3-39 of the build 0.9 pins (was 0.10)
     SPLIT_APPROVAL: 2, // DEFAULT: §25.5 names the split's approval points but no number
 
     // ---- The year-end screen (N6, PH7) ---------------------------------------

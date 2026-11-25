@@ -31,7 +31,7 @@
   function byId(id) {
     if (!BY_ID) {
       BY_ID = {};
-      V().written.concat([V().hurricane, V().breakingUp], V().approved, V().officerAtSea, V().officerInPort).forEach(function (e) { BY_ID[e.id] = e; });
+      V().written.concat([V().hurricane, V().breakingUp], V().approved, V().officerAtSea, V().officerInPort, V().afterEscape || []).forEach(function (e) { BY_ID[e.id] = e; });
     }
     return BY_ID[id];
   }
@@ -284,7 +284,9 @@
     v.northbound = !!(o && d && d.x < o.x);
     if (PC.weather && v.slots) {
       v.read = PC.weather.autoRead(state, zone, [state.world.seed, stamp(state), v.key, "read"].join("|"));
-      v.chips.push({ icon: "dsea", text: "Read Weather: " + v.read.outcome + " · " + PC.weather.badge(v.read.outlook), ink: v.read.outcome === "setback" ? "mid" : null });
+      v.readChip = { icon: "dsea", text: "Read Weather: " + v.read.outcome + " · " + PC.weather.badge(v.read.outlook), ink: v.read.outcome === "setback" ? "mid" : null };
+      v.chips.push(v.readChip);
+      v.readAt = v.lines.length; // 3-34: shown above the passage lines
     }
     state.voyage = v;
     v.sync = true; run(state, v); v.sync = false;
@@ -300,6 +302,18 @@
     v.sync = true; run(state, v); v.sync = false;
     game.officerRolled = game.officerRolled || v.officerRolled;
     game.stormChecked = game.stormChecked || v.stormChecked;
+    return v;
+  }
+
+  // After an escape on his own ship (3-35): one mandatory card before the
+  // ocean node, with the new officer if one came out of the cell.
+  function afterEscape(state, sea, officerId) {
+    if (PC.voyageEvents.off) return null;
+    var v = newRun(state, { mode: "escape", from: sea, to: sea, ap: 0, slots: 0, zone: PC.world.zoneOf(sea), waters: PC.world.zoneOf(sea), lines: [], chips: [] });
+    state.voyage = v;
+    openCard(state, v, { id: officerId ? "ve_escape_officer" : "ve_escape_crew", officer: officerId || null });
+    v.pending = true;
+    state.current = { screen: "event" };
     return v;
   }
 
@@ -369,6 +383,7 @@
     }
     state.voyage = null;
     if (v.mode === "leg") { PC.hunt.afterLeg(state, v); return; }
+    if (v.mode === "escape") { state.current = { screen: "node" }; return; }
     if (v.mode === "port") {
       if (state.gameOver) { PC.summary.end(state); return; }
       state.current = { screen: "node" };
@@ -445,7 +460,7 @@
     var v = state.voyage;
     if (!v || !v.cur) return null;
     var cur = v.cur;
-    var where = v.mode === "port" ? PC.world.placeName(v.to) : v.mode === "leg" ? "At sea · " + PC.data.hunt.WATERS[v.waters].name : "At sea · bound for " + PC.world.placeName(v.to);
+    var where = v.mode === "port" ? PC.world.placeName(v.to) : v.mode === "escape" ? "At sea" : v.mode === "leg" ? "At sea · " + PC.data.hunt.WATERS[v.waters].name : "At sea · bound for " + PC.world.placeName(v.to);
     var out = { where: where, phase: cur.phase, mode: v.mode, slot: v.i, slots: v.slots };
     if (cur.encounter) {
       var E = V().encounters[cur.encounter];
@@ -765,6 +780,7 @@
   }
 
   PC.voyageEvents = {
+    afterEscape: afterEscape,
     byId: byId, all: all, isWritten: isWritten, voyage: voyage, huntLeg: huntLeg, run: run, view: view, choose: choose, next: next,
     vote: vote, voteReact: voteReact, meet: meet, resume: resume, portLeave: portLeave,
     stormChance: stormChance, generalPool: generalPool, triggered: triggered, passage: passage, points: points, finish: finish,
