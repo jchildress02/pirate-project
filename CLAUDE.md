@@ -37,5 +37,5 @@ The author is not a programmer. Claude writes all the code; explain changes in p
 - Officers: approval points, barks (only the mentor's first-Articles line shows), bonds and officer events. The Acting Quartermaster and the Quartermaster's vote are built (§25.9): a vacancy is held by the Acting Quartermaster until the vote at the next action at sea (the M5 playtest patch). Officers join, show their traits and can be replaced (dismissed); nothing reads their likes yet.
 - Quest deadlines and their expiry outcomes beyond the warning popup (§16.4): only What Was Lost carries a deadline, and nothing expires it yet.
 - Named NPC portraits: Twopenny, Bobby, Davey, Ollie and Geezer show labeled frames until the art lands in `PC.data.npcPortraits` (content/ocracoke.js).
-- The Drunkard/Heavy Drinker temptations, world-state price modifiers and the No Quarter tag's lag.
+- The Drunkard/Heavy Drinker temptations and world-state price modifiers. (The No Quarter tag, its lag and its Dread are built: `js/meters.js`, PR 1E.)
 - Captain ageing over the years: the portrait already follows `captain.age`, but nothing advances it yet.
