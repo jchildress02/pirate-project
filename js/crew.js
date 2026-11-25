@@ -49,6 +49,8 @@
     }
     var L = PC.data.world.lines.mutinyWarning;
     c.qmWarned = true;
+    // The warning opens Strike First and names an officer ringleader (§24.13, §25.14; M9 PR 2).
+    if (PC.mutiny) PC.mutiny.noteWarning(state, { name: true });
     var who = (qm.full || ((qm.first || "") + " " + (qm.last || ""))).trim();
     return { who: who, acting: acting, line: who + (acting ? ", the Acting Quartermaster" : ", your Quartermaster") + ", takes you aside: " + (L[w] || L.neutral) };
   }

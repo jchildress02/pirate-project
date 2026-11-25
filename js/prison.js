@@ -635,7 +635,7 @@
   }
 
   PC.prison = {
-    cellAction: cellAction, afterCellAction: afterCellAction,
+    cellAction: cellAction, afterCellAction: afterCellAction, loseEverything: loseEverything,
     secrets: secrets, liveSecrets: liveSecrets, secretPoints: secretPoints, expose: expose, fenceShut: fenceShut, seasonIndex: seasonIndex,
     chargeFor: chargeFor, captorFor: captorFor, enter: enter, fromScene: fromScene, captureAtSea: captureAtSea,
     talkOffer: talkOffer, interrogate: interrogate, giveUp: giveUp, wait: wait, seasonTurn: seasonTurn,

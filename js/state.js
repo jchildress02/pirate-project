@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 13;
+  var SAVE_VERSION = 14;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -152,6 +152,7 @@
     cr.floor = cr.floor || 0;
     cr.rationing = !!cr.rationing;
     state.articles = state.articles || null;
+    state.mutiny = state.mutiny || null; // while a mutiny plays (M9 PR 2)
     state.nodes = state.nodes || {};
     state.generated = state.generated || {};
     state.world.names = state.world.names || [];
@@ -271,6 +272,13 @@
       (data.captain && data.captain.mentor && data.captain.mentor.type === "Cook") && (data.captain.mentor.type = "Surgeon");
       Object.keys(data.generated || {}).forEach(function (k) { var g = data.generated[k]; if (g && g.type === "Cook") g.type = "Surgeon"; });
       data.saveVersion = 13;
+    }
+    if (data.saveVersion === 13) {
+      // M9 PR 2: the mutiny (state.mutiny while one plays; the crew's
+      // warning signs and a known ringleader).
+      data.mutiny = data.mutiny || null;
+      if (data.crew) { data.crew.mutinySigns = !!data.crew.mutinySigns; data.crew.ringleaderKnown = data.crew.ringleaderKnown || null; }
+      data.saveVersion = 14;
     }
     return data;
   }

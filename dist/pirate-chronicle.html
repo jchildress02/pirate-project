@@ -1765,7 +1765,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 13;
+  var SAVE_VERSION = 14;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -1909,6 +1909,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     cr.floor = cr.floor || 0;
     cr.rationing = !!cr.rationing;
     state.articles = state.articles || null;
+    state.mutiny = state.mutiny || null; // while a mutiny plays (M9 PR 2)
     state.nodes = state.nodes || {};
     state.generated = state.generated || {};
     state.world.names = state.world.names || [];
@@ -2028,6 +2029,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       (data.captain && data.captain.mentor && data.captain.mentor.type === "Cook") && (data.captain.mentor.type = "Surgeon");
       Object.keys(data.generated || {}).forEach(function (k) { var g = data.generated[k]; if (g && g.type === "Cook") g.type = "Surgeon"; });
       data.saveVersion = 13;
+    }
+    if (data.saveVersion === 13) {
+      // M9 PR 2: the mutiny (state.mutiny while one plays; the crew's
+      // warning signs and a known ringleader).
+      data.mutiny = data.mutiny || null;
+      if (data.crew) { data.crew.mutinySigns = !!data.crew.mutinySigns; data.crew.ringleaderKnown = data.crew.ringleaderKnown || null; }
+      data.saveVersion = 14;
     }
     return data;
   }
@@ -2584,6 +2592,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     }
     var L = PC.data.world.lines.mutinyWarning;
     c.qmWarned = true;
+    // The warning opens Strike First and names an officer ringleader (§24.13, §25.14; M9 PR 2).
+    if (PC.mutiny) PC.mutiny.noteWarning(state, { name: true });
     var who = (qm.full || ((qm.first || "") + " " + (qm.last || ""))).trim();
     return { who: who, acting: acting, line: who + (acting ? ", the Acting Quartermaster" : ", your Quartermaster") + ", takes you aside: " + (L[w] || L.neutral) };
   }
@@ -9543,6 +9553,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     opts = opts || {};
     var c = canHunt(state);
     if (!c.ok) throw new Error(c.why);
+    // Departing a port: desertion, then the mutiny (§24.10, §24.13; M9 PR 2).
+    var dep = null;
+    if (!opts.departed && PC.mutiny && !PC.node.isOcean(state.location.node)) {
+      dep = PC.mutiny.depart(state, { kind: "hunt", opts: opts });
+      if (dep.mutiny || dep.blocked) return null;
+    }
     var waters = H().HOME_WATERS[state.location.node] || PC.node.nodeData(state.location.node).waters || "north";
     var game = {
       kind: "hunt", key: "hunt-" + (state.rolls.hunt = (state.rolls.hunt || 0) + 1), waters: waters,
@@ -9550,6 +9566,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       prizesTaken: 0, prizeMorale: 0, captives: 0, force: opts.force || null, home: state.location.node,
     };
     M().start(state, game, "node");
+    if (dep) dep.lines.forEach(function (l) { M().say(state, game, l); });
     M().say(state, game, L().setOut);
     // Read Weather rolls itself before a port hunt (§42.6); its result
     // rides on the hunt's storm check (voyage events, §44.7).
@@ -10788,9 +10805,16 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var from = opts.from || here(state);
     var c = canSail(state, to, opts);
     if (!c.ok) throw new Error(c.why);
+    // Departing a port (§24.10, §24.13): desertion, then the mutiny at
+    // Pressure 4 or more (M9 PR 2). The voyage resumes after a quelled one.
+    var dep = { lines: [], chips: [] };
+    if (!opts.departed && !opts.from && PC.mutiny) {
+      dep = PC.mutiny.depart(state, { kind: "sail", to: to, opts: opts });
+      if (dep.mutiny || dep.blocked) return null;
+    }
     var cost = opts.free ? 0 : apCost(from, to);
-    var lines = [fill(W().lines.sailFor, { Place: placeName(to) })];
-    var chips = [];
+    var lines = dep.lines.concat([fill(W().lines.sailFor, { Place: placeName(to) })]);
+    var chips = dep.chips.slice();
     if (cost) { PC.crew.spendAP(state, cost); chips.push({ icon: "ap", text: plural(cost, "action") + " at sea" }); }
     var b = burn(state, Math.max(1, cost), {});
     lines = lines.concat(b.lines);
@@ -10861,6 +10885,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // Mutiny Pressure drifts by the morale band at season end (§24.13).
     var band = PC.crew.band(state.crew.morale);
     var dp = band === "Mutinous" ? 2 : band === "Sullen" ? 1 : band === "Eager" || band === "Devoted" ? -1 : 0;
+    // Each mutinous officer +1, a Schemer at Wary or below +1 (§24.13, §25.14).
+    if (PC.mutiny) dp += PC.mutiny.seasonPressure(state);
     state.crew.pressure = clamp((state.crew.pressure || 0) + dp, 0, 5);
     // A crew line at Sullen and Mutinous (P7d), and the Quartermaster's
     // warning at Pressure 3 or more (P7c).
@@ -10898,6 +10924,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (state.location) state.location.place = null;
     state.current = { screen: "node" };
     if (seasonName(state) === "Winter") out.winter = startWinter(state);
+    // The mutiny at Pressure 5 (§24.13; M9 PR 2), after the turn.
+    if (PC.mutiny && PC.mutiny.seasonCheck(state)) out.mutiny = true;
     return out;
   }
 
@@ -11823,6 +11851,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var e = byId(card.id);
     if (!e) return;
     if (e.trigger) noteOfficerEvent(state);
+    // A Pressure-triggered event opens Strike First (§24.13; M9 PR 2).
+    if (e.grumbling && (state.crew.pressure || 0) >= 1 && PC.mutiny) PC.mutiny.noteWarning(state);
     if (e.trigger === "qmOpinion") state.used.qmOpinion = stamp(state);
     if (card.officer) {
       var o = (state.officers || []).filter(function (x) { return x.id === card.officer; })[0];
@@ -12160,6 +12190,17 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if ("heatZone" in f) { var fz = factionOfZone(v.zone); PC.meters.addHeat(state, fz, f.heatZone); chips.push({ icon: "heat", text: (fz === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatZone, ink: "bad" }); }
     if ("heatHere" in f) { var nf = (PC.data.nodes[v.to] || {}).faction; var hf = nf === "frisia" ? "frisia" : "avalon"; PC.meters.addHeat(state, hf, f.heatHere); chips.push({ icon: "heat", text: (hf === "avalon" ? "Avalon" : "Frisian") + " Heat +" + f.heatHere, ink: "bad" }); }
     if ("pressure" in f) { state.crew.pressure = clamp((state.crew.pressure || 0) + f.pressure, 0, 5); chips.push({ icon: "pressure", text: f.pressure > 0 ? "The crew's grievances grow" : "The talk dies down", ink: f.pressure > 0 ? "bad" : "good" }); }
+    // Read People in a Pressure event (§24.13, §25.14; M9 PR 2): a clean
+    // result reveals how close the crew is and names an officer ringleader;
+    // a partial only the level.
+    if ("reveal" in f && PC.mutiny) {
+      var pr = state.crew.pressure || 0;
+      chips.push({ icon: "pressure", text: "How close the crew is to mutiny: " + pr + " of 5", ink: pr >= 3 ? "bad" : "mid" });
+      if (f.reveal === "full") {
+        var rl = PC.mutiny.noteWarning(state, { name: true });
+        chips.push({ icon: "officer", text: rl ? "Behind it: " + (rl.first + " " + (rl.last || "")).trim() : "No officer is behind it", ink: rl ? "bad" : null });
+      }
+    }
     if ("rumor" in f) {
       var weights = RUMOR_WEIGHTS[f.rumor] || RUMOR_WEIGHTS.C;
       var rec = state.location ? PC.rumors.draw(state, weights, [state.world.seed, stamp(state), v.key, "rumor", v.i].join("|"), "at sea", null, { noA: true }) : null;
@@ -13673,7 +13714,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   PC.prison = {
-    cellAction: cellAction, afterCellAction: afterCellAction,
+    cellAction: cellAction, afterCellAction: afterCellAction, loseEverything: loseEverything,
     secrets: secrets, liveSecrets: liveSecrets, secretPoints: secretPoints, expose: expose, fenceShut: fenceShut, seasonIndex: seasonIndex,
     chargeFor: chargeFor, captorFor: captorFor, enter: enter, fromScene: fromScene, captureAtSea: captureAtSea,
     talkOffer: talkOffer, interrogate: interrogate, giveUp: giveUp, wait: wait, seasonTurn: seasonTurn,
@@ -14165,6 +14206,502 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     breakOut: breakOut, spendPoint: spendPoint, modes: modes, beat: beat, freedom: freedom, captivity: captivity,
     seasonInCell: seasonInCell, twopennyCan: twopennyCan, twopenny: twopenny, atGallows: atGallows,
     devFillClock: devFillClock, devToTrial: devToTrial, view: view,
+  };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — desertion and the mutiny (§24.10, §24.13, §25.13,
+ * §25.14; Milestone 9, PR 2).
+ *
+ * Desertion is checked when the captain departs a port (a voyage or a
+ * hunt), never at sea. Then, at Pressure 4 or more, the mutiny fires; it
+ * also fires at the season's end at Pressure 5. The captain picks one
+ * approach (Reason, Pay Off, Make an Example, Strike First, Call Out the
+ * Ringleader) and rolls it; a setback leads to the endings: a plea, then
+ * the crew's verdict and the last stand when the crew is Mutinous.
+ *
+ * state.mutiny = { when: "departure"|"season", cont, stage, ringleader,
+ *   known, log, result, ... } while it plays. The screen is "mutiny".
+ * Nothing here touches the screen.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function D() { return PC.data.mutiny; }
+  function L() { return PC.data.mutiny.lines; }
+  function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  function stamp(state) { return PC.state.stamp(state); }
+  function key(state, what) { return [state.world.seed, stamp(state), "mutiny", (state.rolls.mutiny = (state.rolls.mutiny || 0) + 1), what].join("|"); }
+  function plural(n, w) { return n + " " + w + (n === 1 ? "" : "s"); }
+  function R() { return PC.npcs.RUNG_VALUE; }
+  function oName(o) { return (o.first || "").trim(); }
+  function fullName(o) { return (o.first + " " + (o.last || "")).trim(); }
+  function hasTrait(o, t) { return o.voice === t || o.secondary === t || o.third === t || o.unique === t; }
+  function band(state) { return PC.crew.band(state.crew.morale); }
+
+  // ---- Where each officer stands (§25.14) -------------------------------------
+
+  function present(state) { return (state.officers || []).filter(function (o) { return !o.gone && !o.captured; }); }
+  function mutinous(state) {
+    var p = state.crew.pressure || 0;
+    return present(state).filter(function (o) { return o.rung <= R().Enemy || (o.rung <= R().Rival && p >= 3); });
+  }
+  function loyal(state) { return present(state).filter(function (o) { return o.rung >= R().Friend; }); }
+  function bystanders(state) {
+    var m = mutinous(state), l = loyal(state);
+    return present(state).filter(function (o) { return m.indexOf(o) < 0 && l.indexOf(o) < 0; });
+  }
+  // The lowest opinion is the ringleader; ties: a Schemer, then a seeded coin.
+  function ringleader(state) {
+    var m = mutinous(state);
+    if (!m.length) return null;
+    var low = Math.min.apply(null, m.map(function (o) { return o.rung; }));
+    var tied = m.filter(function (o) { return o.rung === low; });
+    var sch = tied.filter(function (o) { return hasTrait(o, "Schemer"); });
+    if (sch.length) tied = sch;
+    if (tied.length === 1) return tied[0];
+    var r = PC.rng.fromKey([state.world.seed, "ringleader", tied.map(function (o) { return o.id; }).join(",")].join("|"));
+    return tied[Math.floor(r() * tied.length)];
+  }
+
+  // Seeing it coming (§24.13, §25.14): a Pressure-triggered voyage event or
+  // the Quartermaster's warning opens Strike First; a clean Read People (or
+  // the Quartermaster's warning) names an officer ringleader.
+  function noteWarning(state, opts) {
+    opts = opts || {};
+    var c = state.crew;
+    c.mutinySigns = true;
+    if (opts.name) { var rl = ringleader(state); if (rl) c.ringleaderKnown = rl.id; }
+    return c.ringleaderKnown ? (present(state).filter(function (o) { return o.id === c.ringleaderKnown; })[0] || null) : null;
+  }
+
+  // ---- Pressure at the season's end (§24.13, §25.3, §25.14) ----------------------
+  // +1 for each mutinous officer, +1 for a Schemer at Wary or below.
+  function seasonPressure(state) {
+    var n = mutinous(state).length;
+    present(state).forEach(function (o) { if (hasTrait(o, "Schemer") && o.rung <= R().Wary) n += 1; });
+    return n;
+  }
+
+  // ---- Desertion at departure (§24.10, §25.13) ------------------------------------
+
+  function isPort(id) { return !!id && !PC.node.isOcean(id); }
+
+  function desertion(state) {
+    var out = { lines: [], chips: [], hands: 0, officers: [] };
+    var here = PC.node.here(state), nd = PC.node.nodeData(here), b = band(state);
+    var range = D().DESERT[b];
+    var plus = state.flags.desertionPlus ? D().DESERT_GO_WITHOUT : 0;
+    state.flags.desertionPlus = null;
+    if (range) {
+      var r = PC.rng.fromKey(key(state, "desert"));
+      var rate = range[0] + r() * (range[1] - range[0]) + (nd.faction === "avalon" || nd.faction === "frisia" ? D().DESERT_FACTION_PORT : 0) + plus;
+      var n = Math.min(state.crew.count, Math.round(state.crew.count * rate));
+      var left = n;
+      PC.data.economy.TIER_ORDER.forEach(function (t) { var k = Math.min(left, state.crew.tiers[t] || 0); if (k) { PC.crew.removeHands(state, t, k); left -= k; } });
+      out.hands = n - left;
+    } else if (plus) {
+      // DEFAULT: the Go Without setback's +10% applies at any morale.
+      var n2 = Math.min(state.crew.count, Math.round(state.crew.count * plus)), l2 = n2;
+      PC.data.economy.TIER_ORDER.forEach(function (t) { var k = Math.min(l2, state.crew.tiers[t] || 0); if (k) { PC.crew.removeHands(state, t, k); l2 -= k; } });
+      out.hands = n2 - l2;
+    }
+    if (out.hands) {
+      PC.crew.addMorale(state, D().DESERT_MORALE);
+      out.lines.push(L().deserted.replace("[n]", plural(out.hands, "hand")));
+      out.chips.push({ icon: "crew", text: plural(out.hands, "hand") + " deserted · morale +" + D().DESERT_MORALE, ink: "bad" });
+      PC.state.addLog(state, plural(out.hands, "hand") + " deserted at " + nd.name + ".");
+    }
+    // Officers: a Rival deserts unless Pressure is 3 or more (then he stays
+    // with the mutineers); an Enemy never deserts; a ringleader who yielded
+    // goes at this port. A fleet captain takes his ship.
+    var p = state.crew.pressure || 0;
+    present(state).forEach(function (o) {
+      var goes = o.desertNext || (o.rung === R().Rival && p < 3);
+      if (!goes) return;
+      o.gone = true; o.left = "deserted"; o.desertNext = false;
+      var shipId = o.aboard && o.aboard !== "flagship" ? o.aboard : null;
+      if (shipId) {
+        var f = (state.fleet || []).filter(function (x) { return x.id === shipId; })[0];
+        state.fleet = (state.fleet || []).filter(function (x) { return x.id !== shipId; });
+        out.lines.push(L().fleetDeserted.replace("[Ship]", f ? f.name || f.cls : "ship").replace("[Name]", oName(o)));
+      } else out.lines.push(L().officerDeserted.replace("[Name]", oName(o)));
+      if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
+      out.officers.push(o.id);
+      PC.state.addLog(state, fullName(o) + " deserted.");
+    });
+    if (out.officers.length) PC.officers.ensureQuartermaster(state);
+    return out;
+  }
+
+  // The captain departs a port (cont: what he was doing: { kind: "sail",
+  // to, opts } or { kind: "hunt", opts }). Desertion first, then the mutiny
+  // at Pressure 4 or more. Returns { lines, chips, mutiny, blocked }.
+  function depart(state, cont) {
+    var out = { lines: [], chips: [], mutiny: false, blocked: false };
+    if (!state.location || !isPort(PC.node.here(state)) || state.shipless || state.jail) return out;
+    var d = desertion(state);
+    out.lines = d.lines; out.chips = d.chips;
+    if ((state.crew.pressure || 0) >= D().FIRE_AT_DEPARTURE) {
+      start(state, "departure", cont, d);
+      out.mutiny = true;
+      return out;
+    }
+    if (state.crew.count < (state.ship.crewMin || 5)) {
+      out.blocked = true;
+      out.lines.push(L().tooFew);
+      state.location.popup = { title: "Short-handed", text: out.lines.join("\n\n"), lines: out.lines, chips: out.chips };
+    }
+    return out;
+  }
+
+  // At the season's end, at Pressure 5 (§24.13). Not in a cell, not
+  // shipless, not when the Winter's forced split comes first (DEFAULT).
+  function seasonCheck(state) {
+    if ((state.crew.pressure || 0) < D().FIRE_AT_SEASON_END || state.jail || state.shipless || state.mutiny || state.ended) return false;
+    if (state.split && state.split.forced) return false;
+    start(state, "season", { kind: "season" });
+    return true;
+  }
+
+  // ---- It fires ------------------------------------------------------------------------
+
+  function start(state, when, cont, desert) {
+    var rl = ringleader(state);
+    var m = state.mutiny = { when: when, cont: cont || null, stage: "approach", ringleader: rl ? rl.id : null, log: [], result: null, at: stamp(state) };
+    if (desert && desert.lines.length) m.log = m.log.concat(desert.lines);
+    m.log.push(L().fires[when] || L().fires.departure);
+    if (rl) m.log.push(L().ringleaderSpeaks.replace(/\[Name\]/g, oName(rl)));
+    else m.log.push(L().crewSpeaks);
+    var lo = loyal(state);
+    if (lo.length) m.log.push(L().loyal.replace("[Names]", lo.map(oName).join(" and ")).replace("[stand]", lo.length === 1 ? "stands" : "stand"));
+    state.current = { screen: "mutiny" };
+    PC.state.addLog(state, "Mutiny" + (rl ? ", led by " + fullName(rl) : "") + ".");
+    return m;
+  }
+
+  function rlOf(state) { var m = state.mutiny; return m && m.ringleader ? (state.officers || []).filter(function (o) { return o.id === m.ringleader; })[0] || null : null; }
+
+  // DR = 1 + Pressure − the Dread bonus, 1 to 5 in Year 1; an officer
+  // ringleader +1 on top (DEFAULT: after the clamp).
+  function dr(state) {
+    var base = clamp(1 + (state.crew.pressure || 0) - PC.meters.dreadBonus(state), 1, D().DR_MAX);
+    return base + (rlOf(state) ? D().RINGLEADER_DR : 0);
+  }
+  function loyalExtra(state) {
+    var n = Math.min(D().LOYAL_EDGE_MAX, loyal(state).length);
+    return n ? [{ label: "Loyal officers", value: n }] : [];
+  }
+  function hookExtra(state, trait, label) {
+    return present(state).some(function (o) { return hasTrait(o, trait); }) ? [{ label: label, value: 1 }] : [];
+  }
+  function weaponType(state) {
+    var items = state.captain.items || [];
+    return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
+  }
+  // The ringleader's duel DR: 2 + level, +1 for a Raider, Bloodthirsty,
+  // Daredevil or Ironclad (§25.14, §25.10).
+  function duelDR(o) {
+    return clamp(2 + (o.level || 1) + (o.type === "Raider" || hasTrait(o, "Bloodthirsty") || hasTrait(o, "Daredevil") || hasTrait(o, "Ironclad") ? 1 : 0), 0, 8);
+  }
+  function headGold(state) { return state.money.crew / Math.max(1, state.crew.count); }
+
+  // The approaches on offer, each { id, label, check, lock, note }.
+  function approaches(state) {
+    var m = state.mutiny, d = dr(state), lx = loyalExtra(state), out = [];
+    var rl = rlOf(state), known = rl && state.crew.ringleaderKnown === rl.id;
+    out.push({ id: "reason", label: "Reason with them", check: { type: "Rally Crew", dr: d, extra: lx.concat(hookExtra(state, "Prankster", "Prankster officer")) },
+      note: "Clean: it ends; morale +" + D().REASON_MORALE + ". Partial: morale +" + D().REASON_MORALE + ", but nothing is settled: it can fire again at the next departure." });
+    var head = headGold(state);
+    out.push({ id: "payoff", label: "Pay them off", check: { type: "Pirate Code", dr: d, extra: lx },
+      lock: head < D().PAY_OFF_MIN_HEAD ? "Not enough crew gold to buy them off (" + D().PAY_OFF_MIN_HEAD + " a head)" : null,
+      note: "Clean: it ends, for half the crew gold (" + Math.round(state.money.crew * D().PAY_OFF_SHARE.clean) + "). Partial: it ends, for three quarters (" + Math.round(state.money.crew * D().PAY_OFF_SHARE.partial) + ")." });
+    var ex = exampleType(state);
+    out.push({ id: "example", label: "Make an example of them", check: { type: ex, dr: d, extra: lx.concat(hookExtra(state, "Frightening", "Frightening officer")) },
+      note: "Clean: it ends; Dread +" + D().EXAMPLE_DREAD + ". Partial: it ends; morale " + D().EXAMPLE_MORALE + ". Counts as this season's Make an Example." });
+    out.push({ id: "strikeFirst", label: "Strike first", check: { type: "Strike First", dr: d, extra: lx },
+      lock: state.crew.mutinySigns ? null : "You didn't see it coming in time",
+      note: "Clean: the ringleaders are seized; morale " + D().STRIKE_FIRST_MORALE + "; Dread +" + D().STRIKE_FIRST_DREAD + ". Partial: bloody, a tenth of the crew killed. Either way every mutinous officer dies." });
+    if (known) out.push({ id: "callOut", label: "Call out " + oName(rl), check: { type: weaponType(state), dr: duelDR(rl), extra: lx },
+      note: "A duel to the death. Clean: it ends, and his fate is yours to choose. Partial: he yields and leaves at the next port. Setback: you're Wounded, and the crew have you." });
+    return out;
+  }
+  // Make an Example: Discipline or Intimidate, whichever is better (DEFAULT).
+  function exampleType(state) {
+    var a = PC.checks.assess(state, { type: "Discipline", dr: 2 }, { conditions: [] }).edge;
+    var b = PC.checks.assess(state, { type: "Intimidate", dr: 2 }, { conditions: [] }).edge;
+    return b > a ? "Intimidate" : "Discipline";
+  }
+
+  function roll(state, check, what) {
+    return PC.checks.resolve(state, check, key(state, what), { conditions: [] });
+  }
+
+  function addPressure(state, v) { state.crew.pressure = clamp(v, 0, 5); }
+  function killOfficer(state, o, how) {
+    o.gone = true; o.dead = true; o.left = how || "killed in the mutiny";
+    if (o.quartermaster) { o.quartermaster = false; PC.officers.vacate(state); }
+    // A death costs morale by warmth (§25.12).
+    var w = o.mentor ? "warm" : (o.warmth || ((PC.data.creator.OFFICER_TRAITS || []).filter(function (t) { return t.id === o.voice; })[0] || {}).warmth || "neutral");
+    var loss = { warm: 10, neutral: 6, cold: 3 }[w] || 6;
+    PC.crew.addMorale(state, -loss);
+    // A fleet captain's ship stays with the fleet, crewed by her hands (DEFAULT).
+    if (o.aboard && o.aboard !== "flagship") o.aboard = "flagship";
+    return loss;
+  }
+
+  function choose(state, id) {
+    var m = state.mutiny;
+    if (!m || m.stage !== "approach") throw new Error("Not the moment for that.");
+    var a = approaches(state).filter(function (x) { return x.id === id; })[0];
+    if (!a) throw new Error("Not an approach you can take.");
+    if (a.lock) throw new Error(a.lock);
+    var r = roll(state, a.check, id);
+    var res = { approach: id, label: a.label, outcome: r.outcome, dice: r.dice, edge: r.assessment.edge, lines: [], chips: [] };
+    var rl = rlOf(state), name = rl ? oName(rl) : "";
+    res.lines.push((L().approaches[id] || {})[r.outcome].replace(/\[Name\]/g, name));
+    m.result = res;
+    if (r.outcome === "setback") {
+      if (id === "callOut") { wound(state); res.chips.push({ icon: "person", text: "You are Wounded", ink: "bad" }); }
+      return toEndings(state);
+    }
+    switch (id) {
+      case "reason":
+        PC.crew.addMorale(state, D().REASON_MORALE);
+        res.chips.push({ icon: "morale", text: "Morale +" + D().REASON_MORALE, ink: "good" });
+        if (r.outcome === "clean") addPressure(state, 1);
+        else res.again = true;
+        break;
+      case "payoff":
+        var cost = Math.round(state.money.crew * D().PAY_OFF_SHARE[r.outcome]);
+        state.money.crew -= cost;
+        res.chips.push({ icon: "gold", text: "−" + cost + " crew gold, shared out", ink: "bad" });
+        addPressure(state, 2);
+        break;
+      case "example":
+        PC.crew.markUsed(state, "example");
+        if (r.outcome === "clean") { PC.meters.fearDeed(state, D().EXAMPLE_DREAD, "made an example").forEach(function (c) { res.chips.push(c); }); }
+        else { PC.crew.addMorale(state, D().EXAMPLE_MORALE); res.chips.push({ icon: "morale", text: "Morale " + D().EXAMPLE_MORALE, ink: "bad" }); }
+        addPressure(state, 2);
+        break;
+      case "strikeFirst":
+        if (r.outcome === "clean") {
+          PC.crew.addMorale(state, D().STRIKE_FIRST_MORALE);
+          res.chips.push({ icon: "morale", text: "Morale " + D().STRIKE_FIRST_MORALE, ink: "bad" });
+          PC.meters.fearDeed(state, D().STRIKE_FIRST_DREAD, "struck first").forEach(function (c) { res.chips.push(c); });
+        } else {
+          var k = Math.max(1, Math.round(state.crew.count * D().STRIKE_FIRST_KILLED)), left = k;
+          PC.data.economy.TIER_ORDER.forEach(function (t) { var q = Math.min(left, state.crew.tiers[t] || 0); if (q) { PC.crew.removeHands(state, t, q); left -= q; } });
+          res.chips.push({ icon: "crew", text: plural(k - left, "hand") + " killed", ink: "bad" });
+        }
+        var dead = mutinous(state);
+        dead.forEach(function (o) { killOfficer(state, o, "killed when you struck first"); });
+        if (dead.length) res.lines.push(L().officersKilled.replace("[Names]", dead.map(oName).join(" and ")).replace("[lie]", dead.length === 1 ? "lies" : "lie"));
+        addPressure(state, 0);
+        break;
+      case "callOut":
+        if (r.outcome === "clean") { addPressure(state, 1); m.stage = "ringleaderFate"; return res; }
+        rl.desertNext = true; // yields, and leaves at the next port
+        addPressure(state, 2);
+        break;
+    }
+    return quell(state, res);
+  }
+
+  // Call Out the Ringleader, clean: his fate (§25.14).
+  function ringleaderFate(state, how) {
+    var m = state.mutiny, rl = rlOf(state);
+    if (!m || m.stage !== "ringleaderFate" || !rl) throw new Error("Not the moment for that.");
+    var res = m.result;
+    res.lines.push(L().ringleaderFate[how].replace(/\[Name\]/g, oName(rl)));
+    if (how === "kill") { killOfficer(state, rl, "killed in a duel"); PC.meters.fearDeed(state, D().RINGLEADER_KILL_DREAD, "killed the ringleader").forEach(function (c) { res.chips.push(c); }); }
+    else if (how === "plank") { killOfficer(state, rl, "walked the plank"); PC.meters.fearDeed(state, D().PLANK_DREAD, "made him walk the plank").forEach(function (c) { res.chips.push(c); }); }
+    else { rl.desertNext = true; rl.noPay = true; PC.meters.fearDeed(state, D().RINGLEADER_ASHORE_DREAD, "put the ringleader ashore").forEach(function (c) { res.chips.push(c); }); }
+    res.fate = how;
+    return quell(state, res);
+  }
+
+  // It's over. Surviving mutineers stay at Rival (§25.14); Strike First
+  // closes, and a known ringleader is forgotten if he's gone.
+  function quell(state, res) {
+    var m = state.mutiny;
+    mutinous(state).forEach(function (o) { if (o.rung < R().Rival) o.rung = R().Rival; o.mutineer = true; });
+    state.crew.mutinySigns = false;
+    if (state.crew.ringleaderKnown && !present(state).some(function (o) { return o.id === state.crew.ringleaderKnown; })) state.crew.ringleaderKnown = null;
+    res.lines.push(res.again ? L().again : L().quelled);
+    m.stage = "quelled";
+    PC.state.addLog(state, "The mutiny was put down (" + res.label + ", " + res.outcome + ").");
+    return res;
+  }
+
+  // Carry on with what the captain was doing: the voyage or hunt resumes
+  // with its departure checks done.
+  function carryOn(state) {
+    var m = state.mutiny;
+    if (!m || (m.stage !== "quelled" && m.stage !== "over")) throw new Error("Not yet.");
+    var cont = m.stage === "quelled" ? m.cont : null;
+    state.mutiny = null;
+    if (state.ended) return null;
+    if (state.jail) { state.current = { screen: "jail" }; return null; }
+    if (state.shipless) { state.current = { screen: "shipless" }; return null; }
+    state.current = { screen: "node" };
+    if (!cont || cont.kind === "season") return null;
+    if (cont.kind === "sail") return PC.world.sail(state, cont.to, Object.assign({}, cont.opts || {}, { departed: true }));
+    if (cont.kind === "hunt") { var g = PC.hunt.start(state, Object.assign({}, cont.opts || {}, { departed: true })); return g; }
+    return null;
+  }
+
+  // ---- The endings (§24.13) ---------------------------------------------------------
+
+  function wound(state) { var t = state.captain.tags; if (t.indexOf("Wounded") < 0) t.push("Wounded"); }
+
+  function toEndings(state) {
+    var m = state.mutiny;
+    m.mutinousBand = band(state) === "Mutinous";
+    m.stage = "plea";
+    m.result.lines.push(m.mutinousBand ? L().verdict : L().setbackPlea);
+    return m.result;
+  }
+  function pleaCheck(state) {
+    var db = PC.meters.dreadBonus(state);
+    return { type: "Persuade", dr: 2, extra: db ? [{ label: "Dread", value: db }] : [] }; // DR 2: DEFAULT (§24.13 names none)
+  }
+  function plea(state) {
+    var m = state.mutiny;
+    if (!m || m.stage !== "plea") throw new Error("Not the moment for that.");
+    var r = roll(state, pleaCheck(state), "plea");
+    var res = { approach: "plea", label: "Plead your case", outcome: r.outcome, lines: [L().plea[r.outcome]], chips: [] };
+    m.plea = res;
+    if (!m.mutinousBand) return lose(state, r.outcome === "setback" ? "marooned" : "ashore", res);
+    if (r.outcome === "clean") return lose(state, "ashore", res);
+    if (r.outcome === "partial") return lose(state, "marooned", res);
+    m.stage = "lastStand";
+    res.lines.push(L().lastStand);
+    return res;
+  }
+  function lastStandCheck(state) { return { type: weaponType(state), dr: dr(state) }; } // DEFAULT: the approach's DR
+  function lastStand(state) {
+    var m = state.mutiny;
+    if (!m || m.stage !== "lastStand") throw new Error("Not the moment for that.");
+    var r = roll(state, lastStandCheck(state), "laststand");
+    var res = { approach: "lastStand", label: "The last stand", outcome: r.outcome, lines: [L().lastStandResult[r.outcome]], chips: [] };
+    m.stand = res;
+    if (r.outcome !== "setback") { wound(state); res.chips.push({ icon: "person", text: "You are Wounded", ink: "bad" }); return lose(state, r.outcome === "clean" ? "ashore" : "marooned", res); }
+    // The sacrifice (§25.12): a Friend or Confidant who hasn't made it, the
+    // highest rung first. The captain lives, Wounded, and is marooned (DEFAULT).
+    var s = loyal(state).filter(function (o) { return !o.sacrificed; }).sort(function (a, b) { return b.rung - a.rung; })[0];
+    if (s) {
+      s.sacrificed = true;
+      res.lines.push(L().sacrifice.replace(/\[Name\]/g, oName(s)));
+      if (s.unique !== "Ironclad") killOfficer(state, s, "died saving you");
+      wound(state); res.chips.push({ icon: "person", text: "You are Wounded", ink: "bad" });
+      return lose(state, "marooned", res);
+    }
+    res.lines.push(L().killed);
+    state.gameOver = { how: "died", line: "mutiny" };
+    m.stage = "over";
+    PC.state.addLog(state, "Killed by mutineers.");
+    PC.summary.end(state);
+    return res;
+  }
+
+  // The ship is lost (§24.13, §25.14): the mutineers take the whole fleet,
+  // the cargo, crew gold and the purse; the captain keeps the stash, his
+  // holdings ashore, his tags and what he wears. Loyal officers share his
+  // fate; bystanders and mutineers sail on with the ship.
+  function lose(state, how, res) {
+    var m = state.mutiny;
+    var lo = loyal(state), rl = rlOf(state);
+    // A loyal fleet captain picks a marooned captain up: her ship is his.
+    var saver = how === "marooned" ? lo.filter(function (o) { return o.aboard && o.aboard !== "flagship"; })[0] : null;
+    var saved = saver ? (state.fleet || []).filter(function (f) { return f.id === saver.aboard && !f.out; })[0] : null;
+    state.world.mutineers = { ringleader: rl ? rl.id : null, ship: state.ship.name, cls: state.ship.type, at: stamp(state) }; // DEFAULT: recorded for the Ringleader Returns (later)
+    present(state).forEach(function (o) { if (lo.indexOf(o) < 0) { o.gone = true; o.left = m.ringleader === o.id ? "leads the mutineers" : "sailed with the mutineers"; o.quartermaster = false; } });
+    var here = PC.node.here(state);
+    var at = here && !PC.node.isOcean(here) ? here : "ocracoke"; // DEFAULT: an ocean node's nearest port is Ocracoke
+    PC.prison.loseEverything(state);
+    state.minigame = null; state.voyage = null;
+    res.lines.push(L().lost);
+    PC.state.addLog(state, "The crew mutinied and took the ship.");
+    m.stage = "over";
+    lo.forEach(function (o) { if (!o.gone) o.aboard = "flagship"; });
+    if (saved) {
+      takeShip(state, saved, saver);
+      state.location = { node: at, place: null, queue: [] };
+      PC.node.initNode(state, at);
+      res.lines.push(L().pickedUp.replace("[Ship]", saved.name || saved.cls).replace("[Name]", oName(saver)));
+      m.ending = "pickedUp";
+      return res;
+    }
+    if (how === "marooned") {
+      res.lines.push(L().marooned);
+      m.ending = "marooned";
+      m.loyalIds = lo.filter(function (o) { return !o.gone; }).map(function (o) { return o.id; });
+      return res;
+    }
+    state.location = { node: at, place: null, queue: [] };
+    PC.node.initNode(state, at);
+    res.lines.push(L().ashore.replace("[Place]", PC.world.placeName(at)));
+    m.ending = "ashore";
+    return res;
+  }
+
+  // The loyal fleet captain's ship becomes the flagship; he takes his
+  // officer slot aboard her.
+  function takeShip(state, f, o) {
+    var c = PC.data.hunt.CLASSES[f.cls] || {};
+    state.ship = { name: f.name || f.cls, type: f.cls, hull: f.hull, hullMax: f.hullMax, baseHull: c.hull || f.hullMax, guns: f.guns, gunsMax: f.gunsMax,
+      cargo: f.cargo, size: f.size, crewMin: f.crewMin, crewMax: f.crewMax, speed: f.speed, speedMax: f.speed, handling: f.handling,
+      rigging: "sound", upgrades: { hull: 1, rigging: 1, guns: 1 }, dirty: !!f.dirty };
+    Object.keys(f.crewTiers || {}).forEach(function (t) { if (f.crewTiers[t]) PC.crew.addHands(state, t, f.crewTiers[t]); });
+    if (!state.crew.count && f.crew) PC.crew.addHands(state, "Green", f.crew);
+    o.aboard = "flagship";
+    state.shipless = false;
+    PC.officers.ensureQuartermaster(state);
+  }
+
+  // Off the ship: marooned goes into the stranded loop (§21.8) with the
+  // loyal officers; put ashore and picked up go to the town.
+  function afterLoss(state) {
+    var m = state.mutiny;
+    if (!m || m.stage !== "over") throw new Error("Not yet.");
+    var ending = m.ending;
+    state.mutiny = null;
+    if (state.ended) return null;
+    if (ending === "marooned") { PC.prison.maroon(state, { officers: m.loyalIds || [], by: "mutineers'" }); return null; }
+    if (ending === "pickedUp") { state.current = { screen: "node" }; return null; }
+    state.shipless = true;
+    state.current = { screen: "shipless" };
+    return null;
+  }
+
+  // ---- The screen's view --------------------------------------------------------------
+
+  function view(state) {
+    var m = state.mutiny;
+    if (!m) return null;
+    var rl = rlOf(state);
+    var v = { when: m.when, stage: m.stage, log: m.log.slice(), result: m.result, plea: m.plea || null, stand: m.stand || null, ending: m.ending || null,
+      ringleader: rl ? { id: rl.id, name: fullName(rl), known: state.crew.ringleaderKnown === rl.id } : null,
+      loyal: loyal(state).map(fullName), mutinous: mutinous(state).map(fullName), pressure: state.crew.pressure || 0, dr: dr(state) };
+    if (m.stage === "approach") v.approaches = approaches(state);
+    if (m.stage === "plea") v.pleaCheck = pleaCheck(state);
+    if (m.stage === "lastStand") v.standCheck = lastStandCheck(state);
+    return v;
+  }
+
+  // ---- Developer: fire one now ---------------------------------------------------------
+  function devFire(state) {
+    if (state.jail || state.shipless) throw new Error("Not without a ship.");
+    if ((state.crew.pressure || 0) < D().FIRE_AT_DEPARTURE) state.crew.pressure = D().FIRE_AT_DEPARTURE;
+    return start(state, "season", { kind: "season" });
+  }
+
+  PC.mutiny = {
+    mutinous: mutinous, loyal: loyal, bystanders: bystanders, ringleader: ringleader, noteWarning: noteWarning, seasonPressure: seasonPressure,
+    desertion: desertion, depart: depart, seasonCheck: seasonCheck, start: start, dr: dr, approaches: approaches, choose: choose,
+    ringleaderFate: ringleaderFate, carryOn: carryOn, plea: plea, lastStand: lastStand, afterLoss: afterLoss, view: view, devFire: devFire, duelDR: duelDR,
   };
 })();
 </script>
@@ -20161,8 +20698,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           partial: { text: "They'll believe it when they see it.", fx: [{ morale: -2 }, { flag: "promise_next_prize" }] },
           setback: { text: "\"Heard that before,\" someone mutters.", fx: [{ morale: -4, lowPressure: 1 }] } },
         { label: "Find out who's stirring the pot.", shows: { low: true }, check: { type: "Read People", dr: 2 }, approval: ["Order", "Deceit"],
-          clean: { text: "You know exactly whose voice it is. So does he, now.", fx: [{ pressure: -1 }] },
-          partial: { text: "You've only got a rough guess.", fx: [] },
+          clean: { text: "You know exactly whose voice it is. So does he, now.", fx: [{ pressure: -1 }, { reveal: "full" }] },
+          partial: { text: "You've only got a rough guess.", fx: [{ reveal: "level" }] },
           setback: { text: "Your questions only feed the talk.", fx: [{ pressure: 1 }] } },
         { label: "Let them grumble. Sailors always do.", approval: ["Caution"], result: { text: "It doesn't stop.", fx: [{ morale: -5, lowPressure: 1 }] } },
       ] },
@@ -21583,6 +22120,91 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — the mutiny's numbers and lines (§24.10, §24.13,
+ * §25.13, §25.14; Milestone 9, PR 2).
+ *
+ * Every line here is a PLACEHOLDER for the author (PH33): each approach,
+ * the plea, the crew's verdict, the last stand and the endings. The
+ * numbers are the docs' placeholders.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+
+  PC.data.mutiny = {
+    // ---- Desertion at departure (§24.10) ----
+    DESERT: { Sullen: [0.05, 0.10], Mutinous: [0.15, 0.25] },
+    DESERT_FACTION_PORT: 0.05,   // departing an Avalon or Frisian port
+    DESERT_GO_WITHOUT: 0.10,     // after a Go Without setback (§20.6)
+    DESERT_MORALE: 10,           // the crew who stay
+
+    // ---- When it fires (§24.13) ----
+    FIRE_AT_DEPARTURE: 4,
+    FIRE_AT_SEASON_END: 5,
+
+    // ---- The roll: DR = 1 + Pressure − Dread bonus, 1 to 5 (Year 1) ----
+    DR_MAX: 5,
+    RINGLEADER_DR: 1,            // an officer ringleader (§25.14)
+    LOYAL_EDGE_MAX: 2,           // +1 a loyal officer, at most +2
+
+    // ---- The approaches ----
+    REASON_MORALE: 10,
+    PAY_OFF_MIN_HEAD: 25,        // not offered below 25 crew gold a head
+    PAY_OFF_SHARE: { clean: 0.5, partial: 0.75 },
+    EXAMPLE_MORALE: -10,         // a partial
+    EXAMPLE_DREAD: 3,            // a clean (§28.8)
+    STRIKE_FIRST_MORALE: -10,    // a clean
+    STRIKE_FIRST_DREAD: 5,       // §28.8
+    STRIKE_FIRST_KILLED: 0.10,   // a partial: 10% of the crew
+    RINGLEADER_KILL_DREAD: 5,    // Call Out, when the ringleader dies (§28.8)
+    RINGLEADER_ASHORE_DREAD: 2,  // DEFAULT: "Dread up" read as a fear deed
+    PLANK_DREAD: 8,              // §25.14
+
+    lines: {
+      fires: {
+        departure: "PLACEHOLDER: The men don't go to the capstan. They stand on the deck in a body, and nobody meets your eye.",
+        season: "PLACEHOLDER: You wake to voices on deck. The crew have gathered at the mast, and the talk stops when you climb the ladder.",
+      },
+      ringleaderSpeaks: "PLACEHOLDER: [Name] steps out of the crowd. \"We're done, Captain. The men have had enough, and they've chosen me to say so.\"",
+      crewSpeaks: "PLACEHOLDER: A hand at the front speaks for the rest. \"We're done, Captain. The men have had enough.\"",
+      loyal: "PLACEHOLDER: [Names] [stand] at your shoulder.",
+      approaches: {
+        reason: { clean: "PLACEHOLDER: They listen. By the end, the grumbling has turned to nods.", partial: "PLACEHOLDER: They let you talk, and they go back to work. For now.", setback: "PLACEHOLDER: They've heard enough of your words." },
+        payoff: { clean: "PLACEHOLDER: The chest comes up on deck, and the grumbling stops at the first chink of gold.", partial: "PLACEHOLDER: They take the gold, and more of it than you'd hoped. But they take it.", setback: "PLACEHOLDER: They take the gold, and they take the ship too." },
+        example: { clean: "PLACEHOLDER: You drag the loudest of them to the mast. Nobody else says a word.", partial: "PLACEHOLDER: The example is made. The men obey, but they hate you for it.", setback: "PLACEHOLDER: You reach for the loudest of them, and the crowd closes around him." },
+        strikeFirst: { clean: "PLACEHOLDER: You strike before they're ready. The ringleaders are in irons before the rest know what's happening.", partial: "PLACEHOLDER: It's bloody work, and there are bodies on the deck when it's done. But it's done.", setback: "PLACEHOLDER: They were ready for you." },
+        callOut: { clean: "PLACEHOLDER: [Name] goes down on the deck, your blade at his throat.", partial: "PLACEHOLDER: [Name] drops his blade. \"I'll go at the next port,\" he says. \"I'm done with you.\"", setback: "PLACEHOLDER: [Name]'s blade opens your side, and the crew roar." },
+      },
+      ringleaderFate: {
+        kill: "PLACEHOLDER: [Name] goes down and doesn't get up.",
+        ashore: "PLACEHOLDER: [Name] will go ashore at the next port, with nothing but the clothes on his back.",
+        plank: "PLACEHOLDER: The crew bind [Name]'s hands and run a plank out over the side. He walks it.",
+      },
+      officersKilled: "PLACEHOLDER: [Names] [lie] dead on the deck.",
+      setbackPlea: "PLACEHOLDER: The crew have the deck, and the guns, and you. There's one chance left: to talk your way out of this alive.",
+      verdict: "PLACEHOLDER: The crew are past talking. They'll give you their verdict, and you may plead your case first.",
+      plea: { clean: "PLACEHOLDER: They'll set you ashore, alive.", partial: "PLACEHOLDER: They'll put you off the ship, but not where you'd like.", setback: "PLACEHOLDER: Nobody is listening any more." },
+      lastStand: "PLACEHOLDER: They come for you. You draw your blade.",
+      lastStandResult: { clean: "PLACEHOLDER: You cut your way to the boat and pull for the shore, bleeding.", partial: "PLACEHOLDER: You fight until they overwhelm you, and wake in a boat with no oars.", setback: "PLACEHOLDER: There are too many of them." },
+      sacrifice: "Suddenly, [Name] throws himself between you and the killing blow. With a cry, he falls at your feet.",
+      killed: "PLACEHOLDER: The crew you led cut you down on your own deck.",
+      ashore: "PLACEHOLDER: The ship's boat sets you on the beach at [Place]. Your ship stands out to sea without you.",
+      marooned: "PLACEHOLDER: They leave you on a spit of sand with a cask of water and a pistol with one shot.",
+      pickedUp: "PLACEHOLDER: Before the day is out, the [Ship] comes about and picks you up. [Name] meets you at the rail.",
+      lost: "PLACEHOLDER: The mutineers sail off with every ship, all the cargo, the crew's gold and your purse.",
+      quelled: "The mutiny is over.",
+      again: "PLACEHOLDER: The men go back to work, but nothing is settled. They'll be back.",
+      // Desertion (§24.10, §25.13).
+      deserted: "[n] slipped away in the night, and the hands who stayed are glad to see the back of them.",
+      officerDeserted: "[Name]'s hammock is empty, and his sea chest is gone.",
+      fleetDeserted: "At first light the [Ship] is gone from her mooring. So is [Name].",
+      tooFew: "There aren't enough hands left to sail her. You'll need to sign more before you leave.",
+    },
+  };
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -22457,7 +23079,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (screen !== jailScreen) { if (jailScreen === "jail" || jailScreen === "shipless") jailSay = null; jailScreen = screen; }
     if (screen === "end") return drawEnd();
     var content = screen === "hub" ? hubPanel() : screen === "node" ? noActionsBanner() + nodePanel() : screen === "minigame" ? minigamePanel() :
-      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "jail" ? jailPanel() : screen === "shipless" ? shiplessPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
+      screen === "map" ? mapPanel() : screen === "split" ? splitPanel() : screen === "jail" ? jailPanel() : screen === "shipless" ? shiplessPanel() : screen === "mutiny" && PC.mutiny ? mutinyPanel() : screen === "event" && PC.voyageEvents ? eventPanel() : scenePanel();
     root.innerHTML = frame(topBar() + phoneStrip() +
       '<div class="cols"><aside class="strip">' + strip() + '</aside><main class="stage">' + content + "</main></div>" + tabBar()) +
       popupHtml() + menuHtml();
@@ -22468,6 +23090,50 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   var jailSay = null; // the last step's lines and chips, shown above the choices
   var jailSeq = 0;
   var jailScreen = null;
+
+  // ---- The mutiny (§24.13, §25.14; M9 PR 2) ----
+  // The crew's demand, the five approaches, then (on a setback) the plea,
+  // the crew's verdict and the last stand. Lines are PLACEHOLDERs (PH33).
+  function mutinyResult(r) {
+    if (!r) return "";
+    var inner = badge(r.outcome) + '<div class="say">' + r.lines.map(function (l) { return inline(l); }).join("<br>") + "</div>" + chips(r.chips);
+    return rbox(r.outcome, inner, "mutiny-" + r.approach + "-" + r.outcome);
+  }
+  function mutinyPanel() {
+    var v = PC.mutiny.view(state);
+    if (!v) return "";
+    var html = '<div class="where">' + esc(PC.state.seasonName(state) + " " + state.time.year + " · " + state.ship.name) + '</div>' + banner("the crew massed at the mainmast, the officers apart") +
+      '<h2 class="title">Mutiny</h2><div class="prose">' + prose(v.log.join("\n\n")) + "</div>";
+    var side = '<p class="small">' + (v.loyal.length ? "With you: " + esc(v.loyal.join(", ")) + " (+" + Math.min(2, v.loyal.length) + " on your roll). " : "No officer stands with you. ") +
+      (v.ringleader ? (v.ringleader.known ? "Leading them: <b>" + esc(v.ringleader.name) + "</b>." : "One of your officers is behind this, but you don't know which.") : "") + "</p>";
+    if (v.stage === "approach") {
+      return html + side + opts(v.approaches.map(function (a) {
+        return opt({ act: "mutapproach", attrs: 'data-id="' + a.id + '"', label: a.label, check: a.lock ? null : PC.checks.assess(state, a.check, { conditions: [] }), meta: a.note, lock: a.lock });
+      }));
+    }
+    html += mutinyResult(v.result);
+    if (v.stage === "ringleaderFate") {
+      return html + "<p>" + esc(v.ringleader ? v.ringleader.name : "He") + " is at your mercy.</p>" + opts([
+        opt({ act: "mutfate", attrs: 'data-how="kill"', label: "Kill him", meta: "Dread +" + PC.data.mutiny.RINGLEADER_KILL_DREAD + "." }),
+        opt({ act: "mutfate", attrs: 'data-how="ashore"', label: "Put him ashore at the next port", meta: "He leaves with nothing. Dread +" + PC.data.mutiny.RINGLEADER_ASHORE_DREAD + "." }),
+        opt({ act: "mutfate", attrs: 'data-how="plank"', label: "Make him walk the plank", meta: "Dread +" + PC.data.mutiny.PLANK_DREAD + "." })]);
+    }
+    if (v.stage === "quelled") {
+      var go = v.when === "departure" ? "Carry on" : "Back to work";
+      return html + '<div class="actions"><button class="primary" data-act="mutcarry" data-top="1">' + go + "</button></div>";
+    }
+    if (v.stage === "plea" || v.stage === "lastStand" || v.stage === "over") html += mutinyResult(v.plea);
+    if (v.stage === "plea") {
+      return html + opts([opt({ act: "mutplea", label: "Plead your case", check: PC.checks.assess(state, v.pleaCheck, { conditions: [] }),
+        meta: state.crew.morale < 15 ? "Clean: put ashore. Partial: marooned. Setback: they come for you." : "Clean or partial: put ashore. Setback: marooned." })]);
+    }
+    if (v.stage === "lastStand" || v.stage === "over") html += mutinyResult(v.stand);
+    if (v.stage === "lastStand") {
+      return html + opts([opt({ act: "mutstand", label: "Fight for your life", check: PC.checks.assess(state, v.standCheck, { conditions: [] }),
+        meta: "Clean: you cut your way to a boat, Wounded. Partial: marooned, Wounded. Setback: killed, unless a friend gives his life for yours." })]);
+    }
+    return html + '<div class="actions"><button class="primary" data-act="mutafter" data-top="1">' + (v.ending === "marooned" ? "Alone on the sand" : "Continue") + "</button></div>";
+  }
 
   function jailPanel() {
     var v = PC.prison.view(state);
@@ -25080,7 +25746,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         '<p class="small">Add a fleet ship (generated officer-captain): ' + ["Sloop", "Schooner", "Brigantine", "Brig"].map(function (c) { return b("devfleet", c, ' data-cls="' + c + '"'); }).join("") + "</p>" +
         // P8: the crew's hidden numbers.
         '<p class="small">Crew: morale ' + state.crew.morale + " (" + esc(PC.crew.band(state.crew.morale)) + ") · Pressure " + (state.crew.pressure || 0) + " of 5 (mutiny fires at 4 on departure, 5 at season end; not built yet) · set Pressure: " +
-          [0, 2, 3, 4].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + "</p>" +
+          [0, 2, 3, 4, 5].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + " " + b("devmutiny", "Fire a mutiny now") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
       grp("Run log", '<p class="small">Every choice, roll (with its seed), screen and change this run, and any error: ' + (PC.runlog ? PC.runlog.count() : 0) + " entries. Export it and attach the file in the playtest chat.</p>" +
@@ -26332,6 +26998,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     "devjail": function (el) { PC.devtools.jail(state, el.dataset.charge); menu = null; },
     "devcaptured": function (el) { PC.devtools.captured(state, el.dataset.flag); menu = null; },
     "devsecret": function () { state.flags.fenceUsed_bobby = true; },
+    "devmutiny": function () { menu = null; PC.mutiny.devFire(state); },
+    "mutapproach": function (el) { PC.mutiny.choose(state, el.dataset.id); },
+    "mutfate": function (el) { PC.mutiny.ringleaderFate(state, el.dataset.how); },
+    "mutplea": function () { PC.mutiny.plea(state); },
+    "mutstand": function () { PC.mutiny.lastStand(state); },
+    "mutcarry": function () { mgMark = 0; PC.mutiny.carryOn(state); },
+    "mutafter": function () { PC.mutiny.afterLoss(state); },
     "devpressure": function (el) { state.crew.pressure = Number(el.dataset.v); if (state.crew.pressure < 3) state.crew.qmWarned = false; },
     "devfullcrew": function () { var add = state.ship.crewMax - state.crew.count - (state.crew.wounded || 0); if (add > 0) PC.crew.addHands(state, "Able", add); state.ship.hull = state.ship.hullMax; state.ship.guns = state.ship.gunsMax; },
     "devjump": function () {
