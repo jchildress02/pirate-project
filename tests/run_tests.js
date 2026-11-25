@@ -3652,7 +3652,7 @@ test("P3: no idle upkeep at the season's end, anywhere", function () {
   PC.world.endSeason(s); eq(s.provisions, prov);
 });
 
-test("P4/P5: density base 75; Avalon 60/20/20, the north 50/20/30, 40/20/40 at Wanted and 30/20/50 at Hunted", function () {
+test("P4/P5: density base 75; Avalon 60/20/20, the north 55/20/25 (5 a port), 45/20/35 at Wanted and 35/20/45 at Hunted", function () {
   eq(PC.data.hunt.DENSITY.base, 75);
   eq(PC.data.hunt.ROLE.Avalon.join(","), "60,20,20,0"); eq(PC.data.hunt.ROLE.France.join(","), "45,30,25,0");
   var s = m7("pp5"), count = function (heat) {
@@ -3661,9 +3661,9 @@ test("P4/P5: density base 75; Avalon 60/20/20, the north 50/20/30, 40/20/40 at W
     return war / 2000;
   };
   var cold = count(0), wanted = count(45), hunted = count(75);
-  ok(Math.abs(cold - 0.30) < 0.04, "the north at low Heat: about 30% War, got " + cold);
-  ok(Math.abs(wanted - 0.40) < 0.04, "Wanted: about 40%, got " + wanted);
-  ok(Math.abs(hunted - 0.50) < 0.04, "Hunted: about 50%, got " + hunted);
+  ok(Math.abs(cold - 0.25) < 0.04, "the north at low Heat: about 25% War, got " + cold);
+  ok(Math.abs(wanted - 0.35) < 0.04, "Wanted: about 35%, got " + wanted);
+  ok(Math.abs(hunted - 0.45) < 0.04, "Hunted: about 45%, got " + hunted);
 });
 
 test("P7a: grumbling weighs Sullen ×3, Mutinous ×5, ×(1 + 0.5 a Pressure point), sore ×3 on top", function () {
