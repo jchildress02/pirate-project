@@ -1202,6 +1202,7 @@
 
   PC.combat = {
     rollEffect: rollEffect,
+    _woundCaptain: woundCaptain, // for the tests (Bug Log B5)
     weatherParts: weatherParts,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,

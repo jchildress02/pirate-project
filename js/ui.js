@@ -263,6 +263,9 @@
       var onNode = state && state.current && state.current.screen === "node" && state.location;
       var placeBefore = onNode ? state.location.place : undefined;
       if (onNode && !state.location.place) townScroll = globalThis.scrollY || 0;
+      // The run log (Playtest Pins 0.9, PR A): the choice, then what changed.
+      var RL = PC.runlog;
+      if (RL && el && el.dataset) RL.choice(el.dataset.act || "?", el.dataset, before, (el.textContent || el.value || "").replace(/\s+/g, " ").trim().slice(0, 90));
       try { fn.apply(null, arguments); }
       catch (e) { console.error(e); toast("Something went wrong: " + e.message); }
       if (state) PC.state.saveToBrowser(state);
@@ -270,6 +273,7 @@
       stampFlash = !!state;
       draw();
       stampFlash = false;
+      if (RL) { var nowKey = screenKey(); if (nowKey !== before) RL.screen(nowKey); RL.after(state); RL.save(); }
       land(before, keys, el, placeBefore, menuBefore, panelTop);
     };
   }
@@ -1554,7 +1558,7 @@
         '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(pp) + " gold each.</p>" +
         (free <= 0 ? '<p class="note">The hold is full.</p>' : provMax > 0 ? '<div class="buyrow">' + qstep("q-prov", Math.min(provMax, 10), provMax) + '<button class="primary" data-act="buyprov" data-for="q-prov">' +
           totalSlot(function () { return "Buy · " + gold(val("q-prov") * pp); }, "") + "</button></div>" +
-          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * pp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
+          '<p class="small">' + totalSlot(function () { var n = val("q-prov"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * pp) + " left (purse and crew gold together)"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>') +
         // R7: provisions sell back at half his price, out of his coffers.
         (state.provisions > 0 ? (function () {
           var sp = N().provisionsSellPrice(state), cl = N().provisionerCapLeft(state);
@@ -1562,7 +1566,7 @@
           return '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
             '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary outline" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
             totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>" +
-            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, PC.crew.food(state) - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
+            '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, PC.crew.food(state) - n) + " lots aboard · " + gold(onHand() + n * sp) + " left (purse and crew gold together)"; }) + "</p>";
         })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
@@ -2791,6 +2795,8 @@
           [0, 2, 3, 4].map(function (v) { return b("devpressure", String(v), ' data-v="' + v + '"'); }).join("") + "</p>" +
         '<p class="small">Avalon Heat: ' + [0, 25, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="avalon" data-v="' + h + '"'); }).join("") + " · Frisian Heat: " + [0, 55, 85].map(function (h) { return b("devheat", String(h), ' data-f="frisia" data-v="' + h + '"'); }).join("") +
         " · " + b("devfullcrew", "Full crew, guns and hull") + "</p>") : "") +
+      grp("Run log", '<p class="small">Every choice, roll (with its seed), screen and change this run, and any error: ' + (PC.runlog ? PC.runlog.count() : 0) + " entries. Export it and attach the file in the playtest chat.</p>" +
+        '<div class="actions">' + b("runlogexport", "Export the run log") + b("runlogcopy", "Copy it") + b("runlogclear", "Clear it") + "</div>") +
       grp("Start", '<div class="actions">' + b("quickask", "Quick start with the test captain") + "</div>") +
       grp("Info", '<p class="small">World seed ' + esc(state.world.seed) + " · save version " + state.saveVersion + "</p>" +
         (here ? '<p class="small">' + esc(here.name) + "'s people this world: " + here.slots.map(function (sl) {
@@ -3835,6 +3841,7 @@
       var seed = PC.rng.newWorldSeed();
       var template = PC.creator.build(draft, seed);
       var built = PC.state.newGame(template, { seed: seed });
+      if (PC.runlog) PC.runlog.newRun(built);
       PC.state.addLog(built, "— Spring 1754 begins. —");
       PC.state.addLog(built, "The quest What Was Lost is open (until the end of Spring 1755).");
       var m = (built.officers || []).filter(function (o) { return o.mentor; })[0];
@@ -3904,6 +3911,7 @@
       dialog = null; menu = null;
       // Quick start brings the test mentor, Jesse Dew (Playtest Pins 0.8, #3).
       state = PC.state.newGame(Object.assign({}, PC.data.testCaptain, { officers: [PC.data.testMentor] }));
+      if (PC.runlog) PC.runlog.newRun(state);
       PC.state.addLog(state, "— Spring 1754 begins. —");
     },
     "quit": function () { state = null; creating = false; menu = null; },
@@ -3947,6 +3955,9 @@
     "import": function () { dialog = "import"; },
     "closedialog": function () { dialog = null; },
     "download": downloadSave,
+    "runlogexport": downloadRunLog,
+    "runlogcopy": copyRunLog,
+    "runlogclear": function () { PC.runlog.clear(); toast("Run log cleared."); },
     "copy": copySave,
     "pickfile": pickSaveFile,
     "loadpasted": function () { var t = document.querySelector(".pastebox").value; if (t.trim()) loadSaveText(t); else toast("Paste a save first."); },
@@ -4110,7 +4121,7 @@
         if (el.classList.contains("modal") && ev.target !== el) return;
         // These redraw (or not) themselves: file reads finish later, and
         // copy/download must not rebuild the dialog under the user.
-        if (name === "pickfile" || name === "loadpasted" || name === "copy" || name === "download") { h(el); return; }
+        if (name === "pickfile" || name === "loadpasted" || name === "copy" || name === "download" || name === "runlogexport" || name === "runlogcopy") { h(el); return; }
         act(h)(el);
       });
     });
@@ -4183,7 +4194,48 @@
 
   function start(rootEl) {
     root = rootEl;
+    startRunLog();
     draw();
+  }
+
+  // The run log (Playtest Pins 0.9, PR A): it records from the moment the
+  // game opens. Errors, failed pictures and console errors go in too, so a
+  // playtest's bug comes with its trail.
+  function startRunLog() {
+    var RL = PC.runlog;
+    if (!RL || typeof globalThis.addEventListener !== "function") return;
+    RL.start();
+    RL.note("Game opened · " + BUILD);
+    globalThis.addEventListener("error", function (ev) {
+      var t = ev && ev.target;
+      if (t && t.tagName === "IMG") { RL.error("A picture failed to load: " + (t.getAttribute("alt") || "") + " · " + String(t.getAttribute("src") || "").slice(0, 80)); RL.save(); return; }
+      RL.error((ev.message || "error") + (ev.filename ? " at " + ev.filename.split("/").pop() + ":" + ev.lineno : "") + (ev.error && ev.error.stack ? "\n" + ev.error.stack : "")); RL.save();
+    }, true);
+    globalThis.addEventListener("unhandledrejection", function (ev) { RL.error("Unhandled: " + (ev.reason && ev.reason.stack || ev.reason)); RL.save(); });
+    var ce = console.error;
+    console.error = function () {
+      try { RL.error(Array.prototype.map.call(arguments, function (a) { return a && a.stack ? a.stack : String(a); }).join(" ")); RL.save(); } catch (e) { /* never let the log break the game */ }
+      return ce.apply(console, arguments);
+    };
+  }
+
+  function downloadRunLog() {
+    var text = PC.runlog.exportText(state, BUILD);
+    try {
+      var blob = new Blob([text], { type: "text/plain" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "pirate-chronicle-run-log-" + (state && state.world ? state.world.seed : "none") + ".txt";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      toast("Run log downloaded. Attach it in the playtest chat. (If nothing appeared, use Copy instead.)");
+    } catch (e) { toast("Downloads are blocked here. Use Copy instead."); }
+  }
+  function copyRunLog() {
+    var text = PC.runlog.exportText(state, BUILD);
+    try { globalThis.navigator.clipboard.writeText(text).then(function () { toast("Run log copied. Paste it into the playtest chat."); }, function () { toast("Copying is blocked here. Use Export instead."); }); }
+    catch (e) { toast("Copying is blocked here. Use Export instead."); }
   }
 
   PC.ui = { start: start };
