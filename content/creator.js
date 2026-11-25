@@ -30,6 +30,10 @@
     { band: "old", min: 36, max: 40, tags: 3, debuffs: 2 },
   ];
 
+  // The portrait's age (#1 of the build 0.9 pins): its own breaks, apart
+  // from the age bands' tags and debuffs. Young 15-23, middle 24-33, older 34+.
+  var PORTRAIT_AGES = [{ band: "young", max: 23 }, { band: "mid", max: 33 }, { band: "old", max: 999 }];
+
   // ---- Origin: Ash-Born (§12.5) ----------------------------------------
   // Card text as written in the Creator chat; no card says "rung" (§38.6).
   var ORIGINS = [
@@ -181,7 +185,7 @@
   var OFFICER_TYPES = [
     { id: "Gunner", perk: "+1 Gunnery", lessons: "the Exchange; Marksmanship" },
     { id: "Raider", perk: "+1 to boarding clashes", lessons: "boarding clashes; Lead the Charge" },
-    { id: "Cook", perk: "Ship's surgeon: Treat Wounds after battle; crew recovery 45%", lessons: "Treat Wounds; Immune System" },
+    { id: "Surgeon", perk: "Treat Wounds after battle; crew recovery 45%", lessons: "Treat Wounds; Immune System" },
     { id: "Cooper", perk: "Provisions burn -15%", lessons: "Ration Stores; Go Without; Haggle" },
     { id: "Navigator", perk: "+1 Position and +1 Outrun", lessons: "Position; Outrun; Navigate" },
     { id: "Carpenter", perk: "+1 Repair & Refit after battle; better repairs", lessons: "Repair & Refit" },
@@ -193,7 +197,7 @@
   var MENTOR_LESSONS = {
     Gunner: ["Marksmanship"],
     Raider: [],
-    Cook: ["Treat Wounds", "Immune System"],
+    Surgeon: ["Treat Wounds", "Immune System"],
     Cooper: ["Ration Stores", "Go Without", "Haggle"],
     Navigator: ["Maneuver", "Outrun", "Navigate"],
     Carpenter: ["Repair & Refit"],
@@ -259,6 +263,7 @@
     ORIGINS: ORIGINS,
     GREYED: GREYED,
     AGE_BANDS: AGE_BANDS,
+    PORTRAIT_AGES: PORTRAIT_AGES,
     HOME_CITIES: HOME_CITIES,
     PROFESSIONS: PROFESSIONS,
     LOSSES: LOSSES,

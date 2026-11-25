@@ -60,6 +60,13 @@
     return null;
   }
 
+  // Which portrait shows at an age (#1): young to 23, middle to 33, older from 34.
+  function portraitBand(age) {
+    var a = Number(age) || 0, P = D().PORTRAIT_AGES;
+    for (var i = 0; i < P.length; i++) if (a <= P[i].max) return P[i];
+    return P[P.length - 1];
+  }
+
   function setById(id) { return D().PORTRAIT_SETS.filter(function (s) { return s.id === id; })[0] || null; }
 
   function portraitPath(setId, bandName, patch) {
@@ -79,7 +86,7 @@
   // twin once he has One Eye. Ages past 40 stay old.
   function captainPortrait(captain) {
     if (!captain || !captain.portrait || !captain.portrait.set) return null;
-    var b = band(captain.age) || (captain.age > 40 ? { band: "old" } : { band: "young" });
+    var b = portraitBand(captain.age);
     var patch = (captain.tags || []).indexOf("One Eye") >= 0;
     return portraitPath(captain.portrait.set, b.band, patch);
   }
@@ -91,8 +98,8 @@
 
   // Sets the captain may pick from: all eight, in his age band.
   function captainPortraitChoices(draft) {
-    var b = band(draft.age);
-    if (!b) return [];
+    if (!band(draft.age)) return [];
+    var b = portraitBand(draft.age);
     return D().PORTRAIT_SETS.map(function (s) { return { set: s.id, name: s.name, gender: s.gender, path: portraitPath(s.id, b.band, false) }; });
   }
 
@@ -423,6 +430,7 @@
     blankDraft: blankDraft,
     randomDraft: randomDraft,
     band: band,
+    portraitBand: portraitBand,
     setById: setById,
     shipName: shipName,
     portraitPath: portraitPath,

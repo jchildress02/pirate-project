@@ -169,11 +169,28 @@
   }
   function heatBand(v) { return PC.meters.heatBand(v); }
 
+  // The Standing bar (#33 of the build 0.9 pins): thicker, green to the
+  // right of a center zero and red to the left, labeled ticks at 25, 50 and
+  // 75 each way, and the number beside the band.
+  // Who's allied with whom (#36 of the build 0.9 pins), from the hunt's
+  // sides table: whose ships cost you Standing and Heat with whom.
+  function alliesBlock() {
+    var S = PC.data.hunt.SIDES, row = function (fac, name) {
+      var allies = Object.keys(S[fac]).filter(function (k) { return S[fac][k] === "ally"; });
+      return "<li><b>" + name + "</b>" + (allies.length ? " and its allies " + allies.join(" and ") : "") + ": taking their ships costs " + name + " Standing and Heat.</li>";
+    };
+    return '<div class="h4">Who\'s allied with whom</div><ul class="small" style="padding-left:1.1em;margin:4px 0 10px">' + row("Avalon", "Avalon") + row("Frisia", "Frisia") +
+      "<li><b>France and Spain</b> keep a grudge; <b>Sicily</b> sends hunters. Pirates are fair game for anyone.</li></ul>";
+  }
+
   function standingBar(f, v) {
+    v = Math.max(-100, Math.min(100, Math.round(v || 0)));
     var left = v >= 0 ? 50 : 50 + v / 2, width = Math.abs(v) / 2;
-    return '<div class="meterrow"><span>' + FACTION[f] + '</span><span class="sc">' + standingBand(v) + "</span></div>" +
-      '<div class="hbar"><i style="left:' + left + "%;width:" + width + "%;background:" + INK[f] + '"></i><i style="left:50%;width:1px;background:#4a3418"></i>' +
-      '<i style="left:60%;width:1px;background:rgba(74,52,24,.4)"></i><i style="left:70%;width:1px;background:rgba(74,52,24,.4)"></i><i style="left:45%;width:1px;background:rgba(74,52,24,.4)"></i></div>';
+    var ticks = [-75, -50, -25, 25, 50, 75].map(function (t) {
+      return '<b class="stick" style="left:' + (50 + t / 2) + '%"></b><span class="stlab" style="left:' + (50 + t / 2) + '%">' + (t > 0 ? "+" : "−") + Math.abs(t) + "</span>";
+    }).join("");
+    return '<div class="meterrow"><span>' + FACTION[f] + '</span><span class="sc">' + standingBand(v) + ' <span class="stnum">' + (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + "</span></span></div>" +
+      '<div class="stbar" title="' + esc(FACTION[f] + " Standing " + v) + '"><i class="stfill ' + (v >= 0 ? "pos" : "neg") + '" style="left:' + left + "%;width:" + width + '%"></i><b class="stzero"></b>' + ticks + "</div>";
   }
   function vbar(label, v, ink, band) {
     return '<div class="vbar"><div class="tube"><i style="height:' + Math.max(0, Math.min(100, v)) + "%;background:" + INK[ink] + '"></i></div><span>' + esc(label) + '</span><span class="sc">' + esc(band) + "</span></div>";
@@ -182,7 +199,7 @@
     var m = state.meters, n = function (x) { return withNumbers ? " · " + x : ""; };
     return '<div class="h4">Standing</div>' + ["frisia", "avalon", "pirates"].map(function (f) {
       var bar = standingBar(f, m.standing[f]);
-      return withNumbers ? bar.replace(standingBand(m.standing[f]) + "</span>", standingBand(m.standing[f]) + n(m.standing[f]) + "</span>") : bar;
+      return bar; // the number always shows now (#33)
     }).join("") +
       '<div class="h4">Dread &amp; Heat</div><div class="vbars">' +
       // Dread's bonus and floor beside its number (§11.8.5, §5.6).
@@ -870,7 +887,9 @@
     if (r.text) inner += '<div class="prose">' + prose(r.text) + "</div>";
     var list = (r.chips || []).slice();
     approvalChips(r.approval).forEach(function (c) { list.push(c); });
-    if (list.length) inner += (compact ? "" : '<div class="h4" style="max-width:680px">What came of it</div>') + chips(list);
+    // #9 of the build 0.9 pins: on a wide screen, what came of it (effects,
+    // officers' approval) sits beside the text instead of under it.
+    if (list.length) inner = '<div class="rcols"><div class="rmain">' + inner + '</div><div class="rside">' + (compact ? "" : '<div class="h4" style="max-width:680px">What came of it</div>') + chips(list) + "</div></div>";
     html += OUTCOME[r.outcome] ? rbox(r.outcome, inner, key) : '<div data-result="' + esc(key) + '">' + inner + "</div>";
     return html + (compact ? DIVIDER : "");
   }
@@ -1269,6 +1288,13 @@
     // "At the bar" sits above the patrons and officers (Playtest Pins 0.8, #21).
     html += nodeExtras("tavern");
     html += DIVIDER + '<div class="block"><div class="h4">Around the Tavern</div>' + sayFor("around");
+    // Gather Intelligence: pick what to hear about right in its result (#15 of the build 0.9 pins).
+    if (state.location.gatherPick) {
+      var gpl = state.location.gatherPick.left || 1;
+      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?' + (gpl > 1 ? " (" + gpl + " picks)" : "") + '</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
+        return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
+      }).join("") + "</div></div>";
+    }
     var list2 = [];
     if (N().oneArmedHere(state)) list2.push(opt({ act: "oneArmed", label: "Talk to the one-armed pirate", meta: "He sits with his mates, drinking." }));
     var dk = PC.drinking.canDrink(state);
@@ -1279,12 +1305,6 @@
     list2.push(opt({ act: "gather", label: "Gather Intelligence " + apText(1), ap: 1, meta: "Ask around town. Clean: two rumors, you pick both kinds. Partial: one, you pick the kind. Setback: one rumor, and people notice you asking.",
       check: gi.ok ? PC.checks.assess(state, PC.rumors.gatherCheck(state), { conditions: ["Harbor"] }) : null, lock: gi.ok ? null : gi.why }));
     html += opts(list2);
-    if (state.location.gatherPick) {
-      var gpl = state.location.gatherPick.left || 1;
-      html += '<div class="hotmenu"><p class="sc" style="margin:0 0 6px">What do you want to hear about?' + (gpl > 1 ? " (" + gpl + " picks)" : "") + '</p><div class="actions" style="margin:0">' + PC.rumors.gatherTypes(state).map(function (t) {
-        return '<button class="secondary" data-act="gatherpick" data-type="' + esc(t) + '">' + esc(t) + "</button>";
-      }).join("") + "</div></div>";
-    }
     return html + "</div>" + DIVIDER + officersBlock();
   }
 
@@ -2036,9 +2056,11 @@
   }
 
   // A weather word as a text badge (§42.10) until the art chat's icons.
+  // The weather chip; hover (tap on a phone) says what it does (#43).
   function wxBadge(word, title) {
     if (!word || !PC.weather) return "";
-    return '<span class="wx wx-' + esc(String(word).toLowerCase()) + '" title="' + esc(title || "The weather") + '">' + esc(PC.weather.badge(word)) + "</span>";
+    var fx = (PC.data.weather.EFFECTS || {})[word];
+    return '<span class="wx wx-' + esc(String(word).toLowerCase()) + '" tabindex="0" title="' + esc((title ? title + ". " : "") + (fx || "The weather")) + '"' + (fx ? ' data-wxtip="' + esc(fx) + '"' : "") + ">" + esc(PC.weather.badge(word)) + "</span>";
   }
 
   // The scouting card (§22.3): only what a lookout could see. In Fog, only
@@ -2073,14 +2095,15 @@
     if (H.phase === "encounterEnd") {
       html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
     } else if (H.phase === "empty") {
-      html += '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
+      html += foodAtSea() + '<div class="actions"><button class="primary" data-act="hnext">Keep searching</button>' + home + "</div>";
     } else if (H.phase === "scout" || H.phase === "hunter") {
       var sv = H.scout;
       html += '<p class="sc" style="margin:8px 0 4px">' + (sv.ships.length > 1 ? (sv.shape === "convoy" ? "A convoy of " + sv.ships.length : "A merchant under escort") : "A sail") + " · " + caWord(sv.ca) + "</p>";
-      html += sv.ships.map(function (s) { return scoutCard(s, H); }).join("");
+      // #9: the Quartermaster's advice sits beside the scouting card on a wide screen.
+      html += '<div class="beside"><div class="bmain">' + sv.ships.map(function (s) { return scoutCard(s, H); }).join("") + "</div>" +
+        '<div class="bside2">' + qmSays(H.advice, H) + "</div></div>";
       var war = sv.ships.some(function (s) { return s.warship; });
       if (war && sv.ca < 2 && !sv.hunter) html += '<p class="notice warn">☠ A warship at these odds will tear a ship your size apart. Let her go unless you mean it.</p>';
-      html += qmSays(H.advice, H);
       html += sv.hunter ? '<div class="actions"><button class="primary" data-act="hhunter">Face her</button></div>' :
         '<div class="actions"><button class="primary" data-act="hengage">Engage</button><button class="secondary" data-act="hnext">Let her pass</button>' + home + "</div>";
     } else if (H.phase === "vote") {
@@ -2092,7 +2115,7 @@
     } else if (H.phase === "batchEnd") {
       // Read Weather rolls itself (#38): only the next batch's weather shows.
       if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + (H.readAhead.rerolled ? ' <span class="note">(you wait out a storm)</span>' : "") + "</p>";
-      html += '<p>The horizon is empty for now.</p><div class="actions">' +
+      html += '<p>The horizon is empty for now.</p>' + foodAtSea() + '<div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
@@ -2152,6 +2175,16 @@
   }
 
   // Sail on from the hunting grounds to another live place (§22.1).
+  // #41 of the build 0.9 pins: before Keep hunting or Head home, what's
+  // aboard to eat and what another action at sea will cost.
+  function foodAtSea() {
+    var heads = PC.world.headsAtSea(state), per = Math.ceil(heads / 5 * (PC.state.seasonName(state) === "Winter" ? 1.5 : 1));
+    var food = PC.crew.food(state), left = Math.floor(food / Math.max(1, per));
+    return '<div class="foodline' + (food < per ? " short" : left <= 1 ? " low" : "") + '"><b>Provisions ' + food + "</b> aboard · each action at sea eats about <b>" + per + "</b>" +
+      (PC.state.seasonName(state) === "Winter" ? " (Winter)" : "") + " · enough for <b>" + (left === 1 ? "1 more action" : left + " more actions") + "</b>" +
+      (food < per ? " · <b>not enough for another action: the crew go hungry</b>" : "") + "</div>";
+  }
+
   function sailOnButtons() {
     var g = state.minigame;
     if (!g || g.kind !== "hunt") return "";
@@ -2301,7 +2334,7 @@
   function afterPanel(a, H) {
     var html = a.battleChips && a.battleChips.length ? '<div class="h4" style="max-width:680px">The battle</div>' + chips(a.battleChips) : "";
     if (!a.repairDone) {
-      return html + opts([opt({ act: "hrepair", label: "Repairs at sea", check: chk(a.repairCheck), meta: "Repair & Refit on the " + Math.round(a.hpLost) + " hull lost. Clean restores a quarter of it, partial a tenth." })]);
+      return html + opts([opt({ act: "hrepair", label: "Repairs at sea", check: chk(a.repairCheck), meta: (function () { var sh = PC.hunt.repairShares(state); return "Repair & Refit on the " + Math.round(a.hpLost) + " hull lost. Clean restores " + Math.round(sh.clean * 100) + "% of it, partial " + Math.round(sh.partial * 100) + "%."; })() })]);
     }
     if (a.prize) return html + prizeCard(a.prize, a);
     // The summary: every ship taken, one line a good or effect.
@@ -2335,7 +2368,9 @@
         var id = "pk-" + i;
         pickRows.push({ id: id, what: r.what });
         return "<tr><td>" + dirtyName(r.label, p.dirty && r.what !== "provisions") + (r.what === "treasure" ? ' <span class="note">(five to a slot)</span>' : "") + "</td><td>" + r.have + "</td><td>" + qstep(id, r.def, r.have, 0, true) + "</td></tr>";
-      }).join("") + "</table>";
+      }).join("") + "</table>" +
+        // #35: everything she carries in one tap (what won't fit stays in her hold, and the bar says so).
+        (rows.length > 1 ? '<div class="actions" style="margin:4px 0 6px"><button type="button" class="secondary maxbtn" data-takeall="' + rows.map(function (r, i) { return "pk-" + i; }).join(" ") + '">Take all</button></div>' : "");
       html += totalSlot(function () { return pickBar(p); }, "") + (p.dirty ? '<p class="note" style="margin:2px 0 6px">' + dirtyName("Dirty", true) + ": no letter covers her, so only a fence will buy her cargo.</p>" : "");
     } else html += '<p class="small">Nothing in her hold worth taking.</p>';
     var radio = function (name, val, label, note, lock, on) {
@@ -2344,6 +2379,11 @@
     };
     html += '<div class="h4">Her hull</div>' + p.hullOptions.map(function (o) {
       var off = o.id === "fleet" && !o.lock && o.officers.length ? ' <select class="hofficer">' + o.officers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name + " (" + x.type + ")") + "</option>"; }).join("") + "</select>" : "";
+      // #46: which prize she replaces, and what becomes of the old one.
+      if (o.id === "replace" && !o.lock) off = '<div class="swaprow small">In place of <select class="hreplace">' + o.olds.map(function (x) {
+          return '<option value="' + esc(x.id) + '"' + (x.lock ? " disabled" : "") + ">" + esc(x.name + " · crew " + x.crew + " · hold " + x.cargo + (x.over ? " · " + x.over + " would go over the side" : "") + (x.lock ? " · " + x.lock : "")) + "</option>";
+        }).join("") + '</select> · then <label><input type="radio" name="h-oldfate" value="release" checked> let her go</label> <label><input type="radio" name="h-oldfate" value="scuttle"> scuttle her</label>' +
+        (o.olds.some(function (x) { return x.over; }) ? '<p class="notice warn" style="margin:4px 0">Her hold is smaller than the one she replaces: what no longer fits goes over the side.</p>' : "") + "</div>";
       return radio("h-hull", o.id, o.label, o.addsHold && !o.lock ? "her hold adds " + o.addsHold + " · " + o.note : o.note, o.lock, o.id === "release") + off;
     }).join("");
     html += '<div class="h4">Her crew (' + p.crew + ")</div>" +
@@ -2536,8 +2576,9 @@
       "<li>In port: " + (rep.pool === 1 ? "word of fair terms; crew pools as usual." : "crew pools " + (rep.pool > 1 ? "+" : "−") + Math.abs(Math.round((rep.pool - 1) * 100)) + "% at every port.") + "</li>" +
       "<li>You can always loosen a term. Harder terms wait for the Winter split.</li></ul>" + "</div></div>";
     if (!signed_) {
-      html += (check ? opts([opt({ act: "nop", label: "Reading the Articles to the crew", check: check, meta: "A Pirate Code check at signing" })]) : "") +
-        '<div class="actions"><button class="primary" data-act="artask"' + lockAttr(shipLock(false)) + '>Sign the Articles</button><button class="secondary" data-act="artreset">Reset to Standard</button></div>';
+      // The read-out is a note on Sign the Articles, not a button of its own (#18 of the build 0.9 pins).
+      html += '<div class="actions"><button class="primary" data-act="artask"' + lockAttr(shipLock(false)) + '>Sign the Articles</button><button class="secondary" data-act="artreset">Reset to Standard</button></div>' +
+        (check ? '<p class="note" style="margin:6px 0 0">A check follows: reading the Articles to the crew, Pirate Code (' + tierWord(check.tier) + ").</p>" : "");
     }
     return html;
   }
@@ -2867,7 +2908,7 @@
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", esc(foodWords()) + " · " + esc(seaTime(PC.crew.food(state)))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
-      meters(true) + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+      meters(true) + alliesBlock() + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -3104,7 +3145,9 @@
       var cargo = pickRows.length ? { treasure: 0, goods: {}, provisions: 0 } : null;
       pickRows.forEach(function (r) { var n = val(r.id); if (r.what === "treasure") cargo.treasure = n; else if (r.what === "provisions") cargo.provisions = n; else cargo.goods[r.what] = n; });
       markLog();
-      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null, cargo: cargo });
+      var rp = document.querySelector(".hreplace");
+      PC.hunt.settlePrize(state, state.minigame, { hull: pick("h-hull", "release"), crew: pick("h-crew", "release"), captives: pick("h-cap", "free"), officer: off ? off.value : null, cargo: cargo,
+        replace: rp ? rp.value : null, oldFate: pick("h-oldfate", "release") });
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
@@ -3605,7 +3648,7 @@
   function previewCard() {
     var C = PC.creator;
     var b = C.band(draft.age);
-    var pic = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, b.band, false) : null;
+    var pic = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, C.portraitBand(draft.age).band, false) : null;
     var name = (String(draft.first || "") + " " + String(draft.last || "")).trim() || "Your captain";
     var bits = [];
     if (b) bits.push("Age " + draft.age);
@@ -3709,7 +3752,7 @@
     html += '<h3>Ash-Born</h3><p class="note">' + esc(Dc.ORIGINS[0].text) + "</p>" +
       '<div class="cards">' + Dc.HOME_CITIES.map(function (c) { return card("pick", "homeCity", c.id, c.id, null, { extra: '<span class="small"><i>' + esc(c.burned) + "</i> " + esc(c.effect) + "</span>" }); }).join("") + "</div>";
     html += '<h3>Your old trade</h3><p class="note">What you did before the fire. Pick one of its two skills for a free point of training.</p>' +
-      '<div class="cards">' + Dc.PROFESSIONS.map(function (p) {
+      '<div class="cards profgrid">' + Dc.PROFESSIONS.map(function (p) {
         var on = draft.profession === p.id;
         return '<div class="card' + (on ? " on" : "") + '"><b>' + esc(p.id) + '</b><span class="actions" style="margin-top:6px">' + p.free.map(function (t) {
           var pick = on && draft.freePoint === t;
@@ -3795,7 +3838,8 @@
       }).join("") + "</div>";
     });
     html += "<h3>Flaw</h3>" + '<div class="cards small-cards">' + Dc.FLAWS.map(function (f) {
-      return card("pick", "flaw", f.id, f.id, f.text, { blocked: C.blockedBy(draft, f.id), extra: leanLine(f.id) });
+      // Once a flaw is picked the others grey out, as the traits do (#4); tap yours again to change it.
+      return card("pick", "flaw", f.id, f.id, f.text, { blocked: C.blockedBy(draft, f.id), full: !!draft.flaw && draft.flaw !== f.id, unpick: true, extra: leanLine(f.id) });
     }).join("") + "</div>";
     return html;
   }
@@ -3876,7 +3920,7 @@
       .map(function (t) { return esc(t) + " +" + C.trainingTotal(draft, t); }).join(", ");
     var m = draft.mentor;
     var b = C.band(draft.age);
-    var cap = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, b.band, false) : null;
+    var cap = draft.portraitSet && b ? C.portraitPath(draft.portraitSet, C.portraitBand(draft.age).band, false) : null;
     var men = m.portraitSet ? C.portraitPath(m.portraitSet, "old", false) : null;
     var html = head("Review");
     if (errs.length) {
@@ -3898,8 +3942,8 @@
       sec("Tags", "tags", "<p>Ash-Born" + (loss ? ", " + esc(loss.tag) : "") + (draft.tags.length ? ", " + esc(draft.tags.join(", ")) : "") +
         (draft.debuffs.length ? '<br><span class="note">Old ailments:</span> ' + esc(draft.debuffs.join(", ")) : "") + "</p>") +
       sec("Your mentor", "mentor", "<p>" + esc((String(m.first) + " " + String(m.last)).trim() || "?") + (m.type ? ", " + esc(m.type) : "") +
-        (m.voice ? "<br>" + esc(m.voice) + (m.secondary ? ", " + esc(m.secondary) : "") + ", Mentor" : "") + "</p>") +
-      sec("Your ship", "ship", "<p><i>" + esc(PC.creator.shipName(draft.shipName) || "?") + "</i>, a battered sloop</p>") +
+        (m.voice ? "<br>" + esc(m.voice) + (m.secondary ? ", " + esc(m.secondary) : "") : "") + "</p>") +
+      sec("Your ship", "ship", "<p>" + (PC.creator.shipName(draft.shipName) ? "The <i>" + esc(PC.creator.shipName(draft.shipName)) + "</i>" : "?") + ", a battered sloop</p>") +
       '<p style="max-width:680px;margin-top:14px">You start with <b>' + gold(600 + (city && city.gold ? city.gold : 0)) + " gold in the ship's chest</b> (the crew's, until it's split) and <b>nothing in your own purse</b>, plus 10 lots of provisions, " + esc(PC.data.creator.START.startKit) + ". <b>No one knows your name yet.</b></p>" +
       '<div class="actions"><button class="primary big" data-act="begin"' + (errs.length ? " disabled" : "") + ">Set sail</button></div>";
     return html;
@@ -4125,11 +4169,14 @@
       var r = PC.scenes.viewScene(state).result;
       // A beat's "carry on" with nothing to show goes straight through.
       if (r && r.outcome === "result" && !r.text && !r.chips.length) { PC.scenes.commit(state); return; }
-      // A check result that leads to a choice shows the choices on the same
-      // screen (the M3 review: Davey's tab, Twopenny's pay-or-shove).
-      if (r && r.outcome !== "result" && !r.reroll && !r.needsPot) {
+      // A result that leads to more choices shows them on the same screen,
+      // with no Continue in between (the M3 review: Davey's tab, Twopenny's
+      // pay-or-shove; #12 of the build 0.9 pins: plain answers too, like
+      // Twopenny's "my business does not concern you"). A result that ends
+      // the scene keeps its Continue, so it can be read.
+      if (r && !r.reroll && !r.needsPot) {
         var ex = PC.scenes.peekExit(state);
-        if (ex && ex.to && ex.to !== "hub") {
+        if (ex && ex.to && PC.data.scenes[ex.to] && !ex.leaves) {
           var lead = { label: r.choiceLabel, outcome: r.outcome, roll: r.roll, strikeFirst: r.strikeFirst, text: ex.carry || ex.same ? null : r.text, chips: r.chips, approval: r.approval };
           PC.scenes.commit(state);
           if (state.current.screen === "scene") state.current.lead = lead;
@@ -4320,6 +4367,17 @@
         el.addEventListener("mouseleave", off); el.addEventListener("blur", off);
       });
     }
+    // Take all on a prize's cargo (#35): every stepper to its top.
+    root.querySelectorAll("[data-takeall]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.dataset.takeall.split(" ").forEach(function (id) { var box = document.getElementById(id); if (box) box.value = box.max; });
+        refreshTotals();
+      });
+    });
+    // The weather chip's effects: hover on desktop, tap on a phone (#43).
+    root.querySelectorAll("[data-wxtip]").forEach(function (w) {
+      w.addEventListener("click", function (ev) { ev.stopPropagation(); toast(w.dataset.wxtip); });
+    });
     // A skill's Player line: hover on desktop, tap on a phone (§12.6).
     root.querySelectorAll(".skilltip").forEach(function (t) {
       t.addEventListener("click", function () { var l = t.parentNode.querySelector(".tipline"); if (l) l.hidden = !l.hidden; });

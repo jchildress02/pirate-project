@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 12;
+  var SAVE_VERSION = 13;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -264,6 +264,13 @@
       data.provisions = (data.provisions || 0) + (data.hardtack || 0);
       delete data.hardtack;
       data.saveVersion = 12;
+    }
+    if (data.saveVersion === 12) {
+      // The build 0.9 playtest (#5): the Cook is the Surgeon now.
+      (data.officers || []).forEach(function (o) { if (o.type === "Cook") o.type = "Surgeon"; });
+      (data.captain && data.captain.mentor && data.captain.mentor.type === "Cook") && (data.captain.mentor.type = "Surgeon");
+      Object.keys(data.generated || {}).forEach(function (k) { var g = data.generated[k]; if (g && g.type === "Cook") g.type = "Surgeon"; });
+      data.saveVersion = 13;
     }
     return data;
   }

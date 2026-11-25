@@ -90,7 +90,7 @@
     game.nextCondition = null; game.readAhead = null;
     game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force, condition: cond };
     game.force = null;
-    M().say(state, game, "The weather: " + PC.weather.badge(cond) + ".");
+    // #42 of the build 0.9 pins: no "The weather: …" line; the batch's weather chip says it.
     if (cond === "Storm") stormBatch(state, game);
     // A vacant Quartermaster's post is filled at the next voyage event
     // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
@@ -192,9 +192,13 @@
       // A navy ship at Heat 50+, or a pirate at black -70, may attack first (§28.1, §28.4).
       var first = PC.meters.attacksFirst(state, grp, r);
       if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); }
-      else M().say(state, game, grp.hunter ? L().hunter : L().sail);
+      else if (grp.hunter) M().say(state, game, L().hunter); // no "Sail ho!" line (#42): the card shows her
     }
-    else { game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]); }
+    else {
+      game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]);
+      // #49: an empty horizon on the batch's last roll goes straight to Keep hunting / Head home.
+      if (b.next >= b.n) { game.phase = "batchEnd"; if (canReadAhead(state, game)) readAhead(state, game); }
+    }
   }
 
   function next(state, game) {
@@ -317,9 +321,12 @@
     state.fleet = fleet(state).filter(function (f) { return !f.out; });
   }
 
-  // Repair & Refit after the battle (§21.15): a Carpenter aboard gives +1.
+  // Repair & Refit after the battle (§21.15): a Carpenter aboard gives +1,
+  // and a bigger share of the hull back (#45).
+  function hasCarpenter(state) { return (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Carpenter"; }); }
+  function repairShares(state) { return hasCarpenter(state) ? H().REPAIR_AT_SEA_CARPENTER : H().REPAIR_AT_SEA; }
   function repairCheck(state) {
-    var carp = (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Carpenter"; });
+    var carp = hasCarpenter(state);
     return { type: "Repair & Refit", dr: 2, extra: carp ? [{ label: "Carpenter", value: 1 }] : [] };
   }
 
@@ -333,7 +340,7 @@
   function settleRepair(state, game, p) {
     var a = game.after;
     a.repairDone = true;
-    var share = H().REPAIR_AT_SEA[p.outcome] || 0;
+    var share = (hasCarpenter(state) ? H().REPAIR_AT_SEA_CARPENTER : H().REPAIR_AT_SEA)[p.outcome] || 0;
     var hp = share ? Math.max(1, Math.round(a.hpLost * share)) : 0;
     if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
@@ -343,14 +350,14 @@
     if (game.lastRoll) game.lastRoll.chips = [chip];
   }
 
-  // Treat Wounds (§21.15): a Cook aboard rolls on a Wounded captain. Clean
+  // Treat Wounds (§21.15): a Surgeon aboard (the Cook until the build 0.9 playtest, #5) rolls on a Wounded captain. Clean
   // clears it; partial eases it until port (DEFAULT: it stays, no edge).
-  // DEFAULT: the Cook rolls at edge +1 (a level 1 officer's reading).
+  // DEFAULT: the Surgeon rolls at edge +1 (a level 1 officer's reading).
   function treat(state, game) {
     var a = game.after;
     a.treatDone = true;
     if ((state.captain.tags || []).indexOf("Wounded") < 0) return;
-    var cook = (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Cook"; });
+    var cook = (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Surgeon"; });
     if (!cook) return;
     var dice = PC.rng.roll2d6(M().key(state, game, "treat"));
     var out = PC.checks.readTotal(dice[0] + dice[1] + 1 - 2);
@@ -406,6 +413,19 @@
     out.push({ id: "fleet", label: "Make her a fleet ship", note: "An officer captains her and she fights beside you.", lock: lockFleet, officers: freeOfficers.map(function (o) { return { id: o.id, name: o.first + " " + (o.last || ""), type: o.type }; }) });
     var lockFlag = e.hull <= 0 ? "She's sinking" : state.crew.count < e.crewMin + (state.ship.crewMin || 5) ? "Not enough hands to crew both" : null;
     out.push({ id: "flagship", label: "Make her your new flagship", note: "Your " + state.ship.type + " becomes a prize ship.", lock: lockFlag });
+    // #46 of the build 0.9 pins: swap one of your prize ships for this better capture.
+    var olds = fleet(state).filter(function (f) { return f.kind === "prize" && !f.out; });
+    if (olds.length) {
+      var lockSwap = e.hull <= 0 ? "She's sinking" : null;
+      var choices = olds.map(function (f) {
+        var short = Math.max(0, e.crewMin - (f.crew || 0));
+        var cap0 = PC.crew.holdCapacity(state), over = Math.max(0, PC.crew.slotsUsed(state) - (cap0 - (f.cargo || 0) + (e.cargo || 0)));
+        return { id: f.id, name: (f.name ? f.name + " (" + f.cls + ")" : f.cls), crew: f.crew || 0, cargo: f.cargo || 0, short: short, over: over,
+          lock: short > spare ? "Not enough hands: she needs " + e.crewMin + ", the " + (f.name || f.cls) + " has " + (f.crew || 0) : null };
+      });
+      if (!lockSwap && choices.every(function (c) { return c.lock; })) lockSwap = choices[0].lock;
+      out.push({ id: "replace", label: "Replace a prize ship", note: "Her prize crew move across to this one, and her cargo joins the hold. Then you let the old prize go, or scuttle her.", lock: lockSwap, olds: choices });
+    }
     out.push({ id: "release", label: "Take what you can and let her go", note: "Her surviving crew sail her home." });
     out.push({ id: "scuttle", label: "Scuttle her", note: "Denies her to her owners. No value." });
     return out;
@@ -458,7 +478,12 @@
     meterChips(state, e, crewChoice === "execute").forEach(function (c) { chips.push(c); });
     // The hull.
     var shipRec = null;
-    if (ch.hull === "prize" || ch.hull === "fleet") {
+    if (ch.hull === "replace") {
+      var sw = replacePrize(state, e, ch.replace, ch.oldFate);
+      shipRec = sw.rec;
+      chips.push({ icon: "ship", text: "Prize ship: " + (e.name || e.cls) + " in place of the " + sw.oldName + (sw.oldFate === "scuttle" ? " (scuttled)" : " (let go)") });
+      if (sw.thrown.length) chips.push({ icon: "cond", text: "Over the side, for want of room: " + sw.thrown.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions" : x.what); }).join(", "), ink: "bad" });
+    } else if (ch.hull === "prize" || ch.hull === "fleet") {
       shipRec = toFleet(state, e, ch.hull, ch.officer);
       chips.push({ icon: "ship", text: (ch.hull === "prize" ? "Prize ship: " : "Fleet ship: ") + (e.name || e.cls) });
     } else if (ch.hull === "flagship") {
@@ -600,6 +625,35 @@
     }
     fleet(state).push(rec);
     return rec;
+  }
+
+  // Replace a prize ship with this capture (#46): the old prize's crew move
+  // across (topped up from the flagship if she needs more, the extra back to
+  // the flagship's berths), her cargo stays in the pooled hold (what no
+  // longer fits goes over the side), and the old prize is let go or scuttled.
+  function replacePrize(state, e, oldId, oldFate) {
+    var old = fleet(state).filter(function (f) { return f.id === oldId && f.kind === "prize"; })[0];
+    if (!old) throw new Error("Pick the prize ship she replaces.");
+    var tiers = {}, n = 0;
+    Object.keys(old.crewTiers || { Green: old.crew }).forEach(function (t) { var k = (old.crewTiers || { Green: old.crew })[t] || 0; if (k) { tiers[t] = k; n += k; } });
+    state.fleet = fleet(state).filter(function (f) { return f !== old; });
+    if (n < e.crewMin) {
+      var more = takeHands(state, e.crewMin - n);
+      Object.keys(more).forEach(function (t) { tiers[t] = (tiers[t] || 0) + more[t]; n += more[t]; });
+    }
+    var extra = Math.max(0, n - (e.crewMax || n));
+    PC.data.economy.TIER_ORDER.slice().reverse().forEach(function (t) {
+      if (!extra || !tiers[t]) return;
+      var k = Math.min(extra, tiers[t], PC.crew.berths(state));
+      if (k) { tiers[t] -= k; n -= k; extra -= k; PC.crew.addHands(state, t, k); }
+    });
+    var rec = { id: e.id, kind: "prize", cls: e.cls, name: e.name, flag: e.flag, role: e.role, size: e.size, hull: Math.max(1, e.hull), hullMax: e.hullMax,
+      guns: e.guns, gunsMax: e.gunsMax, crew: n, crewMin: e.crewMin, crewMax: e.crewMax, cargo: e.cargo, speed: e.speed,
+      handling: e.handling, rating: 3, dirty: !PC.letters.legitimate(state, e.flag), crewTiers: tiers, wounded: 0 };
+    fleet(state).push(rec);
+    var thrown = PC.crew.jettisonOverflow(state);
+    PC.state.addLog(state, (oldFate === "scuttle" ? "Scuttled" : "Let go") + " the prize " + (old.name || old.cls) + " for the " + (e.name || e.cls) + ".");
+    return { rec: rec, oldName: old.name || old.cls, oldFate: oldFate === "scuttle" ? "scuttle" : "release", thrown: thrown };
   }
 
   // Make a captured ship the flagship (0 AP, §22.7). The old flagship
@@ -774,8 +828,11 @@
     return " Betrayal: you stand high with " + (f === "avalon" ? "Avalon" : "Frisia") + ", so taking her costs +" + PC.data.meterRules.BETRAYAL_HEAT + " Heat on top, and doubles your Heat gains with them for a year.";
   }
   function meterNote(s, state) {
-    if (s.flag === "Avalon" || s.flag === "Burgundy" || s.flag === "Sweden") return "taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
-    if (s.flag === "Frisia" || s.flag === "Ireland") return "taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
+    // #36 of the build 0.9 pins: an ally's ship names the alliance.
+    if (s.flag === "Burgundy" || s.flag === "Sweden") return s.flag + " is Avalon's ally: taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
+    if (s.flag === "Ireland") return "Ireland is Frisia's ally: taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
+    if (s.flag === "Avalon") return "taking her costs Avalon Standing and Heat." + betrayalNote(state, "avalon");
+    if (s.flag === "Frisia") return "taking her costs Frisian Standing and Heat." + betrayalNote(state, "frisia");
     if (s.flag === "France" || s.flag === "Spain") return "France will remember it.";
     if (s.flag === "Sicily") return "Sicily will send hunters after you.";
     return "nobody here will mind.";
@@ -833,6 +890,7 @@
       volunteers: cur.volunteers, volTier: cur.volTier, execute: canExecute(state, e), hullOptions: hullOptions(state, game).map(function (o) {
         // Keeping her hull adds her hold to the pool before her cargo comes across (A7).
         o.addsHold = o.lock ? 0 : (o.id === "prize" || o.id === "fleet" || o.id === "flagship") ? (e.cargo || 0) : 0;
+        if (o.id === "replace" && !o.lock && o.olds && o.olds[0]) o.addsHold = (e.cargo || 0) - o.olds[0].cargo; // with the first old prize picked
         return o;
       }),
       dirty: !PC.letters.legitimate(state, e.flag),
@@ -900,7 +958,6 @@
       prizesTaken: 0, prizeMorale: 0, captives: 0, force: null, home: o.home, encounter: o.voyage, condition: o.condition,
     };
     M().start(state, game, "node");
-    M().say(state, game, "The weather: " + PC.weather.badge(o.condition) + ".");
     var first = PC.meters.attacksFirst(state, grp, M().rand(state, game, "attack-first"));
     if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); return game; }
     if (!grp.hunter && grp.ships[0].flag === "Pirate") {
@@ -933,7 +990,7 @@
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     takeHands: takeHands, doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
-    canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
+    canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck, repairShares: repairShares,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
     afterLeg: afterLeg, provisionsLine: provisionsLine, startEncounter: startEncounter, promoteFleetShip: promoteFleetShip,

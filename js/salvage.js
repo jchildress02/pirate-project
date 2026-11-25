@@ -201,7 +201,8 @@
     game.haul.push(it);
     if (it.tier === "quest") game.questFound = true; // its beat comes before the grab line (settle)
     else if (it.tier !== "junk") M().say(state, game, "You come up with " + describe(it) + ".");
-    // Junk prints on surfacing: "You surface with [line]." (S17 appendix §8).
+    // Junk is named as it's grabbed (#14 of the build 0.9 pins), not on surfacing.
+    else M().say(state, game, D().lines.junkGrab.replace("{junk}", it.line));
   }
 
   function settle(state, game, p) {
@@ -327,7 +328,6 @@
       M().say(state, game, D().lines.surface);
     }
     game.kept = kept;
-    kept.filter(function (i) { return i.tier === "junk"; }).forEach(function (i) { M().say(state, game, D().lines.junkPrefix + i.line + "."); });
     var valuable = kept.filter(function (i) { return i.tier === "treasure" || i.tier === "item" || i.tier === "goods"; }).length;
     // No "you spot something valuable" after surfacing: the haul is already
     // found (Playtest Pins 0.8, #9). Only a poor haul gets a line.
