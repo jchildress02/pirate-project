@@ -229,7 +229,10 @@
       var nv = clamp(h - b, 0, 100);
       if (nv === h) return;
       state.meters.heat[f] = nv;
-      chips.push({ icon: "heat", text: NAME[f] + " Heat −" + (h - nv) + (rec.offense[f] ? " (a season with an offense)" : ""), ink: "good" });
+      // #53 of the build 0.9 pins: say why the cooling is slow, and what a quiet season would have done.
+      var quiet = null;
+      if (rec.offense[f]) { var s0 = state.meters.standing[f] || 0, row = s0 >= 40 ? R().BLEED.high : s0 <= -40 ? R().BLEED.low : R().BLEED.mid; quiet = row.clean + (f === "frisia" && state.world && state.world.posture === "Distracted" ? R().DISTRACTED_EXTRA : 0); }
+      chips.push({ icon: "heat", text: NAME[f] + " Heat cools −" + (h - nv) + (rec.offense[f] ? " (slowed: you took " + NAME[f] + " prizes this season; −" + quiet + " in a quiet season)" : ""), ink: "good" });
       if (heatBand(nv) !== band0) lines.push(R().lines.heatBand.replace("{faction}", NAME[f]).replace("{band}", heatBand(nv)));
     });
     ["avalon", "frisia", "pirates"].forEach(function (f) {

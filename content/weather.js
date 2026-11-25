@@ -31,6 +31,16 @@
     WINTER_SALVAGE: { quantity: 1.25, goodFind: 5 }, // §42.8
 
     // Text badges until the art chat's icons (§42.10).
+    // #43 of the build 0.9 pins: what each weather word does, shown on hover (tap on a phone).
+    EFFECTS: {
+      Fair: "Fair outlook: mostly fair or calm days; no hurricane this season.",
+      Unsettled: "Unsettled outlook: rough water, fog and the odd storm; a small chance of a hurricane.",
+      Foul: "Foul outlook: storms and rough seas are common; a real chance of a hurricane. Make port before it hits.",
+      Calm: "Calm: every ship's Speed counts as 1, except those with sweeps (cutters, sloops, royal sloops, schooners). Fewer ships about.",
+      Rough: "Rough: the smaller ship takes −1 on the Exchange; grappling −1; boarders coming at you −1. Fewer ships about.",
+      Fog: "Fog: you see only her class until the battle opens; no flee roll before the battle; the faster ship +1 to Position; breaking off +1. Fewer ships about.",
+      Storm: "Storm: a Ride Out Storm check before the batch (hull and morale at risk); −2 on the Exchange for both sides; firearms −1; running away means riding out the storm. Far fewer ships about.",
+    },
     BADGE: { Fair: "☀ Fair", Unsettled: "☁ Unsettled", Foul: "⛈ Foul", Calm: "≈ Calm", Rough: "〰 Rough", Fog: "▒ Fog", Storm: "⛈ Storm" },
 
     lines: {

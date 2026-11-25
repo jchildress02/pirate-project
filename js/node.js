@@ -1142,8 +1142,8 @@
     else if (L.arrive && !firstScene) lines.push(L.arrive);
     var c = state.crew;
     if (c.wounded > 0) {
-      var cook = (state.officers || []).some(function (o) { return !o.gone && o.type === "Cook" && o.aboard === "flagship"; });
-      var rate = cook ? 0.45 : 0.30;
+      var surgeon = (state.officers || []).some(function (o) { return !o.gone && o.type === "Surgeon" && o.aboard === "flagship"; });
+      var rate = surgeon ? 0.45 : 0.30;
       var r = PC.rng.fromKey([state.world.seed, PC.state.stamp(state), id, "arrival", state.rolls.arrival = (state.rolls.arrival || 0) + 1].join("|"));
       var back = 0;
       for (var i = 0; i < c.wounded; i++) if (r() < rate) back++;

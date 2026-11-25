@@ -3274,7 +3274,7 @@ test("fear deeds in battle and the season turn: Make an Example's clean is a fea
   var s = atNorfolk("mt8");
   s.meters.heat.avalon = 30;
   var out = PC.world.endSeason(s);
-  ok(out.chips.some(function (c) { return /Avalon Heat −5/.test(c.text); }), "bleed in the popup");
+  ok(out.chips.some(function (c) { return /Avalon Heat cools −5/.test(c.text); }), "bleed in the popup");
 });
 
 // ---- Milestone 8, PR 3: inspections and laying up (§28.5, §22.7) ----

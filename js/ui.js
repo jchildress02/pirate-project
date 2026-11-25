@@ -2036,9 +2036,11 @@
   }
 
   // A weather word as a text badge (§42.10) until the art chat's icons.
+  // The weather chip; hover (tap on a phone) says what it does (#43).
   function wxBadge(word, title) {
     if (!word || !PC.weather) return "";
-    return '<span class="wx wx-' + esc(String(word).toLowerCase()) + '" title="' + esc(title || "The weather") + '">' + esc(PC.weather.badge(word)) + "</span>";
+    var fx = (PC.data.weather.EFFECTS || {})[word];
+    return '<span class="wx wx-' + esc(String(word).toLowerCase()) + '" tabindex="0" title="' + esc((title ? title + ". " : "") + (fx || "The weather")) + '"' + (fx ? ' data-wxtip="' + esc(fx) + '"' : "") + ">" + esc(PC.weather.badge(word)) + "</span>";
   }
 
   // The scouting card (§22.3): only what a lookout could see. In Fog, only
@@ -2301,7 +2303,7 @@
   function afterPanel(a, H) {
     var html = a.battleChips && a.battleChips.length ? '<div class="h4" style="max-width:680px">The battle</div>' + chips(a.battleChips) : "";
     if (!a.repairDone) {
-      return html + opts([opt({ act: "hrepair", label: "Repairs at sea", check: chk(a.repairCheck), meta: "Repair & Refit on the " + Math.round(a.hpLost) + " hull lost. Clean restores a quarter of it, partial a tenth." })]);
+      return html + opts([opt({ act: "hrepair", label: "Repairs at sea", check: chk(a.repairCheck), meta: (function () { var sh = PC.hunt.repairShares(state); return "Repair & Refit on the " + Math.round(a.hpLost) + " hull lost. Clean restores " + Math.round(sh.clean * 100) + "% of it, partial " + Math.round(sh.partial * 100) + "%."; })() })]);
     }
     if (a.prize) return html + prizeCard(a.prize, a);
     // The summary: every ship taken, one line a good or effect.
@@ -4320,6 +4322,10 @@
         el.addEventListener("mouseleave", off); el.addEventListener("blur", off);
       });
     }
+    // The weather chip's effects: hover on desktop, tap on a phone (#43).
+    root.querySelectorAll("[data-wxtip]").forEach(function (w) {
+      w.addEventListener("click", function (ev) { ev.stopPropagation(); toast(w.dataset.wxtip); });
+    });
     // A skill's Player line: hover on desktop, tap on a phone (§12.6).
     root.querySelectorAll(".skilltip").forEach(function (t) {
       t.addEventListener("click", function () { var l = t.parentNode.querySelector(".tipline"); if (l) l.hidden = !l.hidden; });

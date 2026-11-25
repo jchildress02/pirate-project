@@ -90,7 +90,7 @@
     game.nextCondition = null; game.readAhead = null;
     game.batch = { n: H().ROLLS_PER_BATCH, next: 0, hunter: hunter, found: 0, force: force, condition: cond };
     game.force = null;
-    M().say(state, game, "The weather: " + PC.weather.badge(cond) + ".");
+    // #42 of the build 0.9 pins: no "The weather: …" line; the batch's weather chip says it.
     if (cond === "Storm") stormBatch(state, game);
     // A vacant Quartermaster's post is filled at the next voyage event
     // (§25.9): in the prototype, the next action at sea (DEFAULT). An older
@@ -192,9 +192,13 @@
       // A navy ship at Heat 50+, or a pirate at black -70, may attack first (§28.1, §28.4).
       var first = PC.meters.attacksFirst(state, grp, r);
       if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); }
-      else M().say(state, game, grp.hunter ? L().hunter : L().sail);
+      else if (grp.hunter) M().say(state, game, L().hunter); // no "Sail ho!" line (#42): the card shows her
     }
-    else { game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]); }
+    else {
+      game.sighting = null; game.phase = "empty"; M().say(state, game, L().empty[Math.floor(r() * L().empty.length)]);
+      // #49: an empty horizon on the batch's last roll goes straight to Keep hunting / Head home.
+      if (b.next >= b.n) { game.phase = "batchEnd"; if (canReadAhead(state, game)) readAhead(state, game); }
+    }
   }
 
   function next(state, game) {
@@ -317,9 +321,12 @@
     state.fleet = fleet(state).filter(function (f) { return !f.out; });
   }
 
-  // Repair & Refit after the battle (§21.15): a Carpenter aboard gives +1.
+  // Repair & Refit after the battle (§21.15): a Carpenter aboard gives +1,
+  // and a bigger share of the hull back (#45).
+  function hasCarpenter(state) { return (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Carpenter"; }); }
+  function repairShares(state) { return hasCarpenter(state) ? H().REPAIR_AT_SEA_CARPENTER : H().REPAIR_AT_SEA; }
   function repairCheck(state) {
-    var carp = (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Carpenter"; });
+    var carp = hasCarpenter(state);
     return { type: "Repair & Refit", dr: 2, extra: carp ? [{ label: "Carpenter", value: 1 }] : [] };
   }
 
@@ -333,7 +340,7 @@
   function settleRepair(state, game, p) {
     var a = game.after;
     a.repairDone = true;
-    var share = H().REPAIR_AT_SEA[p.outcome] || 0;
+    var share = (hasCarpenter(state) ? H().REPAIR_AT_SEA_CARPENTER : H().REPAIR_AT_SEA)[p.outcome] || 0;
     var hp = share ? Math.max(1, Math.round(a.hpLost * share)) : 0;
     if (hp) state.ship.hull = Math.min(state.ship.hullMax, state.ship.hull + hp);
     M().say(state, game, L().repair[p.outcome] + (hp ? " (+" + hp + " hull)" : ""));
@@ -343,14 +350,14 @@
     if (game.lastRoll) game.lastRoll.chips = [chip];
   }
 
-  // Treat Wounds (§21.15): a Cook aboard rolls on a Wounded captain. Clean
+  // Treat Wounds (§21.15): a Surgeon aboard (the Cook until the build 0.9 playtest, #5) rolls on a Wounded captain. Clean
   // clears it; partial eases it until port (DEFAULT: it stays, no edge).
-  // DEFAULT: the Cook rolls at edge +1 (a level 1 officer's reading).
+  // DEFAULT: the Surgeon rolls at edge +1 (a level 1 officer's reading).
   function treat(state, game) {
     var a = game.after;
     a.treatDone = true;
     if ((state.captain.tags || []).indexOf("Wounded") < 0) return;
-    var cook = (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Cook"; });
+    var cook = (state.officers || []).some(function (o) { return !o.gone && (o.aboard || "flagship") === "flagship" && o.type === "Surgeon"; });
     if (!cook) return;
     var dice = PC.rng.roll2d6(M().key(state, game, "treat"));
     var out = PC.checks.readTotal(dice[0] + dice[1] + 1 - 2);
@@ -900,7 +907,6 @@
       prizesTaken: 0, prizeMorale: 0, captives: 0, force: null, home: o.home, encounter: o.voyage, condition: o.condition,
     };
     M().start(state, game, "node");
-    M().say(state, game, "The weather: " + PC.weather.badge(o.condition) + ".");
     var first = PC.meters.attacksFirst(state, grp, M().rand(state, game, "attack-first"));
     if (first) { game.phase = "hunter"; game.attackFirst = first; M().say(state, game, PC.data.meterRules.lines[first === "navy" ? "navyAttacks" : "pirateAttacks"]); return game; }
     if (!grp.hunter && grp.ships[0].flag === "Pirate") {
@@ -933,7 +939,7 @@
   PC.hunt = {
     canHunt: canHunt, start: start, battle: battle, next: next, engage: engage, meetHunter: meetHunter, vote: vote, voteReact: voteReact, VOTE_REACT: VOTE_REACT,
     takeHands: takeHands, doRepair: doRepair, settlePrize: settlePrize, carryOn: carryOn, anotherBatch: anotherBatch, sailHome: sailHome, sailOnOptions: sailOnOptions, sailOn: sailOn,
-    canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck,
+    canReadAhead: canReadAhead, readAhead: readAhead, stormCheck: stormCheck, repairShares: repairShares,
     hullOptions: hullOptions, fleetCap: fleetCap, devFleetShip: devFleetShip, checkBattleOver: checkBattleOver,
     loadCargo: loadCargo, loadPicked: loadPicked, currentPrize: currentPrize, mergeChips: mergeChips,
     afterLeg: afterLeg, provisionsLine: provisionsLine, startEncounter: startEncounter, promoteFleetShip: promoteFleetShip,

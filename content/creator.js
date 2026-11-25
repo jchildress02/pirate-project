@@ -181,7 +181,7 @@
   var OFFICER_TYPES = [
     { id: "Gunner", perk: "+1 Gunnery", lessons: "the Exchange; Marksmanship" },
     { id: "Raider", perk: "+1 to boarding clashes", lessons: "boarding clashes; Lead the Charge" },
-    { id: "Cook", perk: "Ship's surgeon: Treat Wounds after battle; crew recovery 45%", lessons: "Treat Wounds; Immune System" },
+    { id: "Surgeon", perk: "Treat Wounds after battle; crew recovery 45%", lessons: "Treat Wounds; Immune System" },
     { id: "Cooper", perk: "Provisions burn -15%", lessons: "Ration Stores; Go Without; Haggle" },
     { id: "Navigator", perk: "+1 Position and +1 Outrun", lessons: "Position; Outrun; Navigate" },
     { id: "Carpenter", perk: "+1 Repair & Refit after battle; better repairs", lessons: "Repair & Refit" },
@@ -193,7 +193,7 @@
   var MENTOR_LESSONS = {
     Gunner: ["Marksmanship"],
     Raider: [],
-    Cook: ["Treat Wounds", "Immune System"],
+    Surgeon: ["Treat Wounds", "Immune System"],
     Cooper: ["Ration Stores", "Go Without", "Haggle"],
     Navigator: ["Maneuver", "Outrun", "Navigate"],
     Carpenter: ["Repair & Refit"],

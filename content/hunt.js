@@ -202,7 +202,9 @@
     // battle, at most 3; one more step at half the crew lost.
     SHAKEN_CAP: 3, SHAKEN_STRIKE_PCT: 0.10,
     LEADERLESS: 2,
-    REPAIR_AT_SEA: { clean: 0.25, partial: 0.10 },
+    // #45 of the build 0.9 pins: repairs at sea were too weak. With a Carpenter aboard, the higher shares.
+    REPAIR_AT_SEA: { clean: 0.40, partial: 0.20 },
+    REPAIR_AT_SEA_CARPENTER: { clean: 0.50, partial: 0.25 },
     VOLUNTEERS: { Trade: [3, "Green"], Hybrid: [4, "Able"], Pirate: [6, "Seasoned"] },
     PRIZE_MORALE: { small: 5, big: 10, cap: 10 },
     FLEE_MORALE: -15,
@@ -278,7 +280,7 @@
     lost: "PLACEHOLDER: Your flagship is taken.",
     sinking: "PLACEHOLDER: Your flagship is going down.",
     repair: { clean: "PLACEHOLDER: The crew patches her up well.", partial: "PLACEHOLDER: You stop the worst of the leaks.", setback: "PLACEHOLDER: The patches won't hold. She'll need a yard." },
-    treat: { clean: "PLACEHOLDER: The cook stitches you up properly. You'll live.", partial: "PLACEHOLDER: The cook does what he can. It'll hold until port.", setback: "PLACEHOLDER: The cook shakes his head. You'll need a real surgeon." },
+    treat: { clean: "PLACEHOLDER: The surgeon stitches you up properly. You'll live.", partial: "PLACEHOLDER: The surgeon does what he can. It'll hold until port.", setback: "PLACEHOLDER: The surgeon shakes his head. The wound will have to heal on its own." }, // #5: the author rewords these
     backgroundYou: "PLACEHOLDER: Your {ship} rakes the {enemy}.",
     backgroundBoth: "PLACEHOLDER: Your {ship} and the {enemy} trade broadsides.",
     backgroundThem: "PLACEHOLDER: The {enemy} hammers your {ship}.",
