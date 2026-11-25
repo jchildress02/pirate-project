@@ -6,7 +6,7 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
   "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js",
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -3793,7 +3793,7 @@ test("the trial: Petition DR 3 Imprisoned; clean frees him with a fine and a Sta
   PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
   PC.prison.interrogate(s, "resist"); PC.prison.wait(s); PC.prison.wait(s); PC.prison.wait(s);
   eq(s.jail.stage, "trial"); eq(PC.prison.trialCheck(s).dr, 3); eq(PC.prison.trialCheck(s).extra.length, 0);
-  PC.npcs.get(s, "horace"); s.npcs.horace.rung = PC.npcs.RUNG_VALUE.Friend;
+  s.npcs.horace = s.npcs.horace || {}; s.npcs.horace.rung = PC.npcs.RUNG_VALUE.Friend;
   eq(PC.prison.trialCheck(s).extra[0].value, 1);
   var st = s.meters.standing.avalon;
   withDice([6, 6], function () { PC.prison.trial(s); });
@@ -3828,7 +3828,7 @@ test("the outside: a ship waiting at an Admiralty port is impounded after a seas
   PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
   PC.prison.interrogate(s, "resist");
   PC.prison.seasonTurn(s);
-  eq(s.jail.ship, "impounded"); ok(s.shipless); eq(s.crew.count, 0);
+  eq(s.jail.ship, "impounded"); ok(s.shipless); ok(s.crew.count > 0, "the crew wait ashore"); eq(s.money.crew, 0, "the crew's chest is held with her");
 });
 
 test("the shipless popup: buy a cutter at 1,000; steal one (a setback at Norfolk is jail); retire ends the story", function () {
@@ -3848,6 +3848,108 @@ test("save v11: jail, shipless and the secrets come in through the migration", f
   ["jail", "shipless", "secretsExposed", "fenceShut"].forEach(function (k) { delete old[k]; }); old.saveVersion = 10;
   var m = PC.state.deserialize(JSON.stringify(old));
   eq(m.jail, null); eq(m.shipless, false); eq(m.saveVersion, PC.state.SAVE_VERSION);
+});
+
+// ---- Milestone 8, PR 7: imprisonment II (§43.7-§43.9, §43.11-§43.12, §25.15) ----
+console.log("Milestone 8, PR 7: imprisonment II (the cell, the escape, Twopenny and the gallows)");
+
+function jailedAt(seed, heat, how) {
+  var s = how === "sea" ? m7(seed) : atNorfolk(seed); s.meters.heat.avalon = heat; s.time.season = 0;
+  if (how === "sea") PC.prison.captureAtSea(s, seaGame("Avalon")); else PC.prison.enter(s, { node: "norfolk", faction: "avalon", how: "port" });
+  if (s.jail.stage === "interrogate") PC.prison.interrogate(s, "resist");
+  return s;
+}
+
+test("the escape clock: +2 clean, +1 partial, -1 setback; three segments make a point, capped at 3", function () {
+  var s = jailedAt("pe1", 50);
+  withDice([6, 6], function () { PC.escape.plan(s, "study"); });
+  eq(s.jail.clock, 2); ok(s.jail.plans.study, "Study the Guards unlocks the sneak");
+  withDice([6, 6], function () { PC.escape.plan(s, "study"); });
+  eq(s.jail.points, 1); eq(s.jail.clock, 1);
+  withDice([1, 1], function () { PC.escape.plan(s, "lock"); });
+  eq(s.jail.clock, 0);
+  s.jail.points = 3; s.jail.clock = 2; s.ap.left = 3; withDice([6, 6], function () { PC.escape.plan(s, "study"); }); eq(s.jail.points, 3, "capped");
+  eq(PC.escape.planList(s).map(function (p) { return p.id; }).join(","), "study,lock,grease", "no dog at Norfolk");
+});
+
+test("cell actions: three a season, each plan or cellmate takes one", function () {
+  var s = jailedAt("pe2", 50); s.ap.left = 3;
+  PC.escape.recruit(s, "crew"); eq(s.ap.left, 2); ok(PC.prison.view(s));
+  var threw = false; try { PC.escape.recruit(s, "crew"); } catch (e) { threw = true; } ok(threw, "once a season");
+  PC.escape.recruit(s, "officer"); eq(s.jail.recruits.officers.length, 1);
+  eq(PC.escape.escapees(s), 1 + 2 + PC.escape.escapees(s) - 3, "the officer counts two");
+});
+
+test("the break-out: beat 1 setback is caught (trial DR +1, points lost)", function () {
+  var s = jailedAt("pe3", 50); s.jail.points = 2;
+  PC.escape.breakOut(s);
+  withDice([1, 1], function () { PC.escape.beat(s, null); });
+  ok(!s.jail.breakout); eq(s.jail.points, 0); eq(s.jail.trialDR, 1);
+  s.jail.served = 3; s.jail.stage = "trial";
+  ok(PC.prison.trialCheck(s).extra.some(function (x) { return x.value === -1; }));
+});
+
+test("a clean escape from the cells at sea: Heat +10, a stolen cutter to Ocracoke, the items back", function () {
+  var s = m7("pe4"); s.meters.heat.avalon = 50; s.captain.items = ["Fancy Spyglass"];
+  PC.prison.captureAtSea(s, seaGame("Avalon")); PC.prison.interrogate(s, "resist");
+  var heat = s.meters.heat.avalon;
+  PC.escape.breakOut(s);
+  withDice([6, 6], function () { PC.escape.beat(s, null); PC.escape.beat(s, "run"); PC.escape.beat(s, "run"); });
+  ok(!s.jail); eq(s.meters.heat.avalon, heat + 10); eq(s.ship.type, "Cutter"); eq(s.location.node, "ocracoke");
+  ok(s.captain.items.indexOf("Fancy Spyglass") >= 0); ok(s.crew.count >= s.ship.crewMin); ok(s.crew.count <= s.ship.crewMax);
+});
+
+test("an escape with the ship still in port: back aboard and out to sea", function () {
+  var s = jailedAt("pe5", 50);
+  PC.escape.breakOut(s);
+  withDice([6, 6], function () { PC.escape.beat(s, null); PC.escape.beat(s, "fight"); PC.escape.beat(s, "fight"); });
+  ok(!s.jail); eq(s.location.node, "hatteras"); ok(!s.shipless);
+});
+
+test("sneak needs Study the Guards; a sneak setback becomes a fight at once", function () {
+  var s = jailedAt("pe6", 50);
+  PC.escape.breakOut(s); withDice([6, 6], function () { PC.escape.beat(s, null); });
+  ok(PC.escape.modes(s).indexOf("sneak") < 0);
+  s.jail.plans = { study: true }; ok(PC.escape.modes(s).indexOf("sneak") >= 0);
+  var calls = 0, real = PC.rng.roll2d6; PC.rng.roll2d6 = function () { calls++; return calls === 1 ? [1, 1] : [6, 6]; };
+  try { PC.escape.beat(s, "sneak"); } finally { PC.rng.roll2d6 = real; }
+  eq(s.jail.breakout.mode, "fight"); eq(s.jail.breakout.beat, 3);
+});
+
+test("the Twopenny rescue: once a game, after a Condemned verdict, at Friend or better", function () {
+  var s = jailedAt("pe7", 80, "sea"); s.npcs.twopenny = s.npcs.twopenny || {}; s.npcs.twopenny.rung = PC.npcs.RUNG_VALUE.Friend;
+  s.jail.served = 3; s.jail.stage = "trial";
+  withDice([1, 1], function () { PC.prison.trial(s); });
+  ok(!s.jail); eq(s.location.node, "ocracoke"); eq(s.current.screen, "shipless"); ok(s.flags.twopennyRescued);
+  ok(s.captain.tags.indexOf("Cheated the Gallows") >= 0);
+});
+
+test("the gallows: the crew rescue at morale 70+ in port; Key's reprieve at Trusted; otherwise the rope", function () {
+  var s = jailedAt("pe8", 80); s.crew.morale = 90;
+  s.jail.served = 3; s.jail.stage = "trial";
+  withDice([1, 1], function () { PC.prison.trial(s); });
+  PC.prison.seasonTurn(s); PC.prison.seasonTurn(s);
+  ok(!s.jail); ok(!s.ended); ok(s.captain.tags.indexOf("Cheated the Gallows") >= 0); ok(!s.shipless);
+  var t = jailedAt("pe8b", 80, "sea"); PC.letters.meet(t, "key"); t.regard.key.v = 5;
+  t.jail.served = 3; t.jail.stage = "trial";
+  withDice([1, 1], function () { PC.prison.trial(t); });
+  PC.prison.seasonTurn(t); PC.prison.seasonTurn(t);
+  ok(!t.jail); ok(!t.ended); ok(t.flags.keyReprieve);
+});
+
+test("Freedom's plan: +1 escape point and +1 rung; Captivity's calm on a setback: -1 point (the pool can start at -1)", function () {
+  var s = jailedAt("pe9", 50, "sea");
+  var o = s.officers.filter(function (x) { return !x.gone; })[0]; o.drive = "Freedom"; o.fear = "Captivity"; var r0 = o.rung;
+  ok(PC.escape.view(s).freedom);
+  PC.escape.freedom(s, "trust"); eq(s.jail.points, 1); eq(o.rung, Math.min(3, r0 + 1));
+  s.jail.points = 0;
+  PC.prison.seasonTurn(s); ok(s.jail.captivity);
+  withDice([1, 1], function () { PC.escape.captivity(s, "calm"); }); eq(s.jail.points, -1);
+});
+
+test("the build label reads Build 0.9 · Milestone 8", function () {
+  var src = require("fs").readFileSync(require("path").join(__dirname, "..", "js", "ui.js"), "utf8");
+  ok(/Build 0\.9 · Milestone 8/.test(src));
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

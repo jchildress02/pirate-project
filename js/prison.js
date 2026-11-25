@@ -260,8 +260,13 @@
       j.sentence = Math.max(0, j.sentence - 1);
       if (!j.sentence) { out.served = true; served(state, out); }
     }
+    if (state.jail && PC.escape) PC.escape.seasonInCell(state, out); // jail fever, the Captivity beat (PR 7)
     if (state.jail && j.stage === "gallows") {
-      if (j.gallows <= seasonIndex(state)) { out.hanged = true; hang(state); }
+      if (j.gallows <= seasonIndex(state)) {
+        // The crew's rescue or a patron's reprieve, else the rope (§43.12).
+        var saved = PC.escape ? PC.escape.atGallows(state, out) : false;
+        if (!saved) { out.hanged = true; hang(state); }
+      }
     }
     (turn.lines || []).forEach(function (l) { if (state.jail) state.jail.outside.push(l); });
     if (state.jail) finishStep(state, out);
@@ -275,16 +280,26 @@
   // Friend or better wait ashore for him, the rest sail with the crew.
   function outsideSeason(state, out) {
     var j = state.jail;
+    if (j.ship === "impounded" && state.crew.count > 0) {
+      PC.crew.addMorale(state, P().OUTSIDE_MORALE);
+      j.outside.push(L().outsideMorale);
+      if (state.crew.morale < P().CREW_LEAVE_MORALE) { j.outside.push(L().crewScattered); shipGone(state, false); j.ship = "lost"; }
+      return;
+    }
     if (j.ship !== "port") return;
     j.inPortSeasons += 1;
     PC.crew.addMorale(state, P().OUTSIDE_MORALE);
     j.outside.push(L().outsideMorale);
     var fill = function (l) { return l.replace("[Ship]", state.ship.name); };
     if (jailInfo(j.node).admiralty && j.inPortSeasons >= 1) {
+      // Impounded: the ship, her cargo and the crew's chest are held; the
+      // crew wait ashore (a crew rescue at the gallows retakes her, §43.12).
       j.ship = "impounded";
+      j.impounded = JSON.parse(JSON.stringify(state.ship));
       j.outside.push(fill(L().impounded));
       out.chips.push({ icon: "hull", text: "The " + state.ship.name + " is impounded", ink: "bad" });
-      shipGone(state, false);
+      state.money.crew = 0; state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } }; state.provisions = 0; state.hardtack = 0; state.fleet = [];
+      state.shipless = true;
       return;
     }
     if (state.crew.morale < P().CREW_LEAVE_MORALE || PC.crew.food(state) <= 0) {
@@ -316,8 +331,8 @@
     var best = null;
     ids.forEach(function (id) {
       if (P().NO_TESTIMONY.indexOf(id) >= 0) return;
-      var n = (state.npcs || {})[id];
-      if (n && n.rung >= PC.npcs.RUNG_VALUE.Friend && !best) best = id;
+      var n = PC.npcs.get(state, id);
+      if (n && !n.dead && n.rung >= PC.npcs.RUNG_VALUE.Friend && !best) best = id;
     });
     return best;
   }
@@ -363,7 +378,9 @@
       j.stage = "gallows";
       j.gallows = seasonIndex(state) + 2; // hanged as next season ends (the clock reads +2 then)
       out.lines.push(V);
-      return finishStep(state, out);
+      finishStep(state, out);
+      if (PC.escape && PC.escape.twopenny(state, out)) return out; // once a game, before any cell action (§43.11)
+      return out;
     }
     var range = S[r.outcome], n = between(rnd, range[0], range[1]) + judgeShift(state, j.node);
     n = Math.max(1, n);
@@ -507,7 +524,7 @@
 
   function shiplessOptions(state) {
     var here = PC.node.here(state), nd = PC.data.nodes[here] || {};
-    var friend = nd.slots ? nd.slots.map(function (s) { return PC.node.slotNpc(here, s.key); }).filter(function (id) { var n = (state.npcs || {})[id]; return n && n.rung >= PC.npcs.RUNG_VALUE.Friend; })[0] : null;
+    var friend = nd.slots ? nd.slots.map(function (s) { return PC.node.slotNpc(here, s.key); }).filter(function (id) { var n = PC.npcs.get(state, id); return n && n.rung >= PC.npcs.RUNG_VALUE.Friend; })[0] : null;
     return [
       { id: "buy", label: "Buy a cutter outright", cost: P().CUTTER_PRICE, ok: onHand(state) >= P().CUTTER_PRICE, why: onHand(state) >= P().CUTTER_PRICE ? null : "Needs " + P().CUTTER_PRICE + " gold on hand" },
       { id: "steal", label: "Steal a ship", check: { type: "Light Fingers", dr: P().STEAL_DR }, ok: true },
@@ -605,5 +622,6 @@
     confidant: confidant, judgeShift: judgeShift, trialCheck: trialCheck, trial: trial, serve: serve, release: release,
     maroon: maroon, drift: drift, rescue: rescue, rescueCheck: rescueCheck,
     shiplessOptions: shiplessOptions, shiplessChoose: shiplessChoose, newCutter: newCutter, view: view,
+    jailInfo: jailInfo, finishStep: finishStep, hang: hang, npcName: npcName, takeItems: takeItems, FACTION_NAME: FACTION_NAME,
   };
 })();

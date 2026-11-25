@@ -11,7 +11,7 @@
 
   var state = null;
   var root = null;
-  var BUILD = "Build 0.8 · Milestone 7";
+  var BUILD = "Build 0.9 · Milestone 8";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -343,10 +343,15 @@
       ]);
     }
     if (v.stage === "givePick") return html + '<p>Give them one:</p>' + opts(v.pick.map(function (x) { return opt({ act: "jgive", attrs: 'data-id="' + esc(x.id) + '"', label: x.name, meta: "If exposed: " + esc(x.penalty) }); }));
-    var escape = opt({ act: "noop", label: "Plan an escape", lock: J.lines.escapeSoon });
+    var ev = PC.escape ? PC.escape.view(state) : null;
+    // An escape under way (§43.9) takes over the screen.
+    if (ev && ev.breakout) return html + breakoutBlock(ev);
+    var beats = ev ? officerBeats(ev) : "";
+    if (beats) return html + beats;
+    var escapeHtml = ev && ev.inCell ? escapeBlock(ev) : "";
     if (v.stage === "held" || v.stage === "awaitTrial") {
       var what = v.stage === "held" ? plural(v.left, "more action") + " here, then a fine of " + J.FINE_FEES + "× the port fee and you're out." : plural(v.left, "more action") + " until your trial.";
-      return html + '<p class="small">' + esc(what) + "</p>" + opts([v.ap > 0 ? opt({ act: "jwait", label: "Wait", meta: "One cell action." }) : turn, escape]);
+      return html + '<p class="small">' + esc(what) + "</p>" + opts([v.ap > 0 ? opt({ act: "jwait", label: "Wait", meta: "One cell action." }) : turn]) + escapeHtml;
     }
     if (v.stage === "trial") {
       return html + (v.confidant ? '<p class="small">' + esc(v.confidant) + " will speak for you: +1.</p>" : "") +
@@ -357,12 +362,62 @@
     }
     if (v.stage === "serving") {
       return html + '<p class="small">' + plural(v.sentence, "season") + " left to serve. Serving the whole sentence clears your Heat with " + esc(v.faction) + ".</p>" +
-        opts([opt({ act: "jserve", label: "Serve your time", meta: "The seasons pass. You'll see what happened outside when you're let out." }), turn, escape]);
+        opts([opt({ act: "jserve", label: "Serve your time", meta: "The seasons pass. You'll see what happened outside when you're let out." }), turn]) + escapeHtml;
     }
     if (v.stage === "gallows") {
-      return html + '<p class="notice warn">The gallows ' + (v.gallowsIn <= 1 ? "at the end of this season." : "at the end of next season.") + "</p>" + opts([turn, escape]);
+      return html + '<p class="notice warn">The gallows ' + (v.gallowsIn <= 1 ? "at the end of this season." : "at the end of next season.") + "</p>" + opts([turn]) + escapeHtml;
     }
     return html;
+  }
+
+  // The cell's actions (§43.7) and the escape clock (§43.8).
+  function escapeBlock(ev) {
+    var lock = ev.canAct.ok ? null : ev.canAct.why;
+    var rec = ev.recruits, recN = Object.keys(rec.tiers).reduce(function (a, k) { return a + rec.tiers[k]; }, 0);
+    var dots = function (n, max) { var o = ""; for (var i = 0; i < max; i++) o += i < n ? "●" : "○"; return o; };
+    return '<div class="svc"><h4>Planning an escape</h4><p class="small">The escape clock ' + dots(ev.clock, ev.clockMax) + " · escape points " + (ev.points < 0 ? "−1 (the guards are watching you)" : dots(ev.points, ev.pointsCap)) +
+      " · " + plural(ev.escapees, "escapee") + " (each officer counts two)" + (recN || rec.officers.length ? " · cellmates waiting to come: " + [recN ? plural(recN, "hand") : null].concat(rec.officers.map(function (o) { return o.first + " (" + o.type + ")"; })).filter(Boolean).join(", ") : "") + ".</p>" +
+      '<p class="note">Each plan fills the clock: +2 clean, +1 partial, −1 setback. A full clock is an escape point; spend one before a beat of the break-out for +1.</p></div>' +
+      opts(ev.planList.map(function (p) {
+        return opt({ act: "jplan", attrs: 'data-id="' + p.id + '"', label: p.label + (ev.plans[p.id] ? " ✓" : ""), check: p.assess, lock: lock,
+          meta: "One cell action. Unlocks " + esc(p.unlocks) + (p.note ? ". " + esc(p.note) : "") + "." });
+      }).concat([
+        opt({ act: "jrecruit", attrs: 'data-what="crew"', label: "Work the cellmates: a few hands", lock: lock || (ev.usedCrew ? "Once a season" : null), meta: "One cell action. Seasoned and Veteran hands who join for free, if they get out with you." }),
+        opt({ act: "jrecruit", attrs: 'data-what="officer"', label: "Work the cellmates: an officer", lock: lock || (rec.officers.length ? "One a stay" : null), meta: "One cell action. An officer who joins for free, if he gets out with you." }),
+        opt({ act: "jbreak", label: "Break out", lock: lock, meta: "One cell action, then three beats: the cell, the guards, the jail. Caught: your trial gets harder, or your sentence longer." }),
+      ]));
+  }
+
+  function breakoutBlock(ev) {
+    var b = ev.breakout, html = '<div class="svc"><h4>Breaking out · beat ' + b.beat + " of 3</h4>" +
+      '<p class="small">Escape points: ' + Math.max(0, ev.points) + (b.spent ? " · one spent on this beat (+1)" : "") + ".</p></div>";
+    var list = [];
+    if (!b.spent && ev.points > 0) list.push(opt({ act: "jspend", label: "Spend an escape point", meta: "+1 on this beat." }));
+    var M = { sneak: ["Sneak", "Hard. Clean: unseen. Partial: you're running now. Setback: a fight."], run: ["Run", "Moderate. Partial: you lose an officer. Setback: a fight."],
+      fight: ["Fight", "By the guards here. Partial: you lose an officer and many hands. Setback: Wounded, then Endure: a setback is death; otherwise back to the cell."] };
+    if (b.beat === 1) list.push(opt({ act: "jbeat", label: "Out of the cell", check: PC.checks.assess(state, b.check, { conditions: [] }), meta: "The easiest of the three. Setback: back in the cell, and your escape points are gone." }));
+    else b.modes.forEach(function (m) { list.push(opt({ act: "jbeat", attrs: 'data-mode="' + m.id + '"', label: (b.beat === 3 ? "Keep going: " : "") + M[m.id][0], check: PC.checks.assess(state, m.check, { conditions: [] }), meta: M[m.id][1] })); });
+    return html + opts(list);
+  }
+
+  // The Freedom and Captivity officers' beats in the cell (§25.15).
+  function officerBeats(ev) {
+    var F = PC.data.prison.escape.lines;
+    if (ev.captivity) {
+      var n = ev.captivity.first;
+      return '<div class="prose">' + prose(F.captivity.setup.replace(/\[Name\]/g, n)) + "</div>" + opts([
+        opt({ act: "jcapt", attrs: 'data-c="calm"', label: "Try to calm him", check: PC.checks.assess(state, { type: "Persuade", dr: 2 }, { conditions: [] }), meta: "Clean or partial: +1 rung. Setback: the guards come, and you lose an escape point." }),
+        opt({ act: "jcapt", attrs: 'data-c="shut"', label: "Tell him to shut up, or you'll do it for him", meta: "He won't like it." }),
+        opt({ act: "jcapt", attrs: 'data-c="knock"', label: "Knock him out", meta: "−1 rung, and he's Wounded." })]);
+    }
+    if (ev.freedom) {
+      var f = ev.freedom.first;
+      return '<div class="prose">' + prose(F.freedom.setup.replace(/\[Name\]/g, f)) + "</div>" + opts([
+        opt({ act: "jfree", attrs: 'data-c="trust"', label: "Trust him and follow his lead", meta: "+1 escape point, +1 rung." }),
+        opt({ act: "jfree", attrs: 'data-c="wait"', label: "Too risky. Wait.", meta: "He'll be disappointed." }),
+        opt({ act: "jfree", attrs: 'data-c="better"', label: "Stand down: you've a better plan", meta: "He approves of a captain with a plan." })]);
+    }
+    return "";
   }
 
   function jailResult() {
@@ -2748,7 +2803,7 @@
         // Milestone 8, PR 6: imprisonment.
         '<p class="small">Jail at Norfolk, ship in port: ' + ["Held", "Imprisoned", "Condemned"].map(function (c) { return b("devjail", c, ' data-charge="' + c + '"'); }).join("") +
         " · Taken at sea by: " + ["Avalon", "Frisia", "Pirate"].map(function (f) { return b("devcaptured", f, ' data-flag="' + f + '"'); }).join("") +
-        " · " + b("devsecret", "Make Bobby a secret") + "</p>") : "") +
+        " · " + b("devsecret", "Make Bobby a secret") + (state.jail ? " · " + b("devclock", "Fill the escape points") + b("devtrial", "Skip to the trial") : "") + "</p>") : "") +
       (state.location ? grp("The hunt", '<p class="small">Next sighting: ' + b("devforce", "Avalon hunter", ' data-kind="hunter" data-flag="Avalon"') + b("devforce", "Frisian hunter", ' data-kind="hunter" data-flag="Frisia"') +
         b("devforce", "Sicilian hunter", ' data-kind="hunter" data-flag="Sicily"') + b("devforce", "French hunter", ' data-kind="hunter" data-flag="France"') + b("devforce", "Convoy", ' data-kind="convoy"') +
         b("devforce", "Escorted merchant", ' data-kind="escort"') + b("devforce", "Warship", ' data-kind="warship"') + b("devforce", "Pirate sloop", ' data-kind="ship" data-flag="Pirate" data-cls="Sloop"') + "</p>" +
@@ -3903,7 +3958,18 @@
       if (el.dataset.id === "retire" && confirmFirst(el, "Retire?", "You hang up your cutlass, and your story ends here.", "Retire")) return;
       jailSay = PC.prison.shiplessChoose(state, el.dataset.id);
     },
-    "noop": function () {},
+    "jplan": function (el) { jailSay = PC.escape.plan(state, el.dataset.id); },
+    "jrecruit": function (el) { jailSay = PC.escape.recruit(state, el.dataset.what); },
+    "jbreak": function (el) {
+      if (confirmFirst(el, "Break out?", "If you're caught, your trial gets harder (before it) or your sentence a season longer (after it), and your escape points are lost.", "Break out")) return;
+      jailSay = PC.escape.breakOut(state);
+    },
+    "jspend": function () { jailSay = PC.escape.spendPoint(state); },
+    "jbeat": function (el) { jailSay = PC.escape.beat(state, el.dataset.mode || null); },
+    "jfree": function (el) { jailSay = PC.escape.freedom(state, el.dataset.c); },
+    "jcapt": function (el) { jailSay = PC.escape.captivity(state, el.dataset.c); },
+    "devclock": function () { PC.devtools.fillClock(state); },
+    "devtrial": function () { PC.devtools.toTrial(state); },
     "endgameover": function () { PC.minigames.leave(state); menu = null; PC.summary.end(state); },
     "keepplaying": function () { PC.summary.keepPlaying(state); },
     "export": function () { dialog = "export"; },

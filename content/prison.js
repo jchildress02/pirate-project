@@ -55,6 +55,62 @@
     },
     SECRET_POINTS: { Small: 1, Medium: 3, Large: 6 },
 
+    // ---- Imprisonment II (§43.7-§43.12; Milestone 8, PR 7) ----
+    escape: {
+      PLAN_DR: 2,               // the plans (DEFAULT: §43.7 names the checks, not their DRs)
+      LOCK_DR_BARE: 4,          // Work the Lock without Lockpicks: "a hard check"
+      CLOCK: 3,                 // segments (§43.8)
+      POINTS_CAP: 3,
+      CELLMATES: [2, 4],        // hands a Work the Cellmates recruits (DEFAULT; a third Veterans)
+      BEAT1_DR: 1,              // the cell: the easiest check
+      SNEAK_DR: 3,              // hard
+      RUN_DR: 2,                // moderate
+      GUARD_DR: { "Very poor": 1, "Poor": 1, "Modest": 2, "Wealthy": 3 }, // the fight, by the guard tier (node prosperity)
+      HEAT: 10,                 // a successful escape (§43.9)
+      CUTTER_GOLD: 50,          // "a little crew gold" aboard the stolen cutter (DEFAULT)
+      FEVER: 0.15,              // jail fever a season (§43.7)
+      RESCUE_MORALE: 70,        // the crew's rescue at the gallows (§43.12)
+      lines: {
+        plan: {
+          study: { clean: "PLACEHOLDER: You learn the guards' rounds to the minute.", partial: "PLACEHOLDER: You learn a little of the guards' habits.", setback: "PLACEHOLDER: A guard catches you watching him." },
+          lock: { clean: "PLACEHOLDER: The lock gives with a soft click. You leave it looking shut.", partial: "PLACEHOLDER: The lock nearly gives.", setback: "PLACEHOLDER: The pick snaps in the lock, and the noise brings a guard." },
+          dog: { clean: "PLACEHOLDER: The dog licks your hand through the bars.", partial: "PLACEHOLDER: The dog stops growling, mostly.", setback: "PLACEHOLDER: The dog barks the whole jail awake." },
+          grease: { clean: "PLACEHOLDER: The jailer pockets your coin and tells you what's upstairs.", partial: "PLACEHOLDER: The jailer takes the coin and says little.", setback: "PLACEHOLDER: The jailer laughs and reports you." },
+        },
+        cellmatesCrew: "PLACEHOLDER: [number] of the men in the next cell will come with you, if you can get them out.",
+        cellmatesOfficer: "PLACEHOLDER: [Name], a [Type] by trade, wants in on whatever you're planning.",
+        beat1: { lock: "PLACEHOLDER: The lock you worked on gives, and the cell door swings open.", dog: "PLACEHOLDER: The dog wags its tail as you slip past.", watch: "PLACEHOLDER: You wait for the change of watch." },
+        beat1Done: "PLACEHOLDER: You're out of the cell.",
+        beat1Fail: "PLACEHOLDER: The door won't give, and a lantern swings your way.",
+        beat: {
+          sneak: { clean: "PLACEHOLDER: You slip past unseen.", partial: "PLACEHOLDER: Someone shouts. Run!", setback: "PLACEHOLDER: A guard steps right into your path." },
+          run: { clean: "PLACEHOLDER: You run, and nobody can catch you.", partial: "PLACEHOLDER: You make it, but not everyone does.", setback: "PLACEHOLDER: They cut you off." },
+          fight: { clean: "PLACEHOLDER: You fight your way through.", partial: "PLACEHOLDER: You fight your way through, but it costs you.", setback: "PLACEHOLDER: A club catches you across the head." },
+        },
+        caught: "PLACEHOLDER: They drag you back to the cell.",
+        escaped: "PLACEHOLDER: You're out, and the night swallows you.",
+        ownShip: "PLACEHOLDER: Your ship is waiting. You cut her cable and slip out on the tide.",
+        cutter: "PLACEHOLDER: You steal a cutter from the harbor and sail for [Place].",
+        fever: "PLACEHOLDER: Jail fever runs through the cells.",
+        freedom: {
+          setup: "PLACEHOLDER: [Name] leans close. \"I've a way out of here, Captain. Trust me.\"",
+          trust: "You nod your head, and [Name] puts his plan into motion.",
+          wait: "[Name] seems disappointed, but doesn't press the matter further.",
+          better: "PLACEHOLDER: [Name] nods. \"Your plan, then, Captain.\"",
+        },
+        captivity: {
+          setup: "PLACEHOLDER: [Name] is pacing the cell, shouting at the walls.",
+          calm: "You grab [Name] in a bear hug until he calms down.",
+          calmFail: "You grab [Name] in a bear hug, but he continues shouting. He shuts up when the guards come down to investigate the noise.",
+          shut: "[Name] stops sobbing and instead just whimpers softly for the next few hours.",
+          knock: "You grab a loose chunk of brick and smash it over [Name]'s head. He hits the cold floor of the cell, unconscious. When he wakes up, he remains completely silent, huddled in the corner of the cell.",
+        },
+        twopenny: "PLACEHOLDER: That night, a familiar voice at the window: Twopenny, with a rope and a grin.",
+        crewRescue: "PLACEHOLDER: One by one, your crewmen push through the crowd. They cut you free and fight their way back to the docks.",
+        keyReprieve: "PLACEHOLDER: A rider in Admiralty blue pushes through the crowd with a letter. The Admiral has reprieved you.",
+      },
+    },
+
     lines: {
       // The ways in
       capturedSea: "PLACEHOLDER: Your ship is taken. They put you in irons with what's left of your crew.",
@@ -76,7 +132,6 @@
       talked: "PLACEHOLDER: You tell them everything. The clerk's pen scratches for an hour.",
       // The cell
       cellWait: "PLACEHOLDER: The hours crawl by in the dark.",
-      escapeSoon: "Planning an escape comes in the next update.",
       // The trial (§43.6)
       trialOpen: "PLACEHOLDER: They bring you up to the court in chains.",
       confidant: "PLACEHOLDER: [Name] stands up in the gallery to speak for you.",
@@ -86,6 +141,7 @@
       },
       // The outside (§43.10)
       outsideMorale: "Your crew wait for you in port. Morale −5.",
+      crewScattered: "PLACEHOLDER: Your crew have given up on you and scattered along the waterfront.",
       crewSailed: "PLACEHOLDER: Your crew gave up waiting. The [Ship] has sailed without you.",
       impounded: "PLACEHOLDER: The Admiralty has impounded the [Ship].",
       // Release
