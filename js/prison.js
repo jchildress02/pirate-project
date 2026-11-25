@@ -150,7 +150,7 @@
   function loseEverything(state) {
     state.money.purse = 0; state.money.crew = 0;
     state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } };
-    state.provisions = 0; state.hardtack = 0;
+    state.provisions = 0;
     state.fleet = [];
     var c = state.crew;
     PC.data.economy.TIER_ORDER.forEach(function (t) { c.tiers[t] = 0; });
@@ -298,7 +298,7 @@
       j.impounded = JSON.parse(JSON.stringify(state.ship));
       j.outside.push(fill(L().impounded));
       out.chips.push({ icon: "hull", text: "The " + state.ship.name + " is impounded", ink: "bad" });
-      state.money.crew = 0; state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } }; state.provisions = 0; state.hardtack = 0; state.fleet = [];
+      state.money.crew = 0; state.cargo = { goods: {}, treasure: { clean: 0, dirty: 0 } }; state.provisions = 0; state.fleet = [];
       state.shipless = true;
       return;
     }

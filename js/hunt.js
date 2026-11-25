@@ -127,7 +127,9 @@
     return r.outcome;
   }
 
-  // Read Weather before a batch (§42.6): optional, 0 AP, once a batch.
+  // Read Weather before a batch (§42.6): automatic since the build 0.9
+  // playtest (#38). It rolls itself when a batch ends; the result shows only
+  // as the next batch's weather chip (no line, no roll in the log).
   // Clean: see the next batch's condition, and reroll it once if Storm.
   // Partial: see it. Setback: nothing.
   function canReadAhead(state, game) { return game.phase === "batchEnd" && !game.readAhead && state.ap.left >= 1 && game.apUsed < H().MAX_AP; }
@@ -139,8 +141,6 @@
     if (r.outcome === "clean" && c === "Storm") { c = PC.weather.rollCondition(state, game.waters, M().key(state, game, "condition-reroll")); rerolled = true; }
     game.nextCondition = c;
     game.readAhead = { outcome: r.outcome, seen: r.outcome !== "setback" ? c : null, rerolled: rerolled };
-    M().noteRoll(game, { label: "Read Weather", outcome: r.outcome, effect: r.outcome === "setback" ? "the sky tells you nothing" : "the next batch: " + PC.weather.badge(c) + (rerolled ? " (the storm passes by)" : "") });
-    M().say(state, game, r.outcome === "setback" ? "PLACEHOLDER: You study the sky, but it tells you nothing." : "PLACEHOLDER: You study the sky. Next: " + PC.weather.badge(c) + ".");
     return game.readAhead;
   }
 
@@ -181,7 +181,7 @@
       return;
     }
     var b = game.batch, r = M().rand(state, game, "sighting");
-    if (b.next >= b.n) { game.phase = "batchEnd"; game.sighting = null; return; }
+    if (b.next >= b.n) { game.phase = "batchEnd"; game.sighting = null; if (canReadAhead(state, game)) readAhead(state, game); return; }
     var i = b.next; b.next += 1;
     var grp = null;
     if (i === 0 && b.hunter) grp = G().sighting(state, game.waters, r, { kind: "hunter", flag: b.hunter });
@@ -355,7 +355,10 @@
     var dice = PC.rng.roll2d6(M().key(state, game, "treat"));
     var out = PC.checks.readTotal(dice[0] + dice[1] + 1 - 2);
     M().say(state, game, L().treat[out]);
-    if (out === "clean") { PC.scenes.applyEffect(state, { tag: "Wounded", remove: true }); a.chips.push({ icon: "cond", text: "Wounded: treated" }); }
+    // Bug Log B5: name the wound being treated, so the line never reads as
+    // coming from nowhere.
+    if (out === "clean") { PC.scenes.applyEffect(state, { tag: "Wounded", remove: true }); a.chips.push({ icon: "cond", text: "Your wound is treated: no longer Wounded" }); }
+    else a.chips.push({ icon: "cond", text: "Still Wounded until the season ends", ink: "bad" });
   }
 
   // The next captured ship to settle, with her loot rolled.
@@ -658,7 +661,7 @@
   // "Provisions: X eaten, Y taken, Z left (about N actions at sea)." (P10)
   function provisionsLine(state, eaten, taken) {
     var left = PC.crew.food(state), ap = PC.world.apOfFood(state);
-    return "Provisions: " + eaten + " eaten" + (taken != null ? ", " + taken + " taken" : "") + ", " + left + " left (about " + (ap === 1 ? "1 action" : ap + " actions") + " at sea)." + (state.hardtack ? " " + state.hardtack + " of them hardtack." : "");
+    return "Provisions: " + eaten + " eaten" + (taken != null ? ", " + taken + " taken" : "") + ", " + left + " left (about " + (ap === 1 ? "1 action" : ap + " actions") + " at sea).";
   }
 
   // The hunt ends: home to the port it left from (an arrival: the popup and

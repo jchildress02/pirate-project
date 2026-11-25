@@ -94,7 +94,11 @@
     var nd = nodeData(id);
     var base = (nd.market && nd.market.demand && nd.market.demand[good]) || "Normal";
     if (base === "Won't buy") return base;
-    var sold = (season(state, id).sold[good] || 0);
+    // Bug Log B3: a node never visited has no season yet; read its gluts as
+    // none instead of creating it (the Developer menu's content check prices
+    // Norfolk's goods before any visit).
+    var ns = state.nodes[id];
+    var sold = ns ? (season(state, id).sold[good] || 0) : 0;
     var steps = E().DEMAND_STEPS;
     var i = steps.indexOf(base) - Math.floor(sold / (E().GLUT_UNITS + 1));
     return steps[Math.max(0, i)];
@@ -293,7 +297,10 @@
     var queue = [];
     if (here(state) === "ocracoke" && place === "tavern" && !flag(state, F.tavernDone)) {
       state.flags[F.tavernDone] = true;
-      if (!flag(state, F.underworld) && !(state.location.queue || []).length) queue.push("ocr_uw_1");
+      // Bug Log B4: an old, already-played entry left in the queue used to
+      // count as "something queued", so Bobby never came. Queue him unless
+      // he's already waiting.
+      if (!flag(state, F.underworld) && !uwWaiting(state)) queue.push("ocr_uw_1");
       if (!flag(state, F.dyingWish)) queue.push("ocr_dpw_1");
     }
     state.location.queue = (state.location.queue || []).concat(queue);
@@ -315,12 +322,18 @@
   }
 
   // The first Tavern action triggers Welcome to the Underworld right after
-  // it resolves (§17.2).
+  // it resolves (§17.2). Any action counts, whatever its AP cost: a question
+  // to the keeper, the rumors, a game, lodging (Bug Log B4).
+  function uwWaiting(state) {
+    return (state.location.queue || []).some(function (q) { return q === "ocr_uw_1" && !state.seen[q]; });
+  }
   function tavernActionDone(state) {
-    if (here(state) !== "ocracoke") return;
+    if (here(state) !== "ocracoke" || !state.location || state.location.place !== "tavern") return;
     if (flag(state, F.tavernDone) || flag(state, F.tavernAction)) return;
     state.flags[F.tavernAction] = true;
-    if (!flag(state, F.underworld)) state.location.queue = (state.location.queue || []).concat(["ocr_uw_1"]);
+    // Drop entries already played, so a Continue only shows for Bobby.
+    state.location.queue = (state.location.queue || []).filter(function (q) { return !state.seen[q]; });
+    if (!flag(state, F.underworld) && !uwWaiting(state)) state.location.queue.push("ocr_uw_1");
   }
 
   // A season with an action spent at the Tavern is a visit for the keeper's
@@ -360,20 +373,41 @@
     // Asked this visit: it fades. Asked on an earlier visit: it is gone (the
     // author's phone notes). asked[id] holds the visit it was asked on.
     var visit = state.location ? state.location.visit : null;
-    return (L.questions || []).filter(function (q) { return (!q.after || asked[q.after]) && (!asked[q.id] || asked[q.id] === visit); })
+    var out = (L.questions || []).filter(function (q) { return (!q.after || asked[q.after]) && (!asked[q.id] || asked[q.id] === visit); })
       .map(function (q) { return { id: q.id, label: q.label, asked: !!asked[q.id] }; });
+    // The loss lead (Playtest Pins 0.9, #13): until the variant's Ocracoke
+    // lead is heard, the keeper can point the captain to it. Asked again on
+    // any later visit.
+    var ll = lossLeadQuestion(state);
+    if (ll) out.push({ id: "loss_lead", label: PC.text.render(ll.label, state), asked: asked.loss_lead === visit });
+    return out;
+  }
+
+  // The keeper's pointer to the loss quest's Ocracoke lead (#13): the
+  // one-armed pirate for Variants A and C, Bobby Rats for B.
+  function lossLeadQuestion(state) {
+    var L = nodeData(here(state)).lines.keeper.lossLead;
+    var loss = state.captain.loss;
+    if (!L || !loss || !L[loss]) return null;
+    var q = state.quests && state.quests.what_was_lost;
+    if (q && q.status === "done") return null;
+    var lead = loss === "B" ? "bald_man" : "trident";
+    if (PC.quests.hasLead(state, "what_was_lost", lead) || (lead === "trident" && flag(state, "lead_trident_heard"))) return null;
+    return { label: L.label, line: L[loss] };
   }
 
   function askKeeperQuestion(state, qid) {
     var id = here(state), who = slotNpc(id, "keeper");
     var q = (nodeData(id).lines.keeper.questions || []).filter(function (x) { return x.id === qid; })[0];
+    if (!q && qid === "loss_lead") { var ll = lossLeadQuestion(state); if (ll) q = { id: qid, label: PC.text.render(ll.label, state), line: ll.line }; }
     if (!q) throw new Error("He has nothing to say about that.");
     if (greeting(state, id, who, "keeper").refuse) return { refuse: true, line: nodeData(id).lines.keeper.refuse };
     state.npcs[who] = state.npcs[who] || {};
     state.npcs[who].met = true;
     (state.flags.keeperAsked = state.flags.keeperAsked || {})[qid] = state.location ? state.location.visit || true : true;
     if (q.meets) (state.npcs[q.meets] = state.npcs[q.meets] || {}).met = true;
-    return { label: q.label, line: q.line.replace(/\{keeper\}/g, PC.npcs.get(state, who).first) };
+    tavernActionDone(state); // a question counts as the first Tavern action (Bug Log B4)
+    return { label: q.label, line: PC.text.render(q.line.replace(/\{keeper\}/g, PC.npcs.get(state, who).first), state) };
   }
 
   function talkToKeeper(state) {
@@ -459,24 +493,7 @@
     return { cost: cost, line: noteTrade(state, who, cost, L) || L.provisions };
   }
 
-  // Hardtack (P11 of the build 0.9 playtest pins): half the lot price,
-  // always in stock, sold by every provisioner.
-  function hardtackPrice(state) { return money(provisionsPrice(state) * (E().HARDTACK_SHARE || 0.5)); }
 
-  function buyHardtack(state, n) {
-    n = Math.floor(n);
-    if (n <= 0) throw new Error("Buy at least one lot.");
-    var id = here(state), who = slotNpc(id, "provisioner");
-    var L = nodeData(id).lines.provisioner;
-    if (PC.npcs.serviceLevel(state, who) == null) return { line: L.refuse };
-    if (n > PC.crew.slotsFree(state)) throw new Error("Not enough room in the hold.");
-    var cost = Math.round(hardtackPrice(state) * n);
-    if (state.money.crew < cost) return { line: L.broke, failed: true };
-    state.money.crew -= cost;
-    state.hardtack = (state.hardtack || 0) + n;
-    PC.state.addLog(state, "Bought " + n + " hardtack lot" + (n > 1 ? "s" : "") + " for " + cost + " crew gold.");
-    return { cost: cost, line: noteTrade(state, who, cost, L) || L.provisions };
-  }
 
   function buyGood(state, good, n) {
     n = Math.floor(n);
@@ -605,25 +622,7 @@
     return { units: units, gold: gold, line: noteTrade(state, who, gold, L) || (units < n ? L.capReached : L.goodsSold), partial: units < n };
   }
 
-  // Hardtack sells back at half its price, out of the same cap (P11 default).
-  function hardtackSellPrice(state) { return money(hardtackPrice(state) * E().PROVISIONS_SELL_SHARE); }
 
-  function sellHardtack(state, n) {
-    n = Math.floor(n);
-    var id = here(state), who = slotNpc(id, "provisioner"), L = nodeData(id).lines.provisioner;
-    if (PC.npcs.serviceLevel(state, who) == null) return { line: L.refuse, units: 0, gold: 0 };
-    if (n <= 0 || (state.hardtack || 0) < n) throw new Error("You don't have that many.");
-    var each = hardtackSellPrice(state);
-    var units = Math.min(n, each > 0 ? Math.floor(provisionerCapLeft(state) / each + 1e-9) : 0);
-    if (units <= 0) return { line: L.capReached, units: 0, gold: 0 };
-    var gold = Math.round(each * units);
-    state.hardtack -= units;
-    state.money.crew += takeCut(state, "provisioner", gold).net;
-    season(state).provisionerPaid += gold;
-    noteSale(state, "provisioner", gold);
-    PC.state.addLog(state, "Sold " + units + " hardtack lot" + (units > 1 ? "s" : "") + " for " + gold + " crew gold.");
-    return { units: units, gold: gold, line: noteTrade(state, who, gold, L) || (units < n ? L.capReached : L.goodsSold), partial: units < n };
-  }
 
   // Sell all he'll take (R6): every unit this buyer buys, the dearest first,
   // until his coffers run dry. Provisions are left alone.
@@ -1228,7 +1227,6 @@
   PC.node = {
     sellProvisions: sellProvisions,
     provisionsSellPrice: provisionsSellPrice,
-    hardtackPrice: hardtackPrice, buyHardtack: buyHardtack, hardtackSellPrice: hardtackSellPrice, sellHardtack: sellHardtack,
     sellAll: sellAll,
     visitSales: visitSales,
     FLAGS: F,

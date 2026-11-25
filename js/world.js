@@ -90,20 +90,11 @@
     mult = Math.max(0.5, mult);
     var need = Math.ceil(heads / 5 * ap * mult);
     out.need = need;
-    // Ordinary lots first, then hardtack (P11 of the build 0.9 playtest pins).
     var took = PC.crew.takeFood(state, need), used = took.total;
     out.used = used;
-    out.hardtack = took.hardtack;
     out.short = need - used;
     var winterNote = mult > 1 && seasonName(state) === "Winter" ? " (Winter: +50%)" : "";
     if (took.provisions) out.chips.push({ icon: "prov", text: "−" + plural(took.provisions, "provisions lot") + winterNote, ink: "mid" });
-    if (took.hardtack) {
-      // Each action eaten (even partly) on hardtack costs morale; no Go Without check.
-      var hap = hardtackActions(need, ap, took.provisions, took.hardtack), hm = hap * (E().HARDTACK_MORALE || 2);
-      out.hardtackAP = hap;
-      if (hm) PC.crew.addMorale(state, -hm);
-      out.chips.push({ icon: "prov", text: "−" + plural(took.hardtack, "hardtack lot") + (took.provisions ? "" : winterNote) + (hm ? " · morale −" + hm : ""), ink: "bad" });
-    }
     if (out.short > 0) {
       // Hunger (§20.6): -10 morale and a Go Without check, DR by the shortfall.
       PC.crew.addMorale(state, -10);
@@ -129,16 +120,6 @@
       state.flags.soreFlag = true; // provisions ran short: the sore flag (§44.9)
     }
     return out;
-  }
-
-  // How many of `ap` actions ate any hardtack: action i eats the stretch
-  // [i·per, (i+1)·per) of the burn; ordinary lots cover [0, prov), hardtack
-  // the next ht lots.
-  function hardtackActions(need, ap, prov, ht) {
-    if (!ht || !ap) return 0;
-    var per = need / ap, n = 0;
-    for (var i = 0; i < ap; i++) if (Math.max(i * per, prov) < Math.min((i + 1) * per, prov + ht) - 1e-9) n++;
-    return n;
   }
 
   // About how many actions at sea the food aboard feeds (P9, P10).
@@ -679,7 +660,7 @@
   PC.world = {
     TRADE: TRADE,
     isLive: isLive, isOcean: isOcean, place: place, placeName: placeName, zoneOf: zoneOf, apCost: apCost,
-    headsAtSea: headsAtSea, burn: burn, hardtackActions: hardtackActions, apOfFood: apOfFood,
+    headsAtSea: headsAtSea, burn: burn, apOfFood: apOfFood,
     canSail: canSail, sail: sail, arriveFrom: arriveFrom, destinations: destinations,
     hook: hook, endSeason: endSeason, splitWinter: splitWinter,
     impliedShare: impliedShare, holdPressure: holdPressure, qmReading: qmReading, startWinter: startWinter, holdSplit: holdSplit,

@@ -705,7 +705,7 @@
       applyOne(state, v, { crewLost: n }, res, {}, r);
     } else if (d === 3) {
       var plan = PC.crew.jettisonPlan(state, Math.max(1, Math.ceil(PC.crew.slotsUsed(state) * 0.15)));
-      (plan || []).forEach(function (x) { if (x.what === "provisions") state.provisions -= x.n; else if (x.what === "hardtack") state.hardtack -= x.n; else if (x.what === "treasure") state.cargo.treasure[x.dirty ? "dirty" : "clean"] -= x.n; else PC.crew.removeGood(state, x.what, x.n, x.dirty); });
+      (plan || []).forEach(function (x) { if (x.what === "provisions") state.provisions -= x.n; else if (x.what === "treasure") state.cargo.treasure[x.dirty ? "dirty" : "clean"] -= x.n; else PC.crew.removeGood(state, x.what, x.n, x.dirty); });
       res.text += "\n\n" + L.cargo;
       res.chips.push({ icon: "treasure", text: (plan || []).length ? "Over the side: " + plan.map(function (x) { return x.n + " " + x.what; }).join(", ") : "Nothing worth throwing over", ink: "bad" });
     } else {

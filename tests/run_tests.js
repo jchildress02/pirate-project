@@ -1978,11 +1978,12 @@ test("the keeper's Beach Captain questions: Jack's follows, both name Twopenny a
   var s = at(ocr("keeper"), "tavern"); playOpening(s); s.location.place = "tavern"; s.current = { screen: "node" };
   delete s.npcs.twopenny.met;
   var ap = s.ap.left;
-  eq(PC.node.keeperQuestions(s).map(function (q) { return q.id; }), ["beach_captain"]);
+  var notLoss = function (q) { return q.id !== "loss_lead"; }; // the loss lead has its own test (Playtest Pins 0.9, #13)
+  eq(PC.node.keeperQuestions(s).filter(notLoss).map(function (q) { return q.id; }), ["beach_captain"]);
   var r = PC.node.askKeeperQuestion(s, "beach_captain");
   ok(r.line.indexOf("Arthur Twopenny") >= 0);
   ok(PC.npcs.isMet ? PC.npcs.isMet(s, "twopenny") : s.npcs.twopenny.met, "Twopenny is named now");
-  eq(PC.node.keeperQuestions(s).map(function (q) { return q.id + (q.asked ? "*" : ""); }), ["beach_captain*", "amber_jack"]);
+  eq(PC.node.keeperQuestions(s).filter(notLoss).map(function (q) { return q.id + (q.asked ? "*" : ""); }), ["beach_captain*", "amber_jack"]);
   var j = PC.node.askKeeperQuestion(s, "amber_jack");
   ok(j.line.indexOf("{keeper}") < 0 && j.line.indexOf(PC.npcs.get(s, PC.node.slotNpc("ocracoke", "keeper")).first + " stares") === 0);
   eq(s.ap.left, ap);
@@ -2692,6 +2693,17 @@ test("each hunt batch rolls a condition; a Storm batch makes a Ride Out Storm ch
   eq(g.batch.condition, "Storm");
   ok(s.ship.hull < hull, "a setback costs hull");
   ok(PC.huntGen.density(s, "Storm") < PC.huntGen.density(s, "Fair"));
+});
+
+test("Read Weather before a batch rolls itself at the batch's end, with no line in the log (#38)", function () {
+  var s = m7("wx4b"), g = PC.hunt.start(s), guard = 0;
+  while (g.phase !== "batchEnd" && guard++ < 12) {
+    if (g.phase === "scout" || g.phase === "hunter") { g.phase = "empty"; }
+    PC.hunt.next(s, g);
+  }
+  if (g.phase !== "batchEnd") return; // a hunter or an encounter took the batch; covered elsewhere
+  ok(g.readAhead, "rolled on its own");
+  ok(!g.log.some(function (l) { return /study the sky/.test(l); }), "no line");
 });
 
 test("Read Weather before a batch: clean reveals the next condition and rerolls a Storm once", function () {
@@ -3610,30 +3622,18 @@ test("Howe's information steps: three now, the notice board's after A Wanted Man
 // ---- The build 0.9 playtest pins (mid-Milestone 8) ----
 console.log("Milestone 8: the build 0.9 playtest pins (P1-P12)");
 
-test("P1/P11: provisions 20 a lot at a Modest port; hardtack half that; both sell back at half", function () {
+test("P1: provisions 20 a lot at a Modest port; they sell back at half", function () {
   var s = atNorfolk("pp1");
   eq(PC.data.economy.PROVISIONS_LOT, 20);
-  eq(PC.node.hardtackPrice(s), Math.round(PC.node.provisionsPrice(s) / 2));
-  s.money.crew = 1000; var g = s.money.crew, cost = PC.node.buyHardtack(s, 4).cost;
-  eq(s.hardtack, 4); eq(g - s.money.crew, cost); eq(PC.crew.food(s), s.provisions + 4);
-  var r = PC.node.sellHardtack(s, 2); eq(s.hardtack, 2); ok(r.gold > 0);
+  eq(PC.node.provisionsPrice(s), 20);
 });
 
-test("P11: ordinary lots are eaten first, then hardtack, at -2 morale for each action eaten on it", function () {
-  var s = m7("pp11"); s.time.season = 0; s.crew.rationing = false;
-  var per = Math.ceil(PC.world.headsAtSea(s) / 5);
-  s.provisions = per; s.hardtack = per * 3; s.crew.morale = 60;
-  var b = PC.world.burn(s, 2, {});
-  eq(s.provisions, 0); eq(s.hardtack, per * 3 - per * 2 + per); eq(b.hardtackAP, 1); eq(s.crew.morale, 58);
-  ok(!b.goWithout, "no Go Without check on hardtack");
-  eq(PC.world.hardtackActions(10, 2, 4, 6), 2, "an action is on hardtack if any of its burn was");
-  eq(PC.world.hardtackActions(10, 2, 5, 5), 1);
-});
-
-test("P11: hardtack takes hold space, and the save migration adds it", function () {
-  var s = m7("pp11b"); var used = PC.crew.slotsUsed(s); s.hardtack = 5; eq(PC.crew.slotsUsed(s), used + 5);
-  var old = JSON.parse(PC.state.serialize(s)); delete old.hardtack; old.saveVersion = 9;
-  var m = PC.state.deserialize(JSON.stringify(old)); eq(m.hardtack, 0); eq(m.saveVersion, PC.state.SAVE_VERSION);
+test("#51: hardtack is cut; the save migration turns any aboard into provisions", function () {
+  var s = m7("pp11b");
+  ok(!PC.node.buyHardtack && !PC.node.hardtackPrice, "no hardtack at the provisioner");
+  ok(!("hardtack" in s), "no hardtack in a new game");
+  var old = JSON.parse(PC.state.serialize(s)); old.hardtack = 5; old.saveVersion = 11; var p0 = old.provisions;
+  var m = PC.state.deserialize(JSON.stringify(old)); eq(m.provisions, p0 + 5); ok(!("hardtack" in m)); eq(m.saveVersion, PC.state.SAVE_VERSION);
 });
 
 test("P2: a prize carries her crew ÷ 5 × 2-4 lots; the calculator's provisions share is goods", function () {

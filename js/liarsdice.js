@@ -57,6 +57,7 @@
     if (!c.ok) throw new Error(c.why);
     if (!free) PC.crew.spendAP(state, 1);
     PC.node.tavernVisit(state);
+    PC.node.tavernActionDone(state); // the first Tavern action (Bug Log B4)
     state.minigames.diceSessions = (state.minigames.diceSessions || 0) + 1;
     var node = PC.node.here(state);
     var key = [state.world.seed, PC.state.stamp(state), node, "gambler", state.minigames.diceSessions].join("|");

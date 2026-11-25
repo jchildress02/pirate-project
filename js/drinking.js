@@ -63,6 +63,7 @@
     PC.crew.spendAP(state, 1);
     PC.crew.markUsed(state, "drinking");
     PC.node.tavernVisit(state); // a drinking session counts as a Tavern visit (§18.4.1)
+    PC.node.tavernActionDone(state); // the first Tavern action (Bug Log B4)
     state.minigames.drinkSessions = (state.minigames.drinkSessions || 0) + 1;
     var game = newMatch(state, state.minigames.drinkSessions);
     M().start(state, game, "node");

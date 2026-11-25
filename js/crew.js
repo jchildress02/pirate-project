@@ -134,14 +134,15 @@
     return n;
   }
 
-  // Every lot of food aboard: provisions and hardtack (P11).
-  function food(state) { return (state.provisions || 0) + (state.hardtack || 0); }
+  // Every lot of food aboard. (Hardtack, P11, was cut by the build 0.9
+  // playtest, #51: provisions are the only food again.)
+  function food(state) { return state.provisions || 0; }
 
-  // Take n lots of food: ordinary lots first, then hardtack. Returns what went.
+  // Take n lots of food. Returns what went.
   function takeFood(state, n) {
-    var p = Math.min(state.provisions || 0, n), h = Math.min(state.hardtack || 0, n - p);
-    state.provisions -= p; state.hardtack = (state.hardtack || 0) - h;
-    return { provisions: p, hardtack: h, total: p + h };
+    var p = Math.min(state.provisions || 0, n);
+    state.provisions -= p;
+    return { provisions: p, total: p };
   }
 
   function slotsUsed(state) {
@@ -180,7 +181,6 @@
     n = Math.max(0, Math.floor(n));
     if (!n) return;
     if (what === "provisions") state.provisions = Math.max(0, state.provisions - n);
-    else if (what === "hardtack") state.hardtack = Math.max(0, (state.hardtack || 0) - n);
     else if (what === "treasure") {
       var k = dirty ? "dirty" : "clean";
       state.cargo.treasure[k] = Math.max(0, state.cargo.treasure[k] - n);
@@ -209,7 +209,6 @@
     });
     goods.sort(function (a, b) { return a.base - b.base || (a.dirty ? -1 : 1); });
     goods.forEach(function (g) { if (slots <= 0) return; var k = Math.min(g.n, slots); plan.push({ what: g.what, n: k, dirty: g.dirty }); slots -= k; });
-    if (slots > 0 && state.hardtack) { var hk = Math.min(state.hardtack, slots); plan.push({ what: "hardtack", n: hk, dirty: false }); slots -= hk; }
     if (slots > 0 && state.provisions) { var p = Math.min(state.provisions, slots); plan.push({ what: "provisions", n: p, dirty: false }); slots -= p; }
     if (slots > 0) {
       var per = E().TREASURE_PER_SLOT, t = state.cargo.treasure;

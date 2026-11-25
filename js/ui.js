@@ -584,7 +584,7 @@
       lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? ' <span class="note">+ ' + state.crew.wounded + " wounded</span>" : "")) +
       lrow("Morale", state.crew.morale + ' · <span class="sc" style="font-size:16px">' + esc(PC.crew.band(state.crew.morale)) + "</span>") +
       // P8: provisions as lots, with time at sea in the tooltip.
-      lrow("Provisions", '<span title="' + esc(foodWords() + ": " + timeAtSea(PC.crew.food(state))) + '">' + esc(String(PC.crew.food(state))) + (state.hardtack ? ' <span class="note">(' + state.hardtack + " hardtack)</span>" : "") + "</span>") + "</table>" +
+      lrow("Provisions", '<span title="' + esc(foodWords() + ": " + timeAtSea(PC.crew.food(state))) + '">' + esc(String(PC.crew.food(state))) + "</span>") + "</table>" +
       '<button class="link fulllink" data-act="openmenu" data-menu="captain">Full captain sheet ›</button>' +
       meters(false) +
       '<div class="h4">Officers</div>' + offs.map(function (o) {
@@ -1502,27 +1502,8 @@
       ' <span class="note">tap for the manifest</span></summary><ul class="small">' + manifest.map(function (m) { return "<li>" + m + "</li>"; }).join("") + "</ul></details>";
   }
 
-  // "12 lots" or "12 lots (4 of them hardtack)".
-  function foodWords() { return PC.crew.food(state) + " lots" + (state.hardtack ? " (" + state.hardtack + " of them hardtack)" : ""); }
-
-  // Hardtack (P11 of the build 0.9 playtest pins): its own row under the
-  // provisions, always in stock, with its cost to morale said plainly.
-  function hardtackBlock(free, onHand) {
-    var hp = N().hardtackPrice(state), max = Math.min(free, afford(hp)), have = state.hardtack || 0;
-    var html = '<div class="svc"><h4>Hardtack</h4><p class="small">Cheap and grim: −' + (PC.data.economy.HARDTACK_MORALE || 2) + " morale for each action the crew eats it. It feeds the same as a lot, and the crew eat it only once the ordinary lots run out. Aboard: " + have + " lots.</p>" +
-      '<h5 class="sc">Buy</h5><p class="small">You pay ' + gold(hp) + " gold each. Always in stock.</p>" +
-      (free <= 0 ? '<p class="note">The hold is full.</p>' : max > 0 ? '<div class="buyrow">' + qstep("q-hard", Math.min(max, 10), max) + '<button class="primary" data-act="buyhard" data-for="q-hard">' +
-        totalSlot(function () { return "Buy · " + gold(val("q-hard") * hp); }, "") + "</button></div>" +
-        '<p class="small">' + totalSlot(function () { var n = val("q-hard"); return "After: " + (PC.crew.food(state) + n) + " lots aboard (" + timeAtSea(PC.crew.food(state) + n) + ") · " + gold(onHand() - n * hp) + " gold on hand"; }) + "</p>" : '<p class="note">You can\'t pay for a lot right now.</p>');
-    if (have > 0) {
-      var sp = N().hardtackSellPrice(state), cl = N().provisionerCapLeft(state);
-      var smax = Math.max(1, Math.min(have, sp > 0 ? Math.floor(cl / sp + 1e-9) : 0));
-      html += '<h5 class="sc" style="margin-top:10px">Sell</h5><p class="small">They pay ' + gold(sp) + " gold each.</p>" +
-        '<div class="buyrow">' + qstep("q-sellhard", 1, smax) + '<button class="secondary outline" data-act="sellhard" data-for="q-sellhard"' + (cl < sp ? " disabled" : "") + ">" +
-        totalSlot(function () { return "Sell · " + gold(val("q-sellhard") * sp); }, "") + "</button></div>";
-    }
-    return html + "</div>";
-  }
+  // "12 lots".
+  function foodWords() { return PC.crew.food(state) + " lots"; }
 
   // Provisions as time at sea, short form for the strip: "4½ actions".
   function seaTime(lots) {
@@ -1582,7 +1563,7 @@
             '<div class="buyrow">' + qstep("q-sellprov", 1, smax) + '<button class="secondary outline" data-act="sellprov" data-for="q-sellprov"' + (cl < sp ? " disabled" : "") + ">" +
             totalSlot(function () { return "Sell · " + gold(val("q-sellprov") * sp); }, "") + "</button></div>" +
             '<p class="small">' + totalSlot(function () { var n = val("q-sellprov"); return "After: " + Math.max(0, PC.crew.food(state) - n) + " lots aboard · " + gold(onHand() + n * sp) + " gold on hand"; }) + "</p>";
-        })() : "") + "</div>" + hardtackBlock(free, onHand);
+        })() : "") + "</div>";
       var stock = N().season(state).stock;
       html += '<div class="svc"><h4>For sale this season</h4><table class="grid"><tr><th>Goods</th><th>Left</th><th>Each</th><th>Buy</th></tr>' +
         Object.keys(stock).map(function (gname) {
@@ -1814,7 +1795,6 @@
   // provisions, then treasure) to change as he likes.
   function beachPicker(bch) {
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
-    if (state.hardtack) rows.push({ what: "hardtack", label: "Hardtack lots", n: state.hardtack, dirty: false });
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
@@ -1967,9 +1947,8 @@
     } else if (H.phase === "after") {
       html += afterPanel(H.after, H);
     } else if (H.phase === "batchEnd") {
-      if (H.canReadAhead) html += opts([opt({ act: "hreadwx", label: "Read the weather (optional)", check: chk(H.readCheck),
-        meta: "No action · once a batch. Clean: see the next batch's weather, and if it's a storm, wait it out (reroll once). Partial: see it. Setback: nothing." })]);
-      else if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + "</p>";
+      // Read Weather rolls itself (#38): only the next batch's weather shows.
+      if (H.readAhead && H.readAhead.seen) html += '<p class="small">Next batch: ' + wxBadge(H.readAhead.seen) + (H.readAhead.rerolled ? ' <span class="note">(you wait out a storm)</span>' : "") + "</p>";
       html += '<p>The horizon is empty for now.</p><div class="actions">' +
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
@@ -2502,7 +2481,6 @@
   function cargoTab() {
     var html = holdBar() + '<p class="small">Treasure packs five units to a slot. Every ship\'s hold adds to one total (see Fleet).</p>';
     var rows = [{ what: "provisions", label: "Provisions lots", n: state.provisions, dirty: false }];
-    if (state.hardtack) rows.push({ what: "hardtack", label: "Hardtack lots", n: state.hardtack, dirty: false });
     ["clean", "dirty"].forEach(function (k) { if (state.cargo.treasure[k]) rows.push({ what: "treasure", label: "Treasure", n: state.cargo.treasure[k], dirty: k === "dirty" }); });
     Object.keys(state.cargo.goods).forEach(function (g) {
       ["clean", "dirty"].forEach(function (k) { var n = state.cargo.goods[g][k]; if (n) rows.push({ what: g, label: g, n: n, dirty: k === "dirty" }); });
@@ -2974,14 +2952,13 @@
     },
     "hcarry": function () { markLog(); PC.hunt.carryOn(state, state.minigame); },
     "hmore": function () { markLog(); PC.hunt.anotherBatch(state, state.minigame); },
-    "hreadwx": function () { markLog(); PC.hunt.readAhead(state, state.minigame); },
     "hhome": function () { PC.hunt.sailHome(state, state.minigame); PC.minigames.leave(state); },
     "sellhull": function (el) {
       var id = who("shipwright");
       // A sale that leaves cargo with no room forces a jettison: warn first (A9, G7).
       var hh = N().hullSaleHold(state, el.dataset.ship);
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Selling her takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
-        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what === "hardtack" ? "hardtack lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her.", "Sell her anyway")) return;
       var r = N().sellHull(state, el.dataset.ship);
       say(id, firstName(id), r.line, null, null, r.gold ? { chips: [goldChip(r.gold), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard") : null, r.paid ? textChip("officer", plural(r.paid, "hand") + " paid off: no berths" + (r.paidFromPurse ? " (" + gold(r.paidFromPurse) + " from your purse)" : "")) : null]
           .concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) } : null);
@@ -2991,7 +2968,7 @@
     "layup": function (el) {
       var id = who("shipwright"), hh = N().hullSaleHold(state, el.dataset.ship);
       if (hh && hh.over && confirmFirst(el, "Throw cargo over the side?", "Laying her up takes " + hh.loses + " slots out of your hold. What's left won't fit, so this goes over the side:\n\n" +
-        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what === "hardtack" ? "hardtack lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
+        hh.plan.map(function (x) { return x.n + " " + (x.what === "provisions" ? "provisions lots" : x.what) + (x.dirty ? " (dirty)" : ""); }).join(", ") + "\n\nSell what you can first, or keep her with you.", "Lay her up anyway")) return;
       var r = N().layUp(state, el.dataset.ship);
       say(id, firstName(id), r.line, null, null, { chips: [goldChip(-r.up), textChip("ship", "Plus " + gold(r.season) + " gold a season, paid when you take her back"), r.home ? textChip("officer", plural(r.home, "hand") + " back aboard your flagship") : null,
         r.paidOff ? textChip("officer", plural(r.paidOff, "hand") + " paid off: no berths") : null].concat((r.jettisoned || []).map(function (x) { return textChip("cond", x.n + " " + x.what + " over the side", "bad"); })) });
@@ -3157,12 +3134,6 @@
       say(id, firstName(id), r.line, null, r.rumor ? [r.rumor.leadIn + " " + r.rumor.rumor.text] : null,
         { heardNote: r.rumor ? "Added to your Rumors." : null, chips: r.units ? [{ icon: "treasure", html: "Sold " + r.units + " " + dirtyName(el.dataset.what === "treasure" ? "treasure" : el.dataset.what, el.dataset.buyer === "fence") }, goldChip(r.gold)] : null });
     },
-    "buyhard": function (el) { var id = who("provisioner"); var n = qty(el); var r = N().buyHardtack(state, n); say(id, firstName(id), r.line, null, null, r.cost ? { chips: [textChip("prov", "+" + n + " hardtack", "good"), goldChip(-r.cost)] } : null); bought(r, "Bought " + n + " hardtack"); },
-    "sellhard": function (el) {
-      var r = N().sellHardtack(state, qty(el)), id = who("provisioner");
-      if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
-      say(id, firstName(id), r.line, null, null, { chips: r.units ? [{ icon: "treasure", text: "Sold " + plural(r.units, "hardtack lot") }, goldChip(r.gold)] : [] });
-    },
     "sellprov": function (el) {
       var r = N().sellProvisions(state, qty(el)), id = who("provisioner");
       if (r.units) toast("Sold " + plural(r.units, "lot") + " · +" + gold(r.gold) + " crew gold");
@@ -3209,7 +3180,7 @@
     "jettison": function (el) {
       var n = qty(el);
       if ((el.dataset.big === "1" || n > 3) && !jettisonOk) { jettisonOk = { what: el.dataset.what, n: n, dirty: el.dataset.dirty === "1" };
-        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what === "hardtack" ? "lots of hardtack" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
+        state.location.popup = { title: "Over the side?", text: "Throw " + n + " " + (el.dataset.what === "provisions" ? "lots of provisions" : el.dataset.what) + " overboard? It can't be fished back out.", chips: [], back: "jetcancel", ok: "jetconfirm", okLabel: "Over the side" };
         return; }
       PC.crew.jettison(state, el.dataset.what, n, el.dataset.dirty === "1");
     },
