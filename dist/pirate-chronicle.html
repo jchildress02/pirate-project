@@ -646,6 +646,37 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .flagtag.big { font-size: 20px; margin-bottom: 4px; }
 .flagtag.big .flag { width: 30px; height: 20px; }
 .h4 .flagtag { font-family: inherit; text-transform: none; letter-spacing: 0; }
+
+/* ---- The battle screen (Playtest Pins (Build 0.9), PR C) ---- */
+/* #26: decisions as strong buttons side by side; four make a 2×2; a phone wraps them. */
+.bchoices ol.choices { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 900px; }
+.bchoices.n1 ol.choices { grid-template-columns: minmax(0, 1fr); max-width: 680px; }
+.bchoices.n2 ol.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bchoices.n4 ol.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bchoices .choice { margin: 0; border: 2px solid var(--oxblood); background: rgba(122,36,22,.07); box-shadow: 0 1px 0 rgba(90,30,15,.25); }
+.bchoices .choice:hover { background: rgba(122,36,22,.13); }
+.bchoices .choice .pick span { font-weight: 600; color: var(--oxblood); }
+.bchoices .choice .meta { font-size: 14.5px; }
+.bstrike { margin-top: 10px; max-width: 680px; }
+.bstrike .choice { border: 1px dashed var(--rule); background: transparent; opacity: .75; }
+.bstrike .choice .pick span { font-size: 15.5px; color: var(--faded); }
+.bstrike .choice .meta { font-size: 13.5px; }
+/* #30: each line's check beside it. */
+.rtag { font-family: var(--sc); font-size: 14px; letter-spacing: .02em; white-space: nowrap; margin-left: 4px; }
+.rtag.t-good { color: #2f5a2a; } .rtag.t-mid { color: #8a6414; } .rtag.t-bad { color: #8f2a1c; }
+/* #31: the win, unmistakable. */
+.winbanner { font-family: var(--gp); font-size: 34px; line-height: 1.15; color: #2f5a2a; text-align: center; padding: 10px 8px 12px; margin: 0 0 10px;
+  border-top: 2px solid #2f5a2a; border-bottom: 2px solid #2f5a2a; background: rgba(47,90,42,.07); letter-spacing: .02em; }
+/* #39: prize ships are drawn smaller. */
+.bship.prizeship { opacity: .85; }
+@media (max-width: 760px) {
+  .bchoices ol.choices, .bchoices.n2 ol.choices, .bchoices.n4 ol.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .bchoices.n1 ol.choices { grid-template-columns: minmax(0, 1fr); }
+  .winbanner { font-size: 27px; }
+}
+.bchoices .choice .row { flex-wrap: wrap; }
+.bchoices .choice .oddsbtn { padding: 0 14px 8px; }
+.rtag svg { width: 11px; height: 11px; margin: 0 3px 0 4px; vertical-align: -1px; fill: currentColor; }
 </style>
 </head>
 <body>
@@ -6564,6 +6595,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     v.log = game.log.slice();
     v.lastRoll = game.lastRoll || null;
     v.rollList = (game.rollList || []).slice();
+    v.winBanner = game.winBanner || null; // #31 of the build 0.9 pins
     return v;
   }
 
@@ -8401,6 +8433,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (e.out) return;
     e.out = how;
     if (!quiet && (how === "struck" || how === "captured")) say(state, game, how === "struck" ? L().struck : L().crewBroken);
+    // #31: the win banner shows with this step's result (the first ship taken in a battle).
+    if ((how === "struck" || how === "captured") && !game.winBanner) game.winBanner = { at: Math.max(0, game.log.length - 1), how: how };
     if (how === "sunk") say(state, game, L().knockedOut.sunk);
     var taken = how === "struck" || how === "captured" || how === "sunk";
     if (!taken) return;
@@ -8490,7 +8524,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       condition: (game.batch && game.batch.condition) || game.condition || "Fair",
     };
     fleet(state).forEach(function (f) { b.startCrew[f.id] = f.crew; b.startHull[f.id] = f.hull; });
-    game.battle = b;
+    game.battle = b; game.winBanner = null; // #31: one banner a battle
     // Pirates fly a black flag, and the battle opens saying so (P6).
     if (enemies[0] && enemies[0].flag === "Pirate" && PC.minigames) PC.minigames.say(state, game, (PC.data.huntLines.blackFlag || "PLACEHOLDER: She runs up the black flag."));
     // Default pairings: the flagship takes the escort or the first ship.
@@ -9001,12 +9035,19 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var items = state.captain.items || [];
     return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
   }
+  var GUN = { "Simple Flintlock Pistol": 0, "Sea-Service Pistol": 1, "Dueling Pistol": 2, "Family Pistol": 2 };
   function gunBonus(state) {
     var items = state.captain.items || [];
-    var GUN = { "Simple Flintlock Pistol": 0, "Sea-Service Pistol": 1, "Dueling Pistol": 2, "Family Pistol": 2 };
     var best = null;
     items.forEach(function (i) { if (i in GUN && (best == null || GUN[i] > best)) best = GUN[i]; });
     return best;
+  }
+  // The gun the shot is fired with, for its line (#27): "flintlock pistol".
+  function gunName(state) {
+    var best = null;
+    (state.captain.items || []).forEach(function (i) { if (i in GUN && (best == null || GUN[i] > GUN[best])) best = i; });
+    if (!best) return "pistol";
+    return best === "Simple Flintlock Pistol" ? "flintlock pistol" : best.toLowerCase();
   }
 
   // The captain's five personal actions (§21.12), with what each needs.
@@ -9053,7 +9094,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   function settleShot(state, game, p) {
     var b = game.battle;
-    say(state, game, L().shot[p.outcome]);
+    say(state, game, String(L().shot[p.outcome]).replace(/\{weapon\}/g, gunName(state)));
     b.board.shotHit = p.outcome === "clean";
     var a = actions(state, b).filter(function (x) { return x.id === p.data.then; })[0];
     return rollAction(state, game, a);
@@ -9308,6 +9349,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   PC.combat = {
     rollEffect: rollEffect,
     _woundCaptain: woundCaptain, // for the tests (Bug Log B5)
+    _knockOut: knockOut, // for the tests (#31)
     weatherParts: weatherParts,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,
@@ -19103,7 +19145,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     votePre: "PLACEHOLDER: The crew want a Quartermaster of their own choosing. They'll vote before the day is out.",
     voteResult: "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.",
     demand: { clean: "PLACEHOLDER: \"Throw down your arms!\" They do. Her colors come down, and she's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
-    shot: { clean: "PLACEHOLDER: Your pistol barks and a man drops.", partial: "PLACEHOLDER: Your shot goes wide.", setback: "PLACEHOLDER: Your pistol misfires." },
+    // #27 of the build 0.9 pins: the line names the weapon ({weapon}: the captain's best gun, lowercase).
+    shot: { clean: "PLACEHOLDER: You fire your {weapon} and a man drops.", partial: "PLACEHOLDER: You fire your {weapon}, but the shot goes wide.", setback: "PLACEHOLDER: You fire your {weapon}, but it misfires." },
+    // #31: the win, unmistakable. A banner across the result when she strikes or is taken.
+    winBanner: { struck: "She strikes her colors!", captured: "She's yours!" },
     strikeFirst: { clean: "You strike first: +1 on the first clash.", partial: "Neither side gets the jump.", setback: "They strike first: +1 to them on the first clash." },
     flee: "PLACEHOLDER: You break off and run.",
     youStrike: "PLACEHOLDER: You haul down your colors.",
@@ -23386,7 +23431,42 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     chase: "The chase", show: "A show of force", position: "Position", strikeFirst: "Strike First", endure: "Hold on", drink: "Drink", strong: "The strong stuff", vote: "The vote" };
   // The latest move's lines, in the roll's color-coded box when a roll made
   // them (G4); the screen scrolls here (G1).
+  // Battle text drops its PLACEHOLDER marks (#28 of the build 0.9 pins): the
+  // author flags lines that don't work instead.
+  function noPh(t) { return String(t || "").replace(/^PLACEHOLDER:\s*/, "").replace(/\[PLACEHOLDER\]\s*/g, ""); }
+
+  // The hunt's result box (#24, #29, #30, #31): each line of text with the
+  // check it came from beside it ("You fire your pistol, but the shot goes
+  // wide. · ◆ Partial Marksmanship"); no header over the box and no roll list
+  // under it; a big banner when she strikes.
+  function huntLatest(lines, v) {
+    var from = Math.min(mgMark, lines.length);
+    var rs = (v.rollList || []).filter(function (r) { return r.logAt >= from && r.logAt <= lines.length; });
+    var lr = v.lastRoll && v.lastRoll.logAt >= from && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
+    var wb = v.winBanner && v.winBanner.at >= from && v.winBanner.at < lines.length ? v.winBanner : null;
+    var hasLine = false;
+    for (var k = from; k < lines.length; k++) if (lines[k]) hasLine = true;
+    if (!hasLine && !rs.length && !lr && !wb) return "";
+    var tag = function (r) {
+      var o = OUTCOME[r.outcome];
+      return ' <span class="rtag ' + (o ? o[1] : "t-mid") + '">· ' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + " " + esc(OP_NAME[r.op] || r.label) + "</span>";
+    };
+    var byAt = {};
+    rs.forEach(function (r) { (byAt[r.logAt] = byAt[r.logAt] || []).push(r); });
+    var out = wb ? '<div class="winbanner">' + esc(PC.data.huntLines.winBanner[wb.how] || "She's yours!") + "</div>" : "";
+    for (var i = from; i <= lines.length; i++) {
+      var here = byAt[i] || [], line = i < lines.length ? lines[i] : null;
+      if (wb && i === wb.at) { line = null; } // the banner says it
+      if (line) out += "<p>" + inline(noPh(line)) + here.map(tag).join("") + "</p>";
+      else here.forEach(function (r) { out += '<p class="small">' + esc((OP_NAME[r.op] || r.label) + (r.effect ? ": " + r.effect : "")) + tag(r) + "</p>"; });
+    }
+    if (lr && lr.chips && lr.chips.length) out += chips(lr.chips);
+    var key = "mg:hunt:" + lines.length + ":" + (lr ? lr.seq : 0);
+    return rbox(wb ? "clean" : lr ? lr.outcome : null, out, key, "mglatest" + (wb ? " won" : ""));
+  }
+
   function mgLatest(lines, v) {
+    if (v && v.kind === "hunt") return huntLatest(lines, v);
     var fresh = lines.slice(Math.min(mgMark, lines.length)).filter(function (l) { return l; });
     var lr = v && v.lastRoll && v.lastRoll.logAt >= mgMark && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
     if (!fresh.length && !lr) return "";
@@ -23408,9 +23488,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         "<b>" + esc(OP_NAME[r.op] || r.label) + "</b>" + (r.effect ? ": " + esc(r.effect) : "") + "</li>";
     }).join("") + "</ul>";
   }
-  function mgLog(lines) {
+  function mgLog(lines, hunt) {
     var old = lines.slice(0, Math.min(mgMark, lines.length)).slice(-6);
-    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>" : "";
+    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(hunt ? noPh(l) : l) : "<hr>"; }).join("") + "</div>" : "";
   }
 
   function gpips(n, max, cls) {
@@ -23560,9 +23640,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   var CA_INK = { "3": "t-good", "2": "t-good", "1": "t-good", "0": "t-mid", "-1": "t-bad", "-2": "t-bad", "-3": "t-bad", "-4": "t-bad" };
   function caWord(b) { return '<span class="tier ' + (CA_INK[String(b)] || "t-mid") + '">' + shape(CA_INK[String(b)] || "t-mid") + esc(PC.combat.caName(b)) + "</span>"; }
 
-  function shipArtHtml(cls, faded) {
+  function shipArtHtml(cls, faded, scale) {
     var art = PC.data.shipArt(cls), c = PC.data.hunt.CLASSES[cls] || { size: 1 };
-    var w = 70 + c.size * 26;
+    var w = Math.round((70 + c.size * 26) * (scale || 1));
     return art ? '<img class="shipart" src="' + assetUrl(art) + '" alt="' + esc(cls) + '" style="width:' + w + "px" + (faded ? ";opacity:.4" : "") + '">' : "";
   }
 
@@ -23575,7 +23655,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function qmSays(line, v) {
     if (!line) return "";
     var who = v.qm || "Your Quartermaster";
-    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(PC.text.render(line, state)) + "</div>";
+    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(noPh(PC.text.render(line, state))) + "</div>";
   }
 
   function huntStatus(v) {
@@ -23619,7 +23699,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     // After the battle, each step lands on its report (#48).
     if (H.phase === "after") html += '<div data-land="after"></div>';
     html += mgLatest(v.log, v);
-    if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending) + (H.phase === "battle" ? "" : mgLog(v.log, true));
     var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
     if (H.phase === "encounterEnd") {
       html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
@@ -23647,7 +23727,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
-    return html + mgLog(v.log);
+    // The log hides during a battle and comes back after it (#25).
+    return html + (H.phase === "battle" ? "" : mgLog(v.log, true));
   }
 
   // ---- Voyage events (§44): the card at sea, or in port as you leave ----
@@ -23739,7 +23820,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   function shipRow(s, enemy, target) {
     var hp = s.hullMax ? Math.max(0, Math.round(100 * s.hull / s.hullMax)) : 0;
     var outWord = { struck: "struck", captured: "taken", sunk: "sunk", escaped: "escaped", taken: "taken", left: "left behind" }[s.out] || "";
-    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + '">' + shipArtHtml(s.cls, !!s.out) +
+    // Prize ships don't fight (§21.8), so they're drawn smaller (#39).
+    var prize = !enemy && s.kind === "prize";
+    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + (prize ? " prizeship" : "") + '">' + shipArtHtml(s.cls, !!s.out, prize ? 0.55 : 1) +
       '<div>' + (enemy ? flagTag(s.flag, s.role) + " " : "") + '<b>' + dirtyName(s.name ? s.name : "A " + s.cls, enemy && s.flag && s.flag !== "Pirate") + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
       (outWord ? ' <span class="badge-out">' + esc(outWord) + "</span>" : "") +
       '<div class="hbar" style="height:9px;max-width:200px;margin:3px 0"><i style="width:' + hp + "%;background:" + (hp < 50 ? "#8f2a1c" : "#5e4528") + '"></i></div>' +
@@ -23754,6 +23837,13 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<div class="bside"><div class="h4">Theirs' + (b.enemies[0] ? " · " + flagTag(b.enemies[0].flag, b.enemies[0].role) : "") + '</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
     if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
+  }
+
+  // Battle decisions (#26 of the build 0.9 pins): the choices sit side by
+  // side as strong buttons, one row (four make a 2×2), wrapping on a phone.
+  function bopts(list) {
+    list = list.filter(Boolean);
+    return '<div class="bchoices n' + list.length + '">' + opts(list) + "</div>";
   }
 
   function battlePanel(b, H) {
@@ -23777,22 +23867,22 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
           '<div class="actions">' + B("engage", null, "Close and call on her to strike", "primary") + "</div>";
         break;
       case "showOfForce":
-        html += opts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
+        html += bopts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
         break;
       case "hunterChoice":
-        html += qmSays(A.hunter, H) + opts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
+        html += qmSays(A.hunter, H) + bopts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
           O("hunterChoice", "flee", "Run for it", chk({ type: "Outrun", dr: en ? 3 : 3 }), "Morale −15. Clean: escaped. Partial: escaped with a parting hit. Setback: she catches you, +1 to her Position.")]);
         break;
       case "chase": case "press":
         var fleeing = b.chaseMode === "flee";
         html += b.step === "press" ? '<p>She\'s pulling away. You\'re faster: you can keep after her, giving up your next sighting this action.</p>' + '<div class="actions">' + B("press", "yes", "Press the chase", "primary") + B("press", "no", "Let her go") + "</div>" :
-          opts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
+          bopts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
         break;
       case "position":
-        html += opts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
+        html += bopts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
         break;
       case "posChoice":
-        html += '<p class="sc">You have the position. What now?</p>' + opts([
+        html += '<p class="sc">You have the position. What now?</p>' + bopts([
           O("choosePosition", "rake", "Rake her", null, "+2 on this round's Exchange."),
           O("choosePosition", "close", "Close for boarding", chk(b.grappleCheck), "Skip the Exchange: the grapple rolls at once, +1."),
           O("choosePosition", "open", "Open the range", null, "Your next attempt to flee needs no roll.")]);
@@ -23801,33 +23891,34 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         var ex = b.exchange, rc = rawCheck("Exchange", ex.edge, ex.parts);
         var shots = [["round", "Round shot", "Full damage. Sink or cripple her."], ["chain", "Chain shot", "Half damage; a heavy hit costs her 1 Speed. Stops a runner."], ["grape", "Grapeshot", "Quarter damage, double crew losses. Thins her crew before boarding and keeps the prize whole."]];
         if (b.gunnersEye) { shots.push(["rigging", "Called shot: her rigging", "Gunner's Eye. Half damage; a heavy hit costs her 1 Speed."]); shots.push(["rudder", "Called shot: her rudder", "Gunner's Eye. Half damage; a heavy hit costs her −1 on her next Position."]); }
-        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + opts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
+        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + bopts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
         html += qmSays(me && en && me.crew >= 0.75 * en.crew ? A.grape : en && en.speed >= me.speed ? A.chain : A.fire, H);
         break;
       case "decision":
         var hurt = me.hull < 0.6 * me.hullMax;
-        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + opts([
+        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + bopts([
           O("decide", "fire", "Fire again", null, "A new round, starting with Position."),
           O("decide", "board", "Board her", chk(b.grappleCheck), "The grapple rolls at once. Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples. Then up to three clashes."),
-          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun.")),
-          O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]);
+          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun."))]) +
+          // Strike your colors sits apart, smaller and muted: it ends the game (#26).
+          '<div class="bstrike">' + opts([O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]) + "</div>";
         break;
       case "grapple":
-        html += opts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
+        html += bopts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
         break;
       case "repel":
-        html += '<p class="notice">She\'s coming alongside to board you.</p>' + opts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
+        html += '<p class="notice">She\'s coming alongside to board you.</p>' + bopts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
         break;
       case "clash":
         var bd = b.board || {};
         html += '<p class="sc" style="margin:4px 0">' + (bd.meBoarding ? "On her deck" : "On your deck") + " · clash " + (bd.clash + 1) + " of 3" + (bd.sf && bd.clash === 0 ? " · " + esc(PC.data.huntLines.strikeFirst[bd.sf]) : "") + "</p>" +
-          opts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
+          bopts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
         break;
       case "retarget":
         html += '<p class="sc">Your target is out of the fight. Who next?</p><div class="actions">' + b.enemies.filter(function (e) { return !e.out; }).map(function (e) { return B("retarget", e.id, esc(e.name || e.cls)); }).join("") + "</div>";
         break;
       case "endure":
-        html += opts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
+        html += bopts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
         break;
     }
     if (state.settings.showDice && b.lastExchange) html += '<div class="dice">Last Exchange: dice ' + b.lastExchange.dice.join(" + ") + ", edge " + signed(b.lastExchange.edge) + " · " + b.lastExchange.outcome + "</div>";

@@ -1760,7 +1760,42 @@
     chase: "The chase", show: "A show of force", position: "Position", strikeFirst: "Strike First", endure: "Hold on", drink: "Drink", strong: "The strong stuff", vote: "The vote" };
   // The latest move's lines, in the roll's color-coded box when a roll made
   // them (G4); the screen scrolls here (G1).
+  // Battle text drops its PLACEHOLDER marks (#28 of the build 0.9 pins): the
+  // author flags lines that don't work instead.
+  function noPh(t) { return String(t || "").replace(/^PLACEHOLDER:\s*/, "").replace(/\[PLACEHOLDER\]\s*/g, ""); }
+
+  // The hunt's result box (#24, #29, #30, #31): each line of text with the
+  // check it came from beside it ("You fire your pistol, but the shot goes
+  // wide. · ◆ Partial Marksmanship"); no header over the box and no roll list
+  // under it; a big banner when she strikes.
+  function huntLatest(lines, v) {
+    var from = Math.min(mgMark, lines.length);
+    var rs = (v.rollList || []).filter(function (r) { return r.logAt >= from && r.logAt <= lines.length; });
+    var lr = v.lastRoll && v.lastRoll.logAt >= from && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
+    var wb = v.winBanner && v.winBanner.at >= from && v.winBanner.at < lines.length ? v.winBanner : null;
+    var hasLine = false;
+    for (var k = from; k < lines.length; k++) if (lines[k]) hasLine = true;
+    if (!hasLine && !rs.length && !lr && !wb) return "";
+    var tag = function (r) {
+      var o = OUTCOME[r.outcome];
+      return ' <span class="rtag ' + (o ? o[1] : "t-mid") + '">· ' + shape(o ? o[1] : "t-mid") + esc(OUT_WORD[r.outcome] || r.outcome) + " " + esc(OP_NAME[r.op] || r.label) + "</span>";
+    };
+    var byAt = {};
+    rs.forEach(function (r) { (byAt[r.logAt] = byAt[r.logAt] || []).push(r); });
+    var out = wb ? '<div class="winbanner">' + esc(PC.data.huntLines.winBanner[wb.how] || "She's yours!") + "</div>" : "";
+    for (var i = from; i <= lines.length; i++) {
+      var here = byAt[i] || [], line = i < lines.length ? lines[i] : null;
+      if (wb && i === wb.at) { line = null; } // the banner says it
+      if (line) out += "<p>" + inline(noPh(line)) + here.map(tag).join("") + "</p>";
+      else here.forEach(function (r) { out += '<p class="small">' + esc((OP_NAME[r.op] || r.label) + (r.effect ? ": " + r.effect : "")) + tag(r) + "</p>"; });
+    }
+    if (lr && lr.chips && lr.chips.length) out += chips(lr.chips);
+    var key = "mg:hunt:" + lines.length + ":" + (lr ? lr.seq : 0);
+    return rbox(wb ? "clean" : lr ? lr.outcome : null, out, key, "mglatest" + (wb ? " won" : ""));
+  }
+
   function mgLatest(lines, v) {
+    if (v && v.kind === "hunt") return huntLatest(lines, v);
     var fresh = lines.slice(Math.min(mgMark, lines.length)).filter(function (l) { return l; });
     var lr = v && v.lastRoll && v.lastRoll.logAt >= mgMark && v.lastRoll.logAt <= lines.length ? v.lastRoll : null;
     if (!fresh.length && !lr) return "";
@@ -1782,9 +1817,9 @@
         "<b>" + esc(OP_NAME[r.op] || r.label) + "</b>" + (r.effect ? ": " + esc(r.effect) : "") + "</li>";
     }).join("") + "</ul>";
   }
-  function mgLog(lines) {
+  function mgLog(lines, hunt) {
     var old = lines.slice(0, Math.min(mgMark, lines.length)).slice(-6);
-    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(l) : "<hr>"; }).join("") + "</div>" : "";
+    return old.length ? '<div class="mglog">' + old.map(function (l) { return l ? prose(hunt ? noPh(l) : l) : "<hr>"; }).join("") + "</div>" : "";
   }
 
   function gpips(n, max, cls) {
@@ -1934,9 +1969,9 @@
   var CA_INK = { "3": "t-good", "2": "t-good", "1": "t-good", "0": "t-mid", "-1": "t-bad", "-2": "t-bad", "-3": "t-bad", "-4": "t-bad" };
   function caWord(b) { return '<span class="tier ' + (CA_INK[String(b)] || "t-mid") + '">' + shape(CA_INK[String(b)] || "t-mid") + esc(PC.combat.caName(b)) + "</span>"; }
 
-  function shipArtHtml(cls, faded) {
+  function shipArtHtml(cls, faded, scale) {
     var art = PC.data.shipArt(cls), c = PC.data.hunt.CLASSES[cls] || { size: 1 };
-    var w = 70 + c.size * 26;
+    var w = Math.round((70 + c.size * 26) * (scale || 1));
     return art ? '<img class="shipart" src="' + assetUrl(art) + '" alt="' + esc(cls) + '" style="width:' + w + "px" + (faded ? ";opacity:.4" : "") + '">' : "";
   }
 
@@ -1949,7 +1984,7 @@
   function qmSays(line, v) {
     if (!line) return "";
     var who = v.qm || "Your Quartermaster";
-    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(PC.text.render(line, state)) + "</div>";
+    return '<div class="qm"><b>' + esc(who) + ', Quartermaster:</b> ' + inline(noPh(PC.text.render(line, state))) + "</div>";
   }
 
   function huntStatus(v) {
@@ -1993,7 +2028,7 @@
     // After the battle, each step lands on its report (#48).
     if (H.phase === "after") html += '<div data-land="after"></div>';
     html += mgLatest(v.log, v);
-    if (v.pending) return html + mgPending(v.pending) + mgLog(v.log);
+    if (v.pending) return html + mgPending(v.pending) + (H.phase === "battle" ? "" : mgLog(v.log, true));
     var home = H.encounter ? "" : H.canContinue.ok || H.phase === "batchEnd" ? '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() : "";
     if (H.phase === "encounterEnd") {
       html += '<div class="actions"><button class="primary" data-top="1" data-act="mgleave">Back to your voyage</button></div>';
@@ -2021,7 +2056,8 @@
         (H.apLeft >= 1 && H.apUsed < H.maxAp ? '<button class="primary" data-act="hmore" data-cost-ap="1">Keep hunting (1 action)</button>' : '<span class="note">' + esc(H.apLeft < 1 ? "No actions left this season." : "A hunt is at most three actions.") + "</span>") +
         '<button class="secondary" data-act="hhome">' + esc(homeLabel) + "</button>" + sailOnButtons() + "</div>";
     }
-    return html + mgLog(v.log);
+    // The log hides during a battle and comes back after it (#25).
+    return html + (H.phase === "battle" ? "" : mgLog(v.log, true));
   }
 
   // ---- Voyage events (§44): the card at sea, or in port as you leave ----
@@ -2113,7 +2149,9 @@
   function shipRow(s, enemy, target) {
     var hp = s.hullMax ? Math.max(0, Math.round(100 * s.hull / s.hullMax)) : 0;
     var outWord = { struck: "struck", captured: "taken", sunk: "sunk", escaped: "escaped", taken: "taken", left: "left behind" }[s.out] || "";
-    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + '">' + shipArtHtml(s.cls, !!s.out) +
+    // Prize ships don't fight (§21.8), so they're drawn smaller (#39).
+    var prize = !enemy && s.kind === "prize";
+    return '<div class="bship' + (s.out ? " out" : "") + (target ? " target" : "") + (prize ? " prizeship" : "") + '">' + shipArtHtml(s.cls, !!s.out, prize ? 0.55 : 1) +
       '<div>' + (enemy ? flagTag(s.flag, s.role) + " " : "") + '<b>' + dirtyName(s.name ? s.name : "A " + s.cls, enemy && s.flag && s.flag !== "Pirate") + '</b> <span class="note">' + esc(s.cls + (s.kind === "prize" ? " · prize" : "") + (s.escort ? " · escort" : "")) + "</span>" +
       (outWord ? ' <span class="badge-out">' + esc(outWord) + "</span>" : "") +
       '<div class="hbar" style="height:9px;max-width:200px;margin:3px 0"><i style="width:' + hp + "%;background:" + (hp < 50 ? "#8f2a1c" : "#5e4528") + '"></i></div>' +
@@ -2128,6 +2166,13 @@
       '<div class="bside"><div class="h4">Theirs' + (b.enemies[0] ? " · " + flagTag(b.enemies[0].flag, b.enemies[0].role) : "") + '</div>' + b.enemies.map(function (s) { return shipRow(s, true, s.id === b.target); }).join("") + "</div></div>";
     if (b.ca != null) html += '<p class="sc" style="margin:6px 0">' + (b.condition ? wxBadge(b.condition) + " " : "") + "Round " + Math.max(1, b.round) + " · the odds: " + caWord(b.ca) + (b.enemies.length > 1 ? " · whole fleet " + caWord(b.fleetCA) : "") + "</p>";
     return html;
+  }
+
+  // Battle decisions (#26 of the build 0.9 pins): the choices sit side by
+  // side as strong buttons, one row (four make a 2×2), wrapping on a phone.
+  function bopts(list) {
+    list = list.filter(Boolean);
+    return '<div class="bchoices n' + list.length + '">' + opts(list) + "</div>";
   }
 
   function battlePanel(b, H) {
@@ -2151,22 +2196,22 @@
           '<div class="actions">' + B("engage", null, "Close and call on her to strike", "primary") + "</div>";
         break;
       case "showOfForce":
-        html += opts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
+        html += bopts([O("showOfForce", "yes", "A show of force (optional)", chk(b.check), "Prize Taker. Clean: +1 on the strike roll. Anything else: no harm done."), O("showOfForce", "no", "Just call on her to strike", null, "No roll")]);
         break;
       case "hunterChoice":
-        html += qmSays(A.hunter, H) + opts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
+        html += qmSays(A.hunter, H) + bopts([O("hunterChoice", "fight", "Fight her", null, "She won't strike or run before the battle."),
           O("hunterChoice", "flee", "Run for it", chk({ type: "Outrun", dr: en ? 3 : 3 }), "Morale −15. Clean: escaped. Partial: escaped with a parting hit. Setback: she catches you, +1 to her Position.")]);
         break;
       case "chase": case "press":
         var fleeing = b.chaseMode === "flee";
         html += b.step === "press" ? '<p>She\'s pulling away. You\'re faster: you can keep after her, giving up your next sighting this action.</p>' + '<div class="actions">' + B("press", "yes", "Press the chase", "primary") + B("press", "no", "Let her go") + "</div>" :
-          opts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
+          bopts([O("doChase", null, fleeing ? "Run for it" : "Give chase", chk(b.check), fleeing ? "Clean: escaped. Partial: escaped, with a parting hit. Setback: caught; she gets +1 to Position." : "Clean: caught, +1 to your first Position. Partial: caught. Setback: she gets away (unless you're faster and press the chase).")]);
         break;
       case "position":
-        html += opts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
+        html += bopts([O("doPosition", null, "Work for position", chk(b.check), "Maneuver against her captain. Clean lets you Rake, Close or Open the range; partial +1 on the Exchange, setback −1.")]);
         break;
       case "posChoice":
-        html += '<p class="sc">You have the position. What now?</p>' + opts([
+        html += '<p class="sc">You have the position. What now?</p>' + bopts([
           O("choosePosition", "rake", "Rake her", null, "+2 on this round's Exchange."),
           O("choosePosition", "close", "Close for boarding", chk(b.grappleCheck), "Skip the Exchange: the grapple rolls at once, +1."),
           O("choosePosition", "open", "Open the range", null, "Your next attempt to flee needs no roll.")]);
@@ -2175,33 +2220,34 @@
         var ex = b.exchange, rc = rawCheck("Exchange", ex.edge, ex.parts);
         var shots = [["round", "Round shot", "Full damage. Sink or cripple her."], ["chain", "Chain shot", "Half damage; a heavy hit costs her 1 Speed. Stops a runner."], ["grape", "Grapeshot", "Quarter damage, double crew losses. Thins her crew before boarding and keeps the prize whole."]];
         if (b.gunnersEye) { shots.push(["rigging", "Called shot: her rigging", "Gunner's Eye. Half damage; a heavy hit costs her 1 Speed."]); shots.push(["rudder", "Called shot: her rudder", "Gunner's Eye. Half damage; a heavy hit costs her −1 on her next Position."]); }
-        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + opts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
+        html += '<p class="sc" style="margin:4px 0">The Exchange · pick your shot</p>' + bopts(shots.map(function (x) { return O("doExchange", x[0], x[1], rc, x[2]); }));
         html += qmSays(me && en && me.crew >= 0.75 * en.crew ? A.grape : en && en.speed >= me.speed ? A.chain : A.fire, H);
         break;
       case "decision":
         var hurt = me.hull < 0.6 * me.hullMax;
-        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + opts([
+        html += qmSays(hurt ? A.run : me.crew >= 0.75 * (en ? en.crew : 1) ? A.board : A.fire, H) + bopts([
           O("decide", "fire", "Fire again", null, "A new round, starting with Position."),
           O("decide", "board", "Board her", chk(b.grappleCheck), "The grapple rolls at once. Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples. Then up to three clashes."),
-          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun.")),
-          O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]);
+          O("decide", "flee", "Break off and run", null, "Morale −15. " + (b.openRange ? "You opened the range: no roll needed." : "A chase: Outrun."))]) +
+          // Strike your colors sits apart, smaller and muted: it ends the game (#26).
+          '<div class="bstrike">' + opts([O("decide", "strike", "Strike your colors", null, "The battle is lost, and your story ends here.")]) + "</div>";
         break;
       case "grapple":
-        html += opts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
+        html += bopts([O("doGrapple", null, "Grapple her", chk(b.check), "Clean: you're aboard. Partial: aboard, but she sweeps your deck with grape. Setback: they cut your grapples.")]);
         break;
       case "repel":
-        html += '<p class="notice">She\'s coming alongside to board you.</p>' + opts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
+        html += '<p class="notice">She\'s coming alongside to board you.</p>' + bopts([O("doRepel", null, "Repel boarders", chk(b.check), "Clean: cut her grapples and rake her as she sheers off. Partial: they're aboard, but pay for it. Setback: they're aboard.")]);
         break;
       case "clash":
         var bd = b.board || {};
         html += '<p class="sc" style="margin:4px 0">' + (bd.meBoarding ? "On her deck" : "On your deck") + " · clash " + (bd.clash + 1) + " of 3" + (bd.sf && bd.clash === 0 ? " · " + esc(PC.data.huntLines.strikeFirst[bd.sf]) : "") + "</p>" +
-          opts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
+          bopts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
         break;
       case "retarget":
         html += '<p class="sc">Your target is out of the fight. Who next?</p><div class="actions">' + b.enemies.filter(function (e) { return !e.out; }).map(function (e) { return B("retarget", e.id, esc(e.name || e.cls)); }).join("") + "</div>";
         break;
       case "endure":
-        html += opts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
+        html += bopts([O("doEndure", null, "Hold on", chk(b.check), "Endure, as your ship goes down.")]);
         break;
     }
     if (state.settings.showDice && b.lastExchange) html += '<div class="dice">Last Exchange: dice ' + b.lastExchange.dice.join(" + ") + ", edge " + signed(b.lastExchange.edge) + " · " + b.lastExchange.outcome + "</div>";

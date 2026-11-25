@@ -296,6 +296,8 @@
     if (e.out) return;
     e.out = how;
     if (!quiet && (how === "struck" || how === "captured")) say(state, game, how === "struck" ? L().struck : L().crewBroken);
+    // #31: the win banner shows with this step's result (the first ship taken in a battle).
+    if ((how === "struck" || how === "captured") && !game.winBanner) game.winBanner = { at: Math.max(0, game.log.length - 1), how: how };
     if (how === "sunk") say(state, game, L().knockedOut.sunk);
     var taken = how === "struck" || how === "captured" || how === "sunk";
     if (!taken) return;
@@ -385,7 +387,7 @@
       condition: (game.batch && game.batch.condition) || game.condition || "Fair",
     };
     fleet(state).forEach(function (f) { b.startCrew[f.id] = f.crew; b.startHull[f.id] = f.hull; });
-    game.battle = b;
+    game.battle = b; game.winBanner = null; // #31: one banner a battle
     // Pirates fly a black flag, and the battle opens saying so (P6).
     if (enemies[0] && enemies[0].flag === "Pirate" && PC.minigames) PC.minigames.say(state, game, (PC.data.huntLines.blackFlag || "PLACEHOLDER: She runs up the black flag."));
     // Default pairings: the flagship takes the escort or the first ship.
@@ -896,12 +898,19 @@
     var items = state.captain.items || [];
     return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
   }
+  var GUN = { "Simple Flintlock Pistol": 0, "Sea-Service Pistol": 1, "Dueling Pistol": 2, "Family Pistol": 2 };
   function gunBonus(state) {
     var items = state.captain.items || [];
-    var GUN = { "Simple Flintlock Pistol": 0, "Sea-Service Pistol": 1, "Dueling Pistol": 2, "Family Pistol": 2 };
     var best = null;
     items.forEach(function (i) { if (i in GUN && (best == null || GUN[i] > best)) best = GUN[i]; });
     return best;
+  }
+  // The gun the shot is fired with, for its line (#27): "flintlock pistol".
+  function gunName(state) {
+    var best = null;
+    (state.captain.items || []).forEach(function (i) { if (i in GUN && (best == null || GUN[i] > GUN[best])) best = i; });
+    if (!best) return "pistol";
+    return best === "Simple Flintlock Pistol" ? "flintlock pistol" : best.toLowerCase();
   }
 
   // The captain's five personal actions (§21.12), with what each needs.
@@ -948,7 +957,7 @@
 
   function settleShot(state, game, p) {
     var b = game.battle;
-    say(state, game, L().shot[p.outcome]);
+    say(state, game, String(L().shot[p.outcome]).replace(/\{weapon\}/g, gunName(state)));
     b.board.shotHit = p.outcome === "clean";
     var a = actions(state, b).filter(function (x) { return x.id === p.data.then; })[0];
     return rollAction(state, game, a);
@@ -1203,6 +1212,7 @@
   PC.combat = {
     rollEffect: rollEffect,
     _woundCaptain: woundCaptain, // for the tests (Bug Log B5)
+    _knockOut: knockOut, // for the tests (#31)
     weatherParts: weatherParts,
     caBand: caBand, caName: caName, br: br, manned: manned, ship: ship, dreadBonus: dreadBonus, playerGunnery: playerGunnery,
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,

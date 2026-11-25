@@ -268,7 +268,10 @@
     votePre: "PLACEHOLDER: The crew want a Quartermaster of their own choosing. They'll vote before the day is out.",
     voteResult: "The crew gathers to elect a new Quartermaster. After deliberating for some time, they select [Officer] to represent their interests.",
     demand: { clean: "PLACEHOLDER: \"Throw down your arms!\" They do. Her colors come down, and she's yours.", partial: "PLACEHOLDER: \"Throw down your arms!\" Some of them hesitate.", setback: "PLACEHOLDER: \"Throw down your arms!\" They laugh at you." },
-    shot: { clean: "PLACEHOLDER: Your pistol barks and a man drops.", partial: "PLACEHOLDER: Your shot goes wide.", setback: "PLACEHOLDER: Your pistol misfires." },
+    // #27 of the build 0.9 pins: the line names the weapon ({weapon}: the captain's best gun, lowercase).
+    shot: { clean: "PLACEHOLDER: You fire your {weapon} and a man drops.", partial: "PLACEHOLDER: You fire your {weapon}, but the shot goes wide.", setback: "PLACEHOLDER: You fire your {weapon}, but it misfires." },
+    // #31: the win, unmistakable. A banner across the result when she strikes or is taken.
+    winBanner: { struck: "She strikes her colors!", captured: "She's yours!" },
     strikeFirst: { clean: "You strike first: +1 on the first clash.", partial: "Neither side gets the jump.", setback: "They strike first: +1 to them on the first clash." },
     flee: "PLACEHOLDER: You break off and run.",
     youStrike: "PLACEHOLDER: You haul down your colors.",

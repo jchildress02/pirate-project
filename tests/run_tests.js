@@ -4023,6 +4023,29 @@ test("the run log records choices, checks with their keys and state changes, and
   } finally { RL.on = false; RL.clear(); }
 });
 
+
+// ---- Post-M8 playtest, PR C: the battle screen ----
+console.log("Post-M8 playtest, PR C: the battle screen");
+
+test("#27: the boarding shot's line names the weapon", function () {
+  var t = PC.data.huntLines.shot;
+  ["clean", "partial", "setback"].forEach(function (k) { ok(/\{weapon\}/.test(t[k]), k); });
+  ok(/goes wide/.test(t.partial));
+});
+
+test("#31: the first ship to strike in a battle raises the win banner, one a battle", function () {
+  var s = m7("c31"), g = huntWith(s, PC.huntGen.sighting(s, "north", PC.rng.fromKey("c31"), { kind: "ship", flag: "Pirate", cls: "Sloop" }));
+  PC.hunt.engage(s, g);
+  if (!g.battle) return; // she ran before the battle; the banner is the battle's
+  var e = g.battle.enemies[0];
+  ok(!g.winBanner);
+  PC.combat._knockOut ? PC.combat._knockOut(s, g, g.battle, e, "struck") : null;
+  if (!PC.combat._knockOut) return;
+  ok(g.winBanner && g.winBanner.how === "struck");
+  eq(PC.minigames.view(s).winBanner.how, "struck");
+  ok(PC.data.huntLines.winBanner.struck === "She strikes her colors!");
+});
+
 test("the build label reads Build 0.9 · Milestone 8", function () {
   var src = require("fs").readFileSync(require("path").join(__dirname, "..", "js", "ui.js"), "utf8");
   ok(/Build 0\.9 · Milestone 8/.test(src));

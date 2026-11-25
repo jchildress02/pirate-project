@@ -639,3 +639,34 @@ h2.title.smallname { font-size: 28px; margin: 2px 0 8px; }
 .flagtag.big { font-size: 20px; margin-bottom: 4px; }
 .flagtag.big .flag { width: 30px; height: 20px; }
 .h4 .flagtag { font-family: inherit; text-transform: none; letter-spacing: 0; }
+
+/* ---- The battle screen (Playtest Pins (Build 0.9), PR C) ---- */
+/* #26: decisions as strong buttons side by side; four make a 2×2; a phone wraps them. */
+.bchoices ol.choices { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 900px; }
+.bchoices.n1 ol.choices { grid-template-columns: minmax(0, 1fr); max-width: 680px; }
+.bchoices.n2 ol.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bchoices.n4 ol.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bchoices .choice { margin: 0; border: 2px solid var(--oxblood); background: rgba(122,36,22,.07); box-shadow: 0 1px 0 rgba(90,30,15,.25); }
+.bchoices .choice:hover { background: rgba(122,36,22,.13); }
+.bchoices .choice .pick span { font-weight: 600; color: var(--oxblood); }
+.bchoices .choice .meta { font-size: 14.5px; }
+.bstrike { margin-top: 10px; max-width: 680px; }
+.bstrike .choice { border: 1px dashed var(--rule); background: transparent; opacity: .75; }
+.bstrike .choice .pick span { font-size: 15.5px; color: var(--faded); }
+.bstrike .choice .meta { font-size: 13.5px; }
+/* #30: each line's check beside it. */
+.rtag { font-family: var(--sc); font-size: 14px; letter-spacing: .02em; white-space: nowrap; margin-left: 4px; }
+.rtag.t-good { color: #2f5a2a; } .rtag.t-mid { color: #8a6414; } .rtag.t-bad { color: #8f2a1c; }
+/* #31: the win, unmistakable. */
+.winbanner { font-family: var(--gp); font-size: 34px; line-height: 1.15; color: #2f5a2a; text-align: center; padding: 10px 8px 12px; margin: 0 0 10px;
+  border-top: 2px solid #2f5a2a; border-bottom: 2px solid #2f5a2a; background: rgba(47,90,42,.07); letter-spacing: .02em; }
+/* #39: prize ships are drawn smaller. */
+.bship.prizeship { opacity: .85; }
+@media (max-width: 760px) {
+  .bchoices ol.choices, .bchoices.n2 ol.choices, .bchoices.n4 ol.choices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .bchoices.n1 ol.choices { grid-template-columns: minmax(0, 1fr); }
+  .winbanner { font-size: 27px; }
+}
+.bchoices .choice .row { flex-wrap: wrap; }
+.bchoices .choice .oddsbtn { padding: 0 14px 8px; }
+.rtag svg { width: 11px; height: 11px; margin: 0 3px 0 4px; vertical-align: -1px; fill: currentColor; }

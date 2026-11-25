@@ -152,6 +152,7 @@
     v.log = game.log.slice();
     v.lastRoll = game.lastRoll || null;
     v.rollList = (game.rollList || []).slice();
+    v.winBanner = game.winBanner || null; // #31 of the build 0.9 pins
     return v;
   }
 
