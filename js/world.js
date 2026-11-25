@@ -269,6 +269,8 @@
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
+    // Holdings (§27.5): income into the ledgers; the Hostile warning and seizure (§28.2).
+    if (PC.holdings) { var hs = PC.holdings.season(state); out.lines = out.lines.concat(hs.lines); out.chips = out.chips.concat(hs.chips); }
     // Laid-up ships' anchorage runs up (§20.4), paid when she's taken back.
     PC.node.layUpSeason(state);
     // The meters (§28): Heat bleed, Standing's drift, Dread's decay.

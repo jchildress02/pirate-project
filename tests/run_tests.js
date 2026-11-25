@@ -6,9 +6,9 @@
 var path = require("path");
 var root = path.join(__dirname, "..");
 [
-  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/items.js", "js/shop.js", "js/devtools.js",
+  "js/rng.js", "js/checks.js", "js/runlog.js", "js/meters.js", "js/letters.js", "js/state.js", "js/text.js", "js/npcs.js", "js/crew.js", "js/articles.js", "js/node.js", "js/scenes.js", "js/quests.js", "js/officers.js", "js/rumors.js", "js/validate.js", "js/creator.js", "js/minigames.js", "js/salvage.js", "js/drinking.js", "js/liarsdice.js", "js/hunt_gen.js", "js/combat.js", "js/hunt.js", "js/summary.js", "js/world.js", "js/weather.js", "js/voyage_events.js", "js/norfolk.js", "js/inspections.js", "js/forgery.js", "js/admiralty.js", "js/prison.js", "js/escape.js", "js/mutiny.js", "js/bounties.js", "js/wanted.js", "js/items.js", "js/shop.js", "js/holdings.js", "js/devtools.js",
   "content/check_types.js", "content/modifiers.js", "content/items.js", "content/creator.js", "content/ships.js", "content/names.js", "content/economy.js", "content/articles.js",
-  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js", "content/wanted_man.js",
+  "content/test_captain.js", "content/test_scenes.js", "content/ocracoke.js", "content/ocracoke_scenes.js", "content/quests.js", "content/rumors.js", "content/officer_lines.js", "content/minigames.js", "content/hunt.js", "content/world.js", "content/weather.js", "content/norfolk.js", "content/voyage_events.js", "content/norfolk_scenes.js", "content/inspection_scenes.js", "content/admiralty_scenes.js", "content/prison.js", "content/mutiny.js", "content/bounties.js", "content/wanted_man.js", "content/holdings.js",
 ].forEach(function (f) { require(path.join(root, f)); });
 var PC = globalThis.PC;
 PC.voyageEvents.off = true; // the voyage-event tests (PR 4) turn them on themselves
@@ -4585,9 +4585,9 @@ test("Key's Spyglass at Trusted: given once; +1 Keep Watch and her captain's rat
   ok(a.parts.some(function (p) { return /Spyglass/.test(p.label); }), JSON.stringify(a.parts));
 });
 
-test("the build label reads Build 0.9 · Milestone 8", function () {
+test("the build label reads Build 0.10 · Milestone 9", function () {
   var src = require("fs").readFileSync(require("path").join(__dirname, "..", "js", "ui.js"), "utf8");
-  ok(/Build 0\.9 · Milestone 8/.test(src));
+  ok(/Build 0\.10 · Milestone 9/.test(src));
 });
 
 
@@ -4845,6 +4845,85 @@ test("save 17 loads as 18: a carried Giant Tooth hangs in the cabin", function (
   data.saveVersion = 17; data.captain.items.push("Giant Tooth"); delete data.shops;
   var t = PC.state.deserialize(JSON.stringify(data));
   eq(t.saveVersion, PC.state.SAVE_VERSION); eq(t.ship.cabin.join(), "Giant Tooth"); ok(t.captain.items.indexOf("Giant Tooth") < 0);
+});
+
+
+console.log("Milestone 9, PR 7: holdings and homes (§27.5, §27.6)");
+test("Ocracoke's harbor clerk: the Official in his own tent; a warehouse and a home for sale; the keeper sells a share", function () {
+  var s = huntReady("hd1");
+  ok(PC.node.places(s).some(function (p) { return p.id === "clerk"; }));
+  PC.node.enter(s, "clerk");
+  var off = PC.holdings.seller(s, "ocracoke", "warehouse");
+  ok(off.npc); eq(PC.npcs.get(s, off.npc).role, "Official");
+  var o = PC.holdings.offers(s, "ocracoke", "official").map(function (x) { return x.type + ":" + x.price; });
+  eq(o.join(), "warehouse:3000,home:2000");
+  eq(PC.holdings.offers(s, "ocracoke", "keeper")[0].price, 1800);
+});
+
+test("buying: from the purse, with the seller's friendship; pays from the next season into the ledger; collected on arrival", function () {
+  var s = huntReady("hd2"); s.money.purse = 10000;
+  PC.node.enter(s, "clerk");
+  var off = PC.holdings.seller(s, "ocracoke", "warehouse");
+  PC.npcs.moveRung(s, off.npc, 2 - PC.npcs.rung(s, off.npc)); // Friend: −10%
+  var r = PC.holdings.buy(s, "warehouse");
+  eq(r.paid, 2700); eq(s.money.purse, 7300);
+  var threw = false; try { PC.holdings.buy(s, "warehouse"); } catch (e) { threw = true; } ok(threw, "one of each a node");
+  var h = PC.holdings.find(s, "ocracoke", "warehouse");
+  PC.holdings.season(s); eq(h.ledger, 0, "nothing the season it's bought");
+  PC.holdings.season(s); eq(h.ledger, 120);
+  PC.holdings.season(s); eq(h.ledger, 240, "uncapped");
+  var line = PC.holdings.collect(s, "ocracoke");
+  ok(/240/.test(line)); eq(s.money.purse, 7540); eq(h.ledger, 0);
+});
+
+test("upgrades: ×0.5 then ×1.0 of the price; income ×1.75 then ×3.25 from the next season; a tavern share's Upgrade II adds a rumor", function () {
+  var s = atNorfolk("hd3"); s.money.purse = 100000;
+  PC.node.enter(s, "tavern");
+  PC.holdings.buy(s, "tavern");
+  var h = PC.holdings.find(s, "norfolk", "tavern");
+  eq(PC.holdings.rumorBonus(s, "norfolk"), 0, "not until it's live");
+  PC.holdings.season(s);
+  eq(PC.holdings.rumorBonus(s, "norfolk"), 1);
+  var p = s.money.purse; PC.holdings.upgrade(s, "tavern"); eq(p - s.money.purse, 4500);
+  PC.holdings.season(s); eq(h.ledger, 315, "the old level this season");
+  PC.holdings.season(s); eq(h.ledger, 315 + Math.round(315 * 1.75));
+  p = s.money.purse; PC.holdings.upgrade(s, "tavern"); eq(p - s.money.purse, 9000);
+  PC.holdings.season(s); eq(PC.holdings.rumorBonus(s, "norfolk"), 2);
+  var before = s.money.purse, led = h.ledger;
+  PC.holdings.sellBack(s, "tavern");
+  eq(s.money.purse - before, Math.round((9000 + 4500 + 9000) * 0.5) + led, "half of everything put in, plus the ledger");
+  ok(!PC.holdings.find(s, "norfolk", "tavern"));
+});
+
+test("the gate: barred at Hostile; at Hostile a season's warning, then seized with the ledger", function () {
+  var s = atNorfolk("hd4"); s.money.purse = 30000;
+  PC.holdings.buy(s, "warehouse");
+  PC.holdings.season(s); PC.holdings.season(s);
+  s.meters.standing.avalon = -50;
+  ok(PC.holdings.offers(s, "norfolk", "official").filter(function (o) { return o.type === "home"; })[0].lock, "barred");
+  var o = PC.holdings.season(s); ok(o.lines.length && PC.holdings.find(s, "norfolk", "warehouse").warned);
+  o = PC.holdings.season(s); ok(!PC.holdings.find(s, "norfolk", "warehouse"), "seized");
+});
+
+test("a home: no income; display spots by its price; what hangs there works anywhere and survives losing the ship", function () {
+  var s = atNorfolk("hd5"); s.money.purse = 30000;
+  PC.holdings.buy(s, "home");
+  eq(PC.holdings.homeSpots("norfolk"), 3);
+  PC.items.gain(s, "Giant Tooth"); PC.items.gain(s, "Inca Crown");
+  PC.holdings.hang(s, "Giant Tooth"); PC.holdings.hang(s, "Inca Crown");
+  eq(PC.meters.dreadFloor(s), 15);
+  PC.prison.loseEverything(s);
+  eq(PC.meters.dreadFloor(s), 15, "the home's displays stay");
+  ok(PC.items.held(s, "Giant Tooth"));
+  s.location.node = "ocracoke";
+  var threw = false; try { PC.holdings.takeDown(s, "Giant Tooth"); } catch (e) { threw = true; } ok(threw, "only at that port");
+});
+
+test("save 18 loads as 19 with no holdings", function () {
+  var s = huntReady("hd6");
+  var data = JSON.parse(PC.state.serialize(s)); data.saveVersion = 18; delete data.holdings;
+  var t = PC.state.deserialize(JSON.stringify(data));
+  eq(t.saveVersion, PC.state.SAVE_VERSION); eq(t.holdings.length, 0);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

@@ -1777,7 +1777,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 18;
+  var SAVE_VERSION = 19;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -1822,6 +1822,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     addMilestone5Fields(state);
     addMilestone7Fields(state);
     addItemFields(state);
+    state.holdings = state.holdings || [];
     if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
   }
@@ -2094,6 +2095,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         });
       }
       data.saveVersion = 18;
+    }
+    if (data.saveVersion === 18) {
+      // M9 PR 7: holdings and homes (§27.5, §27.6).
+      data.holdings = data.holdings || [];
+      data.saveVersion = 19;
     }
     return data;
   }
@@ -4411,9 +4417,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       lines.push("PLACEHOLDER: You set " + state.captives + " captive" + (state.captives === 1 ? "" : "s") + " ashore, free. Their thanks come with " + reward + " gold.");
       state.captives = 0;
     }
-    // Holdings come in M9; the trade ship's earnings are collected here (§27.7).
+    // The trade ship's earnings (§27.7) and the holdings' ledger (§27.5) are collected here.
     var ledger = PC.world ? PC.world.collectLedger(state, id) : null;
     if (ledger) lines.push("PLACEHOLDER: The Trade Master hands over your trade ship's earnings: " + ledger + " gold, into your purse.");
+    var hl = PC.holdings ? PC.holdings.collect(state, id) : null;
+    if (hl) lines.push(hl);
     if (firstScene) {
       state.location.queue = (state.location.queue || []).concat([firstScene]);
       var fall = pre.concat(lines);
@@ -5925,7 +5933,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (s.rumorsAsked) return { line: L.outOfRumors, rumors: [], again: true };
     s.rumorsAsked = true;
     var weights = PC.node.nodeData(node).rumorWeights;
-    var n = Math.max(1, 1 + sl);
+    var n = Math.max(1, 1 + sl) + (PC.holdings ? PC.holdings.rumorBonus(state, node) : 0); // a tavern share's free rumor (§27.5)
     var key = [state.world.seed, stamp(state), node, "keeper-rumor"].join("|");
     var out = [];
     for (var i = 0; i < n; i++) { var r = drawOne(state, weights, key + "|" + i, "tavern keeper", null, { mix: keeperMix(state) }); if (r) out.push(r); }
@@ -11092,6 +11100,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var ts = tradeShipSeason(state);
     out.lines = out.lines.concat(ts.lines);
     out.chips = out.chips.concat(ts.chips);
+    // Holdings (§27.5): income into the ledgers; the Hostile warning and seizure (§28.2).
+    if (PC.holdings) { var hs = PC.holdings.season(state); out.lines = out.lines.concat(hs.lines); out.chips = out.chips.concat(hs.chips); }
     // Laid-up ships' anchorage runs up (§20.4), paid when she's taken back.
     PC.node.layUpSeason(state);
     // The meters (§28): Heat bleed, Standing's drift, Dread's decay.
@@ -15519,7 +15529,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (!d) add(n);                                // quest pieces work while carried
       else if (d.brace) add(n);                      // the Pistol Brace, from inventory
     });
-    if (state) cabin(state).forEach(add);
+    if (state) { cabin(state).forEach(add); if (PC.holdings) PC.holdings.displays(state).forEach(add); } // the cabin and homes (§32.6)
     return out;
   }
 
@@ -15698,7 +15708,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     return c;
   }
   // Held anywhere: carried, worn or in the cabin (a relic is one of each, §32.1).
-  function held(state, name) { return owns(state.captain, name) || cabin(state).indexOf(name) >= 0 || ((state.ship && state.ship.cabin) || []).indexOf(name) >= 0; }
+  function held(state, name) { return owns(state.captain, name) || cabin(state).indexOf(name) >= 0 || ((state.ship && state.ship.cabin) || []).indexOf(name) >= 0 || (PC.holdings ? PC.holdings.displays(state).indexOf(name) >= 0 : false); }
 
   // ---- What the worn items do ------------------------------------------------
 
@@ -16028,6 +16038,230 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   PC.shop = { stock: stock, price: price, crewCost: crewCost, buy: buy, sell: sell, sellInfo: sellInfo, view: view, kind: kind, keeper: keeper };
+})();
+</script>
+  <script>
+/* Pirate Chronicle — holdings and homes (§27.5, §27.6, §28.2; M9 PR 7).
+ *
+ * state.holdings: [{ node, type, level, live, ledger, since, warned, display }]
+ *   level   upgrades bought (0-2); `live` is the level that pays (an upgrade,
+ *           and a new holding, pay from the next season)
+ *   ledger  income waiting, uncapped, collected on arrival at the node
+ *   display a home's displayed items (§32.6)
+ * One of each type per node. Bought from the purse, with the seller's
+ * friendship and the Standing gate. Sold back to the seller at 50%.
+ * At Hostile Standing: a one-season warning, then the seller seizes them
+ * (§28.2). Raids, rebuilds and confiscation on a change of control come
+ * with M10. Engine file: no DOM.
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+
+  function D() { return PC.data.holdings; }
+  function nd(id) { return PC.data.nodes[id]; }
+  function list(state) { return (state.holdings = state.holdings || []); }
+  function find(state, node, type) { return list(state).filter(function (h) { return h.node === node && h.type === type; })[0] || null; }
+  function here(state) { return state.location && state.location.node; }
+
+  // The seller of a type at a node: { npc, place, lines }.
+  function seller(state, node, type) {
+    var cfg = D().NODES[node];
+    if (!cfg || cfg.types.indexOf(type) < 0) return null;
+    var s = cfg[D().TYPES[type].seller];
+    var npc = s.npc || PC.node.slotNpc(node, s.slot);
+    if (!npc && s.slot) { PC.node.initNode(state, node); npc = PC.node.slotNpc(node, s.slot); }
+    return { npc: npc, place: s.place, lines: nd(node).lines[s.lines], key: D().TYPES[type].seller };
+  }
+
+  function basePrice(node, type) { return D().TYPES[type].price[nd(node).tier] || 0; }
+  // What everything put in is worth at the current tier (sell-back, §27.5).
+  function putIn(node, type, level) {
+    var p = basePrice(node, type), u = D().UPGRADE_COST, v = p;
+    for (var i = 0; i < level; i++) v += p * u[i];
+    return v;
+  }
+  // The seller's friendship and the Standing gate (Wary +20%), on purchases
+  // and upgrades (§27.5, §28.2).
+  function priceMult(state, node, type) {
+    var s = seller(state, node, type), sl = PC.npcs.serviceLevel(state, s.npc);
+    var gate = PC.meters.officialGate(state, node);
+    return (1 + (D().FRIENDSHIP[String(sl)] || 0)) * gate.mult;
+  }
+  function lock(state, node, type) {
+    var s = seller(state, node, type);
+    if (!s || !s.npc) return "No one sells that here";
+    if (PC.npcs.serviceLevel(state, s.npc) == null) return "He won't deal with you";
+    var gate = PC.meters.officialGate(state, node);
+    if (!gate.ok) return gate.why;
+    return null;
+  }
+
+  function income(h) {
+    var inc = D().TYPES[h.type].income;
+    if (!inc) return 0;
+    return Math.round((inc[nd(h.node).tier] || 0) * D().UPGRADE_INCOME[h.live || 0]);
+  }
+  function rumorBonus(state, node) {
+    var h = find(state, node, "tavern");
+    if (!h || !h.on) return 0;
+    return (D().TYPES.tavern.rumors || 0) + ((h.live || 0) >= 2 ? 1 : 0);
+  }
+
+  // What a seller offers the captain here.
+  function offers(state, node, sellerKey) {
+    node = node || here(state);
+    var cfg = D().NODES[node];
+    if (!cfg) return [];
+    return cfg.types.filter(function (t) { return D().TYPES[t].seller === sellerKey; }).map(function (t) {
+      var h = find(state, node, t), mult = priceMult(state, node, t), why = lock(state, node, t);
+      var o = { type: t, name: D().TYPES[t].name, owned: !!h, lock: why, holding: h };
+      if (!h) {
+        o.price = Math.round(basePrice(node, t) * mult);
+        o.income = D().TYPES[t].income ? D().TYPES[t].income[nd(node).tier] : 0;
+        if (!why && state.money.purse < o.price) o.lock = "Needs " + o.price + " gold in your purse";
+      } else {
+        if (t !== "home" && h.level < 2) {
+          o.upgrade = { n: h.level + 1, name: D().UPGRADE_NAMES[t][h.level], price: Math.round(basePrice(node, t) * D().UPGRADE_COST[h.level] * mult),
+            income: Math.round((D().TYPES[t].income[nd(node).tier] || 0) * D().UPGRADE_INCOME[h.level + 1]) };
+          if (!why && state.money.purse < o.upgrade.price) o.upgrade.lock = "Needs " + o.upgrade.price + " gold in your purse";
+        }
+        o.sellBack = Math.round(putIn(node, t, h.level) * D().SELL_BACK);
+      }
+      return o;
+    });
+  }
+
+  function buy(state, type) {
+    var node = here(state), s = seller(state, node, type), L = s.lines;
+    if (find(state, node, type)) throw new Error("You own one here already.");
+    var why = lock(state, node, type);
+    if (why) return { line: L.locked || L.refuse, failed: true, why: why };
+    var price = Math.round(basePrice(node, type) * priceMult(state, node, type));
+    if (state.money.purse < price) return { line: L.broke, failed: true };
+    state.money.purse -= price;
+    var h = { node: node, type: type, level: 0, live: 0, on: false, ledger: 0, since: PC.state.stamp(state), warned: false };
+    if (type === "home") { h.display = []; h.on = true; }
+    list(state).push(h);
+    PC.state.addLog(state, "Bought a " + D().TYPES[type].name.toLowerCase() + " at " + nd(node).name + " for " + price + " gold.");
+    return { line: L.bought[type], paid: price, holding: h };
+  }
+
+  function upgrade(state, type) {
+    var node = here(state), s = seller(state, node, type), L = s.lines, h = find(state, node, type);
+    if (!h || type === "home" || h.level >= 2) throw new Error("Nothing to upgrade.");
+    var why = lock(state, node, type);
+    if (why) return { line: L.locked || L.refuse, failed: true, why: why };
+    var price = Math.round(basePrice(node, type) * D().UPGRADE_COST[h.level] * priceMult(state, node, type));
+    if (state.money.purse < price) return { line: L.broke, failed: true };
+    state.money.purse -= price;
+    h.level += 1;
+    PC.state.addLog(state, "Paid " + price + " gold for " + D().UPGRADE_NAMES[type][h.level - 1].replace(/^PLACEHOLDER: /, "") + " at " + nd(node).name + ".");
+    return { line: L.upgraded, paid: price };
+  }
+
+  // Sell back to the seller (§27.5): the ledger first, then 50% of
+  // everything put in. A home's displays come back to the inventory.
+  function sellBack(state, type) {
+    var node = here(state), s = seller(state, node, type), L = s.lines, h = find(state, node, type);
+    if (!h) throw new Error("You don't own that.");
+    if (PC.npcs.serviceLevel(state, s.npc) == null) return { line: L.refuse || L.locked, failed: true };
+    var g = Math.round(putIn(node, type, h.level) * D().SELL_BACK) + (h.ledger || 0);
+    state.money.purse += g;
+    (h.display || []).forEach(function (n) { state.captain.items.push(n); });
+    state.holdings = list(state).filter(function (x) { return x !== h; });
+    PC.state.addLog(state, "Sold back the " + D().TYPES[type].name.toLowerCase() + " at " + nd(node).name + " for " + g + " gold.");
+    return { line: L.soldBack, gold: g };
+  }
+
+  // Each season's end: income into the ledgers, upgrades take hold, and the
+  // Hostile warning or seizure (§27.5, §28.2).
+  function season(state) {
+    var out = { lines: [], chips: [] };
+    list(state).slice().forEach(function (h) {
+      var gate = PC.meters.officialGate(state, h.node);
+      if (!gate.ok) {
+        if (!h.warned) { h.warned = true; out.lines.push(D().lines.warn.replace("{node}", nd(h.node).name)); return; }
+        (h.display || []).forEach(function (n) { state.captain.items.push(n); }); // DEFAULT: a seized home's displays come back
+        state.holdings = list(state).filter(function (x) { return x !== h; });
+        out.lines.push(D().lines.seized.replace("{node}", nd(h.node).name));
+        out.chips.push({ icon: "gold", text: D().TYPES[h.type].name + " at " + nd(h.node).name + " seized", ink: "bad" });
+        PC.state.addLog(state, "The " + D().TYPES[h.type].name.toLowerCase() + " at " + nd(h.node).name + " was seized.");
+        return;
+      }
+      h.warned = false;
+      if (h.on) { var inc = income(h); if (inc) h.ledger += inc; }
+      h.on = true;
+      h.live = h.level;
+    });
+    var tot = list(state).reduce(function (a, h) { return a + (h.on ? income(h) : 0); }, 0);
+    if (tot) out.chips.push({ icon: "gold", text: "Your holdings earn about " + tot + " gold a season" });
+    return out;
+  }
+
+  // Collected on arrival at the node (the arrival popup).
+  function collect(state, node) {
+    var g = 0;
+    list(state).forEach(function (h) { if (h.node === node && h.ledger) { g += h.ledger; h.ledger = 0; } });
+    if (!g) return null;
+    state.money.purse += g;
+    PC.state.addLog(state, "Collected " + g + " gold from your holdings at " + nd(node).name + ".");
+    var L = nd(node).lines.harbormaster;
+    return D().lines.ledger.replace("{gold}", g) + (L && L.earnings ? " " + L.earnings : "");
+  }
+
+  // ---- Homes and their displays (§27.6, §32.6) -----------------------------
+  function home(state, node) { return find(state, node, "home"); }
+  function homeSpots(node) { return D().HOME_SPOTS[nd(node).tier] || 1; }
+  // Every item displayed in any home: they work wherever the captain is.
+  function displays(state) {
+    var out = [];
+    list(state).forEach(function (h) { (h.display || []).forEach(function (n) { out.push(n); }); });
+    return out;
+  }
+  // Hang or take down at a home only while in that port (DEFAULT).
+  function hang(state, name) {
+    var node = here(state), h = home(state, node);
+    if (!h) throw new Error("You have no home here.");
+    var why = PC.items.swapLock(state);
+    if (why) throw new Error(why);
+    var d = PC.items.def(name);
+    if (!d || d.slot !== "display") throw new Error("That isn't for display.");
+    if (!PC.items.owns(state, name)) throw new Error("You don't have that.");
+    if (h.display.indexOf(name) >= 0) throw new Error("It already hangs there.");
+    if (h.display.length >= homeSpots(node)) throw new Error("Your home has no free spot.");
+    PC.items.lose(state, name);
+    h.display.push(name);
+    if (PC.meters) PC.meters.liftToFloor(state);
+  }
+  function takeDown(state, name) {
+    var node = here(state), h = home(state, node);
+    if (!h) throw new Error("You have no home here.");
+    var why = PC.items.swapLock(state);
+    if (why) throw new Error(why);
+    var i = h.display.indexOf(name);
+    if (i < 0) throw new Error("That isn't on display here.");
+    h.display.splice(i, 1);
+    state.captain.items.push(name);
+  }
+
+  // The Holdings panel's view (D5): per node, the trade ship beside them.
+  function view(state) {
+    var rows = list(state).map(function (h) {
+      return { node: h.node, nodeName: nd(h.node).name, type: h.type, name: D().TYPES[h.type].name, level: h.level, live: h.live, on: h.on,
+        upgrades: h.type === "home" ? null : D().UPGRADE_NAMES[h.type].slice(0, h.level).map(function (n) { return n.replace(/^PLACEHOLDER: /, ""); }),
+        income: h.on ? income(h) : 0, pending: !h.on || h.live !== h.level, ledger: h.ledger, warned: h.warned,
+        display: h.display || null, spots: h.type === "home" ? homeSpots(h.node) : 0 };
+    });
+    var ts = state.tradeShip;
+    return { rows: rows, trade: ts ? { name: ts.ship.name || ts.ship.cls, node: PC.world.placeName(ts.node), income: PC.world.tradeIncome(ts.ship, ts.node), ledger: ts.ledger } : null };
+  }
+
+  PC.holdings = {
+    list: list, find: find, seller: seller, offers: offers, buy: buy, upgrade: upgrade, sellBack: sellBack,
+    season: season, collect: collect, income: income, rumorBonus: rumorBonus, basePrice: basePrice,
+    home: home, homeSpots: homeSpots, displays: displays, hang: hang, takeDown: takeDown, view: view,
+  };
 })();
 </script>
   <script>
@@ -24104,6 +24338,104 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 })();
 </script>
   <script>
+/* Pirate Chronicle — holdings and homes (§27.5, §27.6; M9 PR 7).
+ *
+ * Numbers from §27.5's tables (placeholders, the Tuning Table). Prices and
+ * income follow the node's current prosperity tier. Sellers: the Official
+ * (warehouses and homes) and the tavern keeper (a tavern share). The
+ * distiller's share waits for the distiller (D4).
+ */
+(function () {
+  "use strict";
+  var PC = (globalThis.PC = globalThis.PC || {});
+  PC.data = PC.data || {};
+
+  PC.data.holdings = {
+    TYPES: {
+      warehouse: { name: "Warehouse", seller: "official",
+        price: { "Very poor": 3000, "Poor": 7500, "Modest": 15000, "Wealthy": 37500 },
+        income: { "Very poor": 120, "Poor": 300, "Modest": 600, "Wealthy": 1500 } },
+      tavern: { name: "Tavern share", seller: "keeper",
+        price: { "Very poor": 1800, "Poor": 4500, "Modest": 9000, "Wealthy": 22500 },
+        income: { "Very poor": 63, "Poor": 160, "Modest": 315, "Wealthy": 790 }, rumors: 1 },
+      home: { name: "Home", seller: "official",
+        price: { "Very poor": 2000, "Poor": 5000, "Modest": 10000, "Wealthy": 25000 }, income: null },
+    },
+    // Two paid upgrades, in order (§27.5): cost × the current price; income × base.
+    UPGRADE_COST: [0.5, 1.0],
+    UPGRADE_INCOME: [1, 1.75, 3.25],
+    // Upgrade names are placeholders (PH34; the author writes them).
+    UPGRADE_NAMES: {
+      warehouse: ["PLACEHOLDER: New Roof", "PLACEHOLDER: Second Floor"],
+      tavern: ["PLACEHOLDER: A Bigger Cellar", "PLACEHOLDER: The Back Room (+1 rumor)"],
+    },
+    SELL_BACK: 0.5,             // 50% of everything put in, at the current tier (§27.5)
+    FRIENDSHIP: { "-1": 0.05, "0": 0, "1": -0.05, "2": -0.10, "3": -0.15 }, // the seller's Service Level
+    // Home display spots by the home's price (§32.6): 2,000 / 5,000 / 10,000 / 25,000+.
+    HOME_SPOTS: { "Very poor": 1, "Poor": 2, "Modest": 3, "Wealthy": 4 },
+
+    // Who sells what at each node, and where his card sits.
+    NODES: {
+      ocracoke: { official: { slot: "official", place: "clerk", lines: "clerk" }, keeper: { slot: "keeper", place: "tavern", lines: "keeperShare" }, types: ["warehouse", "tavern", "home"] },
+      norfolk: { official: { npc: "snodgrass", place: "docks", lines: "harbormaster" }, keeper: { slot: "keeper", place: "tavern", lines: "keeperShare" }, types: ["warehouse", "tavern", "home"] },
+    },
+
+    lines: {
+      ledger: "PLACEHOLDER: Your holdings here have earned {gold} gold since your last visit. It goes into your purse.",
+      warn: "PLACEHOLDER: Word reaches you from {node}: with your Standing so low, your holdings there will be seized if nothing changes by next season.",
+      seized: "PLACEHOLDER: Your holdings at {node} have been seized. Everything you put into them is gone.",
+    },
+  };
+
+  // ---- The sellers' lines ----
+  var O = PC.data.nodes.ocracoke, N = PC.data.nodes.norfolk;
+  // Ocracoke's harbor clerk (the author's ruling, M9 PR 7): the Official there.
+  // Twopenny's planned tent becomes his. PLACEHOLDER lines throughout.
+  O.lines.clerk = {
+    greet: { "-1": "PLACEHOLDER: \"Oh. You. What is it?\"", "0": "PLACEHOLDER: \"Harbor business? I keep the books here, such as they are.\"", "1": "PLACEHOLDER: \"Captain! Come in, mind the ink.\"", "2": "PLACEHOLDER: \"Captain! Come in, mind the ink.\"", "3": "PLACEHOLDER: \"My best customer. Sit, sit.\"" },
+    refuse: "PLACEHOLDER: \"I've got nothing for you. Out.\"",
+    offered: "PLACEHOLDER: \"There's a roof or two for sale, if you don't mind the leaks.\"",
+    bought: { warehouse: "PLACEHOLDER: \"The warehouse is yours. Try not to let the tide in.\"", home: "PLACEHOLDER: \"A home on Ocracoke. Brave of you.\"" },
+    upgraded: "PLACEHOLDER: \"I'll get the work started. It'll be done by next season.\"",
+    soldBack: "PLACEHOLDER: \"Half of what you put in. That's the going rate.\"",
+    locked: "PLACEHOLDER: \"The Beach Captain's men wouldn't like me selling to you.\"",
+    broke: "PLACEHOLDER: \"Come back with the gold.\"",
+    allSold: "PLACEHOLDER: \"You own everything I've got to sell.\"",
+  };
+  O.locations.clerk = { name: "Harbor Clerk's Tent", blurb: "PLACEHOLDER: A patched canvas tent above the dock, stacked with ledgers and damp maps. The harbor clerk keeps Ocracoke's books, such as they are." };
+  O.present.places.clerk = { heading: "The Harbor Clerk's Tent", banner: "the harbor clerk's tent", hint: "A warehouse and a home for sale" };
+  O.slots.push({ key: "official", id: "ocr_clerk", role: "Official", label: "the harbor clerk", place: "clerk", node: "ocracoke" });
+  O.placeOrder = ["tavern", "docks", "merchant", "clerk", "graveyard", "ship"];
+
+  // Norfolk's Harbormaster: the author's lines (Part 4, §9). The upgrade and
+  // sell-back lines are PLACEHOLDER.
+  N.lines.harbormaster = {
+    greet: { "-1": "\"Can't you see I'm busy? Make it quick.\"", "0": "\"Can't you see I'm busy? Make it quick.\"", "1": "\"Can't you see I'm busy? Make it quick.\"", "2": "\"Can't you see I'm busy? Make it quick.\"", "3": "\"Can't you see I'm busy? Make it quick.\"" },
+    refuse: "\"I'm afraid you'll need to look elsewhere.\"",
+    offered: "\"Oh, yes. We've got a few places for sale.\"",
+    bought: { warehouse: "\"A fine warehouse. It's dry, at the very least.\"", home: "\"A house of your own. Respectable, I suppose.\"" },
+    upgraded: "PLACEHOLDER: \"The work will be done by next season. Don't hover.\"",
+    soldBack: "PLACEHOLDER: \"Half what you paid. Take it or leave it.\"",
+    locked: "\"I'm afraid you'll need to look elsewhere.\"",
+    broke: "\"The price is firm. Any more talking, and I'll call the guard.\"",
+    allSold: "\"You've bought everything I have. Pity. I was enjoying spending your gold.\"",
+    earnings: "The official counts twice before handing it over.",
+  };
+  // The tavern keepers' share lines (PH34: Horace's to write; Ocracoke's too).
+  var share = {
+    offered: "PLACEHOLDER: \"A share in the place? For the right price, I could part with a piece.\"",
+    bought: { tavern: "PLACEHOLDER: \"Welcome aboard, partner. Your cut comes every season.\"" },
+    upgraded: "PLACEHOLDER: \"I'll have it done by next season.\"",
+    soldBack: "PLACEHOLDER: \"Buying you out at half. No hard feelings.\"",
+    locked: "PLACEHOLDER: \"Not with your name what it is around here.\"",
+    broke: "PLACEHOLDER: \"You're a little short, friend.\"",
+    refuse: null, // the keeper's own refusal line serves
+  };
+  O.lines.keeperShare = share;
+  N.lines.keeperShare = share;
+})();
+</script>
+  <script>
 /* The prologues (§40): the author's text, the screens' cues, and the
  * placeholder chart drawn in code (§40.1; the author's map art replaces it).
  *
@@ -24535,7 +24867,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
 
   var state = null;
   var root = null;
-  var BUILD = "Build 0.9 · Milestone 8";
+  var BUILD = "Build 0.10 · Milestone 9";
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -25650,7 +25982,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     html += '<div class="prose dropcap">' + prose(isWinter() && loc.winter ? loc.winter : loc.blurb) + '</div><div style="clear:both"></div>';
     var back = function (top) { return '<div class="actions"' + (top ? ' style="margin:0 0 6px"' : "") + '><button class="secondary" data-act="leaveplace">‹ Back to ' + esc(nd.name) + "</button></div>"; };
     html = back(true) + html;
-    html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu, admiralty: admiraltyMenu })[place]();
+    html += ({ tavern: tavernMenu, docks: docksMenu, merchant: merchantMenu, graveyard: graveyardMenu, ship: shipMenu, admiralty: admiraltyMenu, clerk: clerkMenu })[place]();
     return html + DIVIDER + back(false);
   }
 
@@ -25927,7 +26259,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       var gain = (ap === 2 ? 15 : 10) + (N().nodeData(id).freePort ? 5 : 0);
       return opt({ act: "lodging", attrs: 'data-ap="' + ap + '"', label: (ap === 2 ? "Long Shore Leave " : "Shore Leave ") + apText(ap), ap: ap,
         meta: gold(N().lodgingCost(state, ap)) + " crew gold · morale +" + gain, lock: c.ok ? null : c.why });
-    })) + "</div>";
+    })) + (first ? "" : holdingsBlock("keeper")) + "</div>";
     if (first) {
       html += '<p class="note" style="max-width:680px">This is your first visit to the Tavern. Ask ' + esc(PC.npcs.get(state, keeper).first) + " for rumors" +
         (N().oneArmedHere(state) ? ", talk to the one-armed pirate" : "") + ", or leave; the rest opens once your first visit is done.</p>";
@@ -26238,7 +26570,52 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
             '<button class="secondary" data-act="payoff" data-tier="' + t + '" data-for="q-off-' + t + '">Put ashore</button></div></td></tr>';
         }).join("") + "</table></details>";
     }
-    return html + "</div>" + nodeExtras("docks");
+    html += "</div>";
+    // Norfolk's Harbormaster sits at the Docks: the warehouse and the home (§27.5).
+    var hcfg = PC.data.holdings.NODES[id];
+    if (hcfg && hcfg.official.place === "docks") {
+      var off = PC.holdings.seller(state, id, "warehouse");
+      html += DIVIDER + mcard("d:holdings", off.npc, "Harbormaster") + officialSay(id, off) + holdingsBlock("official") + "</div></details>";
+    }
+    return html + nodeExtras("docks");
+  }
+
+  // ---- Holdings (§27.5, §27.6; M9 PR 7) -----------------------------------------------
+  function officialSay(id, off) {
+    if (state.location.say && state.location.say.to === off.npc) return sayFor(off.npc);
+    var sl = PC.npcs.serviceLevel(state, off.npc);
+    return '<div class="say">' + inline(sl == null ? off.lines.refuse : (off.lines.greet[String(sl)] || off.lines.greet["0"])) + "</div>";
+  }
+  // The rows a seller offers here: buy, upgrade, sell back.
+  function holdingsBlock(sellerKey) {
+    var id = N().here(state), cfg = PC.data.holdings.NODES[id];
+    if (!cfg) return "";
+    var list = PC.holdings.offers(state, id, sellerKey);
+    if (!list.length) return "";
+    var s = PC.holdings.seller(state, id, list[0].type), L = s.lines;
+    var all = list.every(function (o) { return o.owned; }) && L.allSold;
+    var html = '<div class="svc"><h4>' + (sellerKey === "keeper" ? "A share in the tavern" : "Property for sale") + '</h4><p class="small">' + inline(all ? L.allSold : L.offered) + "</p>";
+    html += list.map(function (o) {
+      if (!o.owned) {
+        var what = o.type === "home" ? "No income. " + PC.holdings.homeSpots(id) + " display spot" + (PC.holdings.homeSpots(id) > 1 ? "s" : "") + " for art, curios and relics; they work wherever you are." :
+          "About " + gold(o.income) + " gold a season from next season" + (o.type === "tavern" ? ", and a free rumor when you ask the keeper" : "") + ".";
+        return '<div class="buyrow" style="flex-wrap:wrap"><span style="flex:1 1 320px"><b style="font-weight:normal">' + esc(o.name) + '</b><br><span class="small">' + esc(what) + "</span></span> " +
+          '<button class="secondary" data-act="holdbuy" data-type="' + o.type + '"' + (o.lock ? " disabled" : "") + ">Buy · " + gold(o.price) + " from your purse</button>" +
+          (o.lock ? '<span class="lock" style="flex-basis:100%">' + esc(o.lock) + "</span>" : "") + "</div>";
+      }
+      var h = o.holding, row = '<div class="buyrow" style="flex-wrap:wrap"><span style="flex:1 1 320px"><b style="font-weight:normal">Your ' + esc(o.name.toLowerCase()) + "</b>" +
+        (o.type === "home" ? "" : ' <span class="note">· ' + (h.level ? "upgrades " + h.level + " of 2" : "no upgrades") + " · " + (h.on ? gold(PC.holdings.income(h)) + " a season" : "pays from next season") + (h.ledger ? " · " + gold(h.ledger) + " waiting" : "") + "</span>") + "</span>";
+      if (o.upgrade) row += ' <button class="secondary" data-act="holdup" data-type="' + o.type + '"' + (o.lock || o.upgrade.lock ? " disabled" : "") + ">" + esc(o.upgrade.name.replace(/^PLACEHOLDER: /, "")) + " · " + gold(o.upgrade.price) + "</button>";
+      row += ' <button class="link" data-act="holdsell" data-type="' + o.type + '">Sell it back · ' + gold(o.sellBack) + "</button>";
+      if (o.upgrade) row += '<span class="note" style="flex-basis:100%">' + (o.upgrade.name.indexOf("PLACEHOLDER") === 0 ? "[PLACEHOLDER name] " : "") + "Upgrade " + o.upgrade.n + ": " + gold(o.upgrade.income) + " a season from the season after" + (o.type === "tavern" && o.upgrade.n === 2 ? ", and one more rumor" : "") + "." + (o.upgrade.lock ? " " + esc(o.upgrade.lock) : "") + "</span>";
+      if (o.lock) row += '<span class="lock" style="flex-basis:100%">' + esc(o.lock) + "</span>";
+      return row + "</div>";
+    }).join("");
+    return html + '<p class="note">Selling back pays half of everything you\'ve put in, at today\'s prices, plus what\'s waiting. If your Standing here falls to Hostile, you get one season\'s warning before your holdings are seized.</p></div>';
+  }
+  function clerkMenu() {
+    var id = N().here(state), off = PC.holdings.seller(state, id, "warehouse");
+    return '<div class="block">' + nameCard(off.npc, "Harbor Clerk") + officialSay(id, off) + holdingsBlock("official") + "</div>" + nodeExtras("clerk");
   }
 
   // ---- Optional rolls (§41.1): marked optional, every outcome stated ----
@@ -27662,7 +28039,7 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<div class="h4">Skills</div>' + skillsBlock() +
       '<div class="h4">Traits, flaw, old ailments and tags</div><ul style="padding-left:1.1em;font-size:18px">' +
       lines(c.traits || []) + lines(c.flaws || [], "flaw") + lines(c.debuffs || []) + lines((c.tags || []).filter(function (t) { return (c.debuffs || []).indexOf(t) < 0; })) + "</ul>" +
-      equipBlock() +
+      equipBlock() + holdingsPanel() +
       '<div class="h4">Ship and stores</div><table class="ledger wide">' +
       lrow("Ship", esc(state.ship.type) + " <i>" + esc(state.ship.name) + "</i>") + lrow("Hull · Speed", Math.round(state.ship.hull) + " / " + state.ship.hullMax + " · " + state.ship.speed) +
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
@@ -27688,6 +28065,8 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
         btns = it.keys.map(function (k) {
           return '<button class="link" data-act="equip" data-item="' + esc(it.name) + '" data-key="' + k.key + '">' + (k.holds ? "Wear as " + esc(k.name) + " (for the " + esc(k.holds) + ")" : "Wear" + (it.keys.length > 1 ? " as " + esc(k.name) : "")) + "</button>";
         }).join(" ");
+        var hm = state.location && PC.holdings.home(state, N().here(state));
+        if (it.hang && hm) btns += hm.display.length < PC.holdings.homeSpots(hm.node) ? ' <button class="link" data-act="homehang" data-item="' + esc(it.name) + '">Hang it at your home here</button>' : ' <span class="note">Your home here is full</span>';
         if (it.hang) btns += it.hang.why ? ' <span class="note">' + esc(it.hang.why) + "</span>" : ' <button class="link" data-act="hang" data-item="' + esc(it.name) + '">Hang it in the cabin</button>';
         if (it.use) btns += it.use.why ? ' <span class="note">' + esc(it.use.why) + "</span>" : ' <button class="primary" data-act="useitem" data-item="' + esc(it.name) + '">Use</button>';
       }
@@ -27702,6 +28081,21 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       '<div class="h4">Inventory</div>' + (inv ? '<ul style="padding-left:1.1em;font-size:18px">' + inv + "</ul>" : '<p class="small">Nothing else.</p>') +
       (v.cabin.length ? '<p class="small">In your cabin: ' + esc(v.cabin.map(function (c) { return c.name; }).join(", ")) + ".</p>" : "") +
       '<p class="note">Only what you wear works, except the Pistol Brace, what you use, and what hangs in your cabin. Changing costs no actions.</p>';
+  }
+
+  // The Holdings panel (D5): each holding by port, the trade ship beside them.
+  function holdingsPanel() {
+    var v = PC.holdings.view(state), here_ = state.location && N().here(state);
+    var rows = v.rows.map(function (r) {
+      var val = esc(r.name) + (r.type === "home" ? ' <span class="note">· ' + r.display.length + " of " + r.spots + " display spots" + (r.display.length ? ": " + esc(r.display.join(", ")) : "") + "</span>" +
+        (r.node === here_ ? r.display.map(function (n) { return ' <button class="link" data-act="hometake" data-item="' + esc(n) + '">Take down the ' + esc(n) + "</button>"; }).join("") : "") :
+        ' <span class="note">· ' + (r.level ? esc(r.upgrades.join(", ")) : "no upgrades") + " · " + (r.on ? gold(r.income) + " a season" + (r.pending ? " (the upgrade pays from next season)" : "") : "pays from next season") + " · " + gold(r.ledger) + " waiting</span>");
+      if (r.warned) val += ' <span class="lock">Seized next season unless your Standing recovers</span>';
+      return lrow(r.nodeName, val);
+    });
+    if (v.trade) rows.push(lrow("Trade ship", "The " + esc(v.trade.name) + ' <span class="note">· enrolled at ' + esc(v.trade.node) + " · about " + gold(v.trade.income) + " a season · " + gold(v.trade.ledger) + " waiting</span>"));
+    return '<div class="h4">Holdings</div>' + (rows.length ? '<table class="ledger wide">' + rows.join("") + "</table>" : '<p class="small">None yet.</p>') +
+      '<p class="note">Earnings wait at each port and come to your purse when you arrive there.</p>';
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -27835,6 +28229,12 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   function who(slot) { return N().slotNpc(N().here(state), slot); }
+  function holdAct(el, fn) {
+    var id = N().here(state), s = PC.holdings.seller(state, id, el.dataset.type);
+    var r = fn(state, el.dataset.type);
+    var ch = r.paid ? [goldChip(-r.paid, "purse")] : r.gold ? [goldChip(r.gold, "purse")] : null;
+    say(s.npc, firstName(s.npc), r.line, r.failed ? r.why || null : null, null, ch ? { chips: ch } : null);
+  }
   function firstName(id) { return PC.npcs.get(state, id).first; }
 
   // Warn before losing something (G7 of the M5 playtest): a popup with Go
@@ -28263,6 +28663,11 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       PC.world.finishSplit(state);
       if (gaming && PC.liarsdice.canPlay(state, { free: true }).ok) { mgMark = 0; PC.liarsdice.start(state, { free: true }); }
     },
+    "holdbuy": function (el) { holdAct(el, PC.holdings.buy); },
+    "holdup": function (el) { holdAct(el, PC.holdings.upgrade); },
+    "holdsell": function (el) { holdAct(el, PC.holdings.sellBack); },
+    "homehang": function (el) { PC.holdings.hang(state, el.dataset.item); },
+    "hometake": function (el) { PC.holdings.takeDown(state, el.dataset.item); },
     "shopbuy": function (el) {
       var who_ = PC.shop.keeper(state, N().here(state));
       var r = PC.shop.buy(state, Number(el.dataset.i), el.dataset.from);

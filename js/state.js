@@ -8,7 +8,7 @@
   "use strict";
   var PC = (globalThis.PC = globalThis.PC || {});
 
-  var SAVE_VERSION = 18;
+  var SAVE_VERSION = 19;
   var STORAGE_KEY = "pirate-chronicle-save";
   var SEASONS = ["Spring", "Summer", "Hurricane", "Winter"];
   var AP_PER_SEASON = 7; // §4; under review in playtesting
@@ -53,6 +53,7 @@
     addMilestone5Fields(state);
     addMilestone7Fields(state);
     addItemFields(state);
+    state.holdings = state.holdings || [];
     if (PC.officers && state.world) PC.officers.ensureQuartermaster(state);
     return state;
   }
@@ -325,6 +326,11 @@
         });
       }
       data.saveVersion = 18;
+    }
+    if (data.saveVersion === 18) {
+      // M9 PR 7: holdings and homes (§27.5, §27.6).
+      data.holdings = data.holdings || [];
+      data.saveVersion = 19;
     }
     return data;
   }
