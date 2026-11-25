@@ -21872,25 +21872,28 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
   }
 
   // Where the screen lands after an action: ONE rule, built once and used
-  // by every screen (Playtest Pins (Build 0.9), PR B: items 8-10, 23, 40, 44,
-  // 48). To be refined in play.
-  //  1. Entering something new (a location, a scene, a battle, a minigame,
-  //     a creator step; a button marked data-top, the end of a scene) goes to
-  //     the top, woodcut included. A screen can name a better landing spot
-  //     with data-land (the hunt's "Ocracoke · Hunting…" line on a new
-  //     sighting, the two ships' header in battle and on each new round, the
-  //     after-battle report): the last one on the screen wins.
-  //  2. Any other choice scrolls so the FIRST NEW LINE sits just under the
-  //     sticky bar. If nothing new appears, the screen stays put.
-  //  3. Menus: opening or closing one leaves the page where it was; inside a
+  // by every screen (Playtest Pins (Build 0.9), PR B; clarified after the
+  // scrolling playtest, November 24).
+  //  1. The story keeps its place. Inside a place and its scenes (a choice,
+  //     a result, Continue, one scene leading into the next, a scene opened
+  //     from a place's menu, back to the place's menu), the screen puts the
+  //     FIRST NEW LINE OF TEXT just under the sticky bar. The heading, the
+  //     "where" line and the woodcut never count as new. If nothing new
+  //     appears, the screen stays exactly where it is.
+  //  2. Only a real change of scene setting jumps: walking into a place from
+  //     the town menu, arriving at a port, starting a hunt or a minigame, a
+  //     creator step. Those go to the top, or to the screen's landing spot
+  //     (data-land): the hunt's "Hunting…" line on a new sighting, the two
+  //     ships' header when a battle opens and on each new round, the
+  //     after-battle report. The last spot on the screen wins.
+  //  3. Back to the town menu returns to where the town menu was left.
+  //  4. Menus: opening or closing one leaves the page where it was; inside a
   //     menu, a new line scrolls into view within the menu.
-  //  4. Back to the town menu returns to where the town menu was left (G2,
-  //     kept from the M5 playtest).
   var townScroll = 0;
 
-  // What counts as "something new": the screen, the scene, the place, the
-  // minigame, and inside a hunt the sighting, the battle round and the
-  // after-battle step. A scene's own choice-and-result is NOT new.
+  // What counts as a change of setting (rule 2). Scenes, voyage events and a
+  // place's own menu are all "the story" at that port, so moving between
+  // them is not a jump.
   function landKey() {
     if (prologue) return "prologue";
     if (!state) return creating ? "creator|" + stepIndex : "title";
@@ -21900,7 +21903,9 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       sub = [g.phase === "battle" || g.phase === "after" ? g.phase : "look", g.batch ? g.batch.n + "." + g.batch.next : "", g.battle ? g.battle.round : "",
         a ? (a.repairDone ? 1 : 0) + ":" + (a.current ? a.current.id || "prize" : "") + ":" + (a.queue ? a.queue.length : "") : ""].join(",");
     }
-    return [c.screen, c.screen === "scene" ? c.sceneId : "", c.screen === "node" ? l.place : "", g ? g.kind : "", sub].join("|");
+    var story = c.screen === "scene" || c.screen === "event" || (c.screen === "node" && l.place);
+    var where = story ? "story" : c.screen === "node" ? "town" : c.screen;
+    return [where, l.node || "", g ? g.kind : "", sub].join("|");
   }
 
   // The lines on the screen, for spotting the first new one. Leaf blocks
@@ -21910,7 +21915,10 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     if (!scope) return [];
     // Buttons and choices aren't "lines": the choice you just picked comes
     // back as a line of text, and that line is new.
-    return Array.prototype.filter.call(scope.querySelectorAll(LINE_SEL), function (el) { return !el.querySelector(LINE_SEL) && !el.closest("button, .choice, .choices, .opts, .actions"); });
+    // The heading, the "where" line and the woodcut are the frame, not news.
+    return Array.prototype.filter.call(scope.querySelectorAll(LINE_SEL), function (el) {
+      return !el.querySelector(LINE_SEL) && !el.closest("button, .choice, .choices, .opts, .actions, [data-anchor], .banner, .plate") && !el.matches(".where, h2.title");
+    });
   }
   function lineText(el) { return (el.textContent || "").replace(/\s+/g, " ").trim(); }
   function snapLines(scope) {
@@ -21940,9 +21948,6 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
     var modal = a.closest(".modal");
     if (modal) { modal.scrollTop += a.getBoundingClientRect().top - modal.getBoundingClientRect().top - 16; return; }
     var y = a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset();
-    // Never above the woodcut in the middle of a scene (#9).
-    var wood = root.querySelector('.stage [data-anchor="scene"]');
-    if (wood) y = Math.max(y, wood.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset());
     scrollToY(y);
   }
   function scrollTop() { scrollToY(0); }
@@ -21958,14 +21963,14 @@ PC.assets = {"assets/art/amberjack_1745.webp": "data:image/webp;base64,UklGRlojA
       if (mNew) scrollToAnchor(mNew);
       return;
     }
-    // 1. Something new.
-    if ((el && el.dataset && el.dataset.top) || landKey() !== snap.land) {
+    // 2 and 3. A change of setting.
+    if (landKey() !== snap.land) {
       var placeNow = state && state.current && state.current.screen === "node" && state.location ? state.location.place : undefined;
-      if (state && state.current && state.current.screen === "node" && !placeNow && snap.place) return scrollToY(townScroll); // 4.
+      if (state && state.current && state.current.screen === "node" && !placeNow && snap.place !== undefined) return scrollToY(townScroll);
       var spots = root.querySelectorAll(".stage [data-land]");
       return spots.length ? scrollToAnchor(spots[spots.length - 1]) : scrollTop();
     }
-    // 2. The first new line, or stay put.
+    // 1. The story: the first new line of text, or stay put.
     var fresh = firstNewLine(root.querySelector(".stage"), snap.lines);
     if (fresh) scrollToAnchor(fresh);
   }
