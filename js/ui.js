@@ -277,6 +277,11 @@
     var modal = a.closest(".modal");
     if (modal) { modal.scrollTop += a.getBoundingClientRect().top - modal.getBoundingClientRect().top - 16; return; }
     var y = a.getBoundingClientRect().top + (globalThis.scrollY || 0) - stickyOffset();
+    // A short page can't scroll far enough to bring the new line up: add
+    // room at the bottom of the page so it can (gone at the next redraw).
+    var doc = document.documentElement, short = y - (doc.scrollHeight - (globalThis.innerHeight || 0));
+    var stage = root.querySelector(".stage");
+    if (short > 0 && stage) { var pad = document.createElement("div"); pad.className = "landpad"; pad.style.height = Math.ceil(short) + "px"; stage.appendChild(pad); }
     scrollToY(y);
   }
   function scrollTop() { scrollToY(0); }
