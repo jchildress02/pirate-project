@@ -82,7 +82,9 @@
   function captainSources(captain) {
     var out = [];
     ["traits", "flaws", "tags", "items"].forEach(function (kind) {
-      (captain[kind] || []).forEach(function (id) {
+      // Items: only what's worn works (and the Brace, §32.3; js/items.js).
+      var list = kind === "items" && PC.items ? PC.items.activeOf(captain) : (captain[kind] || []);
+      list.forEach(function (id) {
         var m = PC.data.modifiers[id];
         if (m) out.push({ id: id, kind: kind, mod: m });
       });
@@ -97,6 +99,7 @@
     var have = (ctx.conditions || []).concat(ctx.season ? [ctx.season] : []);
     if (when.condition && have.indexOf(when.condition) < 0) return false;
     if (when.anyOf && !when.anyOf.some(function (c) { return have.indexOf(c) >= 0; })) return false;
+    if (when.none && when.none.some(function (c) { return have.indexOf(c) >= 0; })) return false;
     return true;
   }
 

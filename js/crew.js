@@ -24,9 +24,12 @@
     return b.name;
   }
 
+  // The morale floor: Fiddler and the like, plus the items' (§32.4).
+  function floor(state) { return Math.min(100, (state.crew.floor || 0) + (PC.items ? PC.items.moraleFloor(state) : 0)); }
+
   function addMorale(state, n) {
     var c = state.crew;
-    c.morale = clamp(c.morale + n, c.floor || 0, 100);
+    c.morale = clamp(c.morale + n, floor(state), 100);
     return c.morale;
   }
 
@@ -448,7 +451,7 @@
   PC.crew = {
     BANDS: BANDS,
     band: band,
-    addMorale: addMorale,
+    addMorale: addMorale, floor: floor,
     skill: skill,
     discipline: discipline,
     crewRating: crewRating,

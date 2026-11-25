@@ -107,9 +107,8 @@
   // ---- Starting a dive -----------------------------------------------------
 
   function breathMax(state) {
-    var best = 0;
-    (state.captain.items || []).forEach(function (i) { best = Math.max(best, D().GEAR[i] || 0); });
-    return D().BREATH + best;
+    // Worn diving gear: the best one counts (§32.12, js/items.js).
+    return D().BREATH + PC.items.breath(state);
   }
 
   // opts: { site, wreck } for an ordinary dive, or { miranda: true }.
@@ -353,7 +352,7 @@
       } else if (it.tier === "goods") {
         PC.crew.addGood(state, it.good, it.n, false);
       } else if (it.tier === "item") {
-        state.captain.items.push(it.item);
+        PC.items.gain(state, it.item);
       } else if (it.tier === "quest") {
         state.flags.dpw_mermaid = true;
       }

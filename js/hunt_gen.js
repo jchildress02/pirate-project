@@ -239,7 +239,7 @@
       item: null,
     };
     var ip = H().HIDDEN_ITEM[lvl] + (s.flag === "Sicily" ? H().HIDDEN_ITEM_SICILY : 0);
-    if (r() < ip) loot.item = hiddenItem(s, r);
+    if (r() < ip) loot.item = PC.items.hiddenItem(s, r, lvl);
     loot.provisions = prizeFood(s, r);
     return loot;
   }
@@ -251,13 +251,8 @@
     return Math.round((s.crew || 0) / F.per * between(r, F.lo, F.hi));
   }
 
-  // The hidden item (§32.16): this build draws from the items the prototype
-  // already knows (DEFAULT: the full pools arrive with the items work).
-  var ITEM_POOL = { War: ["Sea-Service Pistol", "Spyglass", "Octant"], Pirate: ["Gold Tooth", "Shark-Tooth Necklace", "Eyepatch"], other: ["Silver Pocket Watch", "Spyglass", "Octant", "Sea-Service Pistol"] };
-  function hiddenItem(s, r) {
-    var pool = s.role === "War" ? ITEM_POOL.War : s.flag === "Pirate" ? ITEM_POOL.Pirate : ITEM_POOL.other;
-    return pick(r, pool);
-  }
+  // The hidden item (§32.16): the pools by flag live in content/items.js
+  // and the draw in js/items.js (M9 PR 5).
 
   // ---- What the scouting screen shows (§22.3) -------------------------------
 

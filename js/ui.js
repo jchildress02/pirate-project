@@ -2486,6 +2486,11 @@
         html += '<p class="sc" style="margin:4px 0">' + (bd.meBoarding ? "On her deck" : "On your deck") + " · clash " + (bd.clash + 1) + " of 3" + (bd.sf && bd.clash === 0 ? " · " + esc(PC.data.huntLines.strikeFirst[bd.sf]) : "") + "</p>" +
           bopts(b.actions.map(function (a) { return O("doAction", a.id, a.label, chk(a.check), a.note, a.lock); }));
         break;
+      case "grenade":
+        html += '<p class="sc" style="margin:4px 0">' + (b.board && b.board.meBoarding ? "Boarding her" : "She's boarding you") + "</p>" + bopts([
+          O("grenade", "yes", "Throw a blackpowder grenade", null, "You win Strike First and one more of them falls. You have " + PC.items.count(state, "Blackpowder Grenade") + "."),
+          O("grenade", "no", "Keep it", chk({ type: "Strike First", dr: Math.max(0, Math.min(8, en ? en.rating : 0)) }), "Roll Strike First as usual.")]);
+        break;
       case "retarget":
         html += '<p class="sc">Your target is out of the fight. Who next?</p><div class="actions">' + b.enemies.filter(function (e) { return !e.out; }).map(function (e) { return B("retarget", e.id, esc(e.name || e.cls)); }).join("") + "</div>";
         break;
@@ -3085,13 +3090,44 @@
       '<div class="h4">Skills</div>' + skillsBlock() +
       '<div class="h4">Traits, flaw, old ailments and tags</div><ul style="padding-left:1.1em;font-size:18px">' +
       lines(c.traits || []) + lines(c.flaws || [], "flaw") + lines(c.debuffs || []) + lines((c.tags || []).filter(function (t) { return (c.debuffs || []).indexOf(t) < 0; })) + "</ul>" +
-      '<div class="h4">Items and equipment</div><p class="small">' + esc((c.items || []).join(", ") || "Nothing yet.") + ' <span class="note">The equipment screen comes later.</span></p>' +
+      equipBlock() +
       '<div class="h4">Ship and stores</div><table class="ledger wide">' +
       lrow("Ship", esc(state.ship.type) + " <i>" + esc(state.ship.name) + "</i>") + lrow("Hull · Speed", Math.round(state.ship.hull) + " / " + state.ship.hullMax + " · " + state.ship.speed) +
       lrow("Guns", state.ship.guns + " of " + state.ship.gunsMax) + lrow("Crew", plural(state.crew.count, "hand") + (state.crew.wounded ? " + " + state.crew.wounded + " wounded" : "") + " · morale " + state.crew.morale) +
       lrow("Provisions", esc(foodWords()) + " · " + esc(seaTime(PC.crew.food(state)))) +
       lrow("Hold", PC.crew.slotsUsed(state) + " of " + PC.crew.holdCapacity(state)) + lrow("Crew Rating", PC.crew.crewRating(state)) + "</table>" +
       meters(true) + alliesBlock() + letterLine() + meterHelp() + '<p class="small" style="margin-top:12px">' + seal().replace('class="seal"', 'class="seal" style="display:inline-flex"') + "</p>";
+  }
+
+  // The equipment screen (§32.3, §41.12; M9 PR 5): the slots, then the
+  // inventory. Swaps are free, but not in a battle, a minigame or a scene.
+  function equipBlock() {
+    var v = PC.items.view(state), lk = v.lock;
+    var tierNote = function (t) { return t ? ' <span class="note">' + esc(t) + "</span>" : ""; };
+    var slots = v.slots.map(function (s) {
+      var val = s.item ? "<b style=\"font-weight:normal\">" + esc(s.item) + "</b>" + tierNote(s.tier) + '<br><span class="small">' + esc(s.effect || "") + (s.inert ? ' <span class="note">(' + esc(s.inert) + ")</span>" : "") + "</span>" +
+        (lk ? "" : ' <button class="link" data-act="unequip" data-key="' + s.key + '">Take off</button>')
+        : '<span class="note">' + esc(s.note || "Empty") + "</span>";
+      return lrow(s.name, val);
+    }).join("");
+    var inv = v.inventory.map(function (it) {
+      var btns = "";
+      if (!lk) {
+        btns = it.keys.map(function (k) {
+          return '<button class="link" data-act="equip" data-item="' + esc(it.name) + '" data-key="' + k.key + '">' + (k.holds ? "Wear as " + esc(k.name) + " (for the " + esc(k.holds) + ")" : "Wear" + (it.keys.length > 1 ? " as " + esc(k.name) : "")) + "</button>";
+        }).join(" ");
+        if (it.use) btns += it.use.why ? ' <span class="note">' + esc(it.use.why) + "</span>" : ' <button class="primary" data-act="useitem" data-item="' + esc(it.name) + '">Use</button>';
+      }
+      var how = it.slot === "display" ? (it.works ? "counts while carried, until the cabin" : "for display: the cabin comes later") : it.works && it.tier ? "works from the inventory" : "";
+      return '<li><b style="font-weight:normal">' + esc(it.name) + (it.count > 1 ? " ×" + it.count : "") + "</b>" + tierNote(it.tier) +
+        (it.effect ? '<br><span class="small">' + esc(it.effect) + (it.inert ? ' <span class="note">(' + esc(it.inert) + ")</span>" : "") + "</span>" : "") +
+        (how ? ' <span class="note">· ' + esc(how) + "</span>" : "") + (btns ? '<div class="small" style="margin:2px 0 8px;display:flex;gap:14px;flex-wrap:wrap">' + btns + "</div>" : "") + "</li>";
+    }).join("");
+    return '<div class="h4">Equipment</div>' + (lk ? '<p class="notice">' + esc(lk) + "</p>" : "") +
+      '<p class="small" style="margin:2px 0">In a boarding you fight with <b style="font-weight:normal">' + esc(v.melee) + "</b>" + (v.guns.length ? " and fire the " + esc(v.guns.join(" and the ")) : ", with no gun for the boarding shot") + ".</p>" +
+      '<table class="ledger wide">' + slots + "</table>" +
+      '<div class="h4">Inventory</div>' + (inv ? '<ul style="padding-left:1.1em;font-size:18px">' + inv + "</ul>" : '<p class="small">Nothing else.</p>') +
+      '<p class="note">Only what you wear works, except the Pistol Brace and what you use. Changing costs no actions.</p>';
   }
 
   function menuNotes() { return "<h2>Notes</h2>" + notesBody(); }
@@ -3317,7 +3353,7 @@
     "hb": function (el) {
       markLog();
       var a = el.dataset.arg, fn = el.dataset.fn;
-      if (fn === "showOfForce" || fn === "press") a = a === "yes";
+      if (fn === "showOfForce" || fn === "press" || fn === "grenade") a = a === "yes";
       PC.hunt.battle(state, state.minigame, fn, a);
     },
     "hassign": function (el) { PC.hunt.battle(state, state.minigame, "assignFleetShip", el.dataset.ship, el.dataset.what); },
@@ -4427,6 +4463,9 @@
       var r = PC.bounties.report(state, el.dataset.id, el.dataset.claim);
       say("howe", "Lieutenant Howe", r.lines.join("\n\n"), null, null, r.outcome ? { chips: r.chips, outcome: r.outcome, rollType: "Bluff & Disguise" } : { chips: r.chips });
     },
+    "equip": function (el) { PC.items.equip(state, el.dataset.item, el.dataset.key); },
+    "unequip": function (el) { PC.items.unequip(state, el.dataset.key); },
+    "useitem": function (el) { toast(PC.items.use(state, el.dataset.item)); },
     "prisrelease": function (el) { var r = PC.bounties.releasePrisoner(state, el.dataset.id, false); toast(r.lines.join(" ")); },
     "priskill": function (el) { var r = PC.bounties.releasePrisoner(state, el.dataset.id, true); toast(r.lines.join(" ")); },
     "devfreddy": function () { menu = null; state.flags.a_wanted_man_assigned = true; state.flags.admiralty_board_open = true; PC.wanted.heardRumor(state); toast("Freddy Fearless is in the next hunt batch on the Hatteras Banks."); },

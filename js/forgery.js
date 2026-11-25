@@ -46,7 +46,7 @@
   }
 
   function itemBonus(state) {
-    return (state.captain.items || []).reduce(function (a, id) { var m = PC.data.modifiers[id]; return a + ((m && m.forgeUnits) || 0); }, 0);
+    return PC.items.active(state).reduce(function (a, id) { var m = PC.data.modifiers[id]; return a + ((m && m.forgeUnits) || 0); }, 0);
   }
   // The units the roll clears (§20.3).
   function budget(state, outcome) {

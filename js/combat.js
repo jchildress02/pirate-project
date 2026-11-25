@@ -891,7 +891,7 @@
   function doRepel(state, game) {
     var b = game.battle;
     if (b.step !== "repel") throw new Error("Not the moment for that.");
-    return M().roll(state, game, { type: "Board", dr: clamp(lead(b).rating, 0, 8), extra: weatherParts(state, b, "repel") }, "repel", {}, ["Battle"]);
+    return M().roll(state, game, { type: "Board", dr: clamp(lead(b).rating, 0, 8), extra: weatherParts(state, b, "repel") }, "repel", {}, ["Battle", "Repel"]);
   }
 
   function settleRepel(state, game, p) {
@@ -909,8 +909,22 @@
   // Strike First opens every boarding (§11.4): an automatic roll.
   function toStrikeFirst(state, game) {
     var b = game.battle;
+    // A Blackpowder Grenade offers itself at the start of a boarding (§32.12).
+    if (PC.items.count(state, "Blackpowder Grenade") > 0 && !b.board.grenadeAsked) { b.board.grenadeAsked = true; b.step = "grenade"; return null; }
     b.step = "strikeFirst";
     return M().roll(state, game, { type: "Strike First", dr: clamp(lead(b).rating, 0, 8) }, "strikeFirst", {}, ["Battle"]);
+  }
+
+  // Throw it: Strike First is won and one extra enemy falls; or keep it.
+  function grenade(state, game, yes) {
+    var b = game.battle;
+    if (b.step !== "grenade") throw new Error("Not the moment for that.");
+    if (!yes) { b.step = "strikeFirst"; return M().roll(state, game, { type: "Strike First", dr: clamp(lead(b).rating, 0, 8) }, "strikeFirst", {}, ["Battle"]); }
+    PC.items.lose(state, "Blackpowder Grenade");
+    say(state, game, PC.data.items.lines.grenade);
+    loseCrew(state, game, b, lead(b).id, 1);
+    PC.state.addLog(state, "Threw a blackpowder grenade.");
+    return settleStrikeFirst(state, game, { outcome: "clean" });
   }
 
   function settleStrikeFirst(state, game, p) {
@@ -930,23 +944,18 @@
     var line = PC.wanted.bark(state, e, slot);
     if (line) say(state, game, line);
   }
-  function meleeType(state) {
-    var items = state.captain.items || [];
-    return items.some(function (i) { return /club|cudgel|knuckle|belaying|brawl/i.test(i); }) ? "Brawling" : "Swordsmanship";
+  // The worn melee weapon decides the skill (§32.3; js/items.js).
+  function meleeType(state) { return PC.items.meleeType(state); }
+  // The gun a shot is fired with, for its line (#27): "flintlock pistol".
+  function gunName(g) {
+    if (!g) return "pistol";
+    return g.name === "Simple Flintlock Pistol" || g.name === "Ship's Pistol" ? "flintlock pistol" : g.name.toLowerCase();
   }
-  var GUN = { "Simple Flintlock Pistol": 0, "Sea-Service Pistol": 1, "Dueling Pistol": 2, "Family Pistol": 2 };
-  function gunBonus(state) {
-    var items = state.captain.items || [];
-    var best = null;
-    items.forEach(function (i) { if (i in GUN && (best == null || GUN[i] > best)) best = GUN[i]; });
-    return best;
-  }
-  // The gun the shot is fired with, for its line (#27): "flintlock pistol".
-  function gunName(state) {
-    var best = null;
-    (state.captain.items || []).forEach(function (i) { if (i in GUN && (best == null || GUN[i] > GUN[best])) best = i; });
-    if (!best) return "pistol";
-    return best === "Simple Flintlock Pistol" ? "flintlock pistol" : best.toLowerCase();
+  // One boarding shot (§32.10): the gun's bonus sits outside the cap; a
+  // Storm's firearms −1 spares the crossbow and the bow (§42.4).
+  function shotCheck(state, b, g) {
+    var wp = weatherParts(state, b, "firearms").filter(function () { return !g.def.stormProof; });
+    return { type: "Marksmanship", dr: clamp(lead(b).rating, 0, 8), extra: (g.bonus ? [{ label: g.name, value: g.bonus }] : []).concat(wp) };
   }
 
   // The captain's five personal actions (§21.12), with what each needs.
@@ -959,13 +968,13 @@
     var fl = forced ? "He calls you out: the duel comes first" : null;
     list.push({ id: "lead", label: "Lead the Charge", check: { type: meleeType(state), dr: dr, cond: ["Lead the Charge"] }, lock: w ? "Not while you're Wounded" : fl,
       note: "Clean: +2 on this clash, partial +1. A setback means you're Wounded." });
-    list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr }, lock: fl, note: "+1 on the next clash on a partial or better." });
+    list.push({ id: "rally", label: "Rally", check: { type: "Rally Crew", dr: dr, cond: ["Boarding Rally"] }, lock: fl, note: "+1 on the next clash on a partial or better." });
     list.push({ id: "hold", label: "Hold the Deck", check: { type: "Hold Your Ground", dr: dr }, lock: fl, note: "Halves your losses this clash on a partial or better." });
     list.push({ id: "duel", label: "Seek their captain", check: { type: meleeType(state), dr: dr, cond: ["Duel"] },
       lock: w ? "Not while you're Wounded" : b.dueled ? "There's no second duel in a battle" : en.hunter ? null : null,
       note: "A duel. Clean: she rolls to strike at once and her crew is leaderless for the battle. Setback: you're Wounded and they get +1 on the next clash." });
     // Dread joins Intimidate through the meter modifiers now (§11.8.5).
-    list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8) },
+    list.push({ id: "demand", label: "Demand Surrender", check: { type: "Intimidate", dr: clamp(effResolve(en), 0, 8), cond: ["Demand Surrender"] },
       lock: fl, note: "Clean: they strike, no clash. Partial: they're shaken (−1 Resolve for the battle)." });
     return list;
   }
@@ -979,10 +988,12 @@
     b.board.action = id;
     // The boarding shot: one Marksmanship shot a boarding, at the first
     // Lead the Charge or to open a duel (§21.12, §32.10).
-    var gb = gunBonus(state);
-    if ((id === "lead" || id === "duel") && !b.board.shotDone && gb != null) {
+    // With the Pistol Brace and a second pistol, the shot rolls twice.
+    var gs = PC.items.guns(state);
+    if ((id === "lead" || id === "duel") && !b.board.shotDone && gs.length) {
       b.board.shotDone = true;
-      return M().roll(state, game, { type: "Marksmanship", dr: clamp(lead(b).rating, 0, 8), extra: (gb ? [{ label: "The pistol", value: gb }] : []).concat(weatherParts(state, b, "firearms")) }, "shot", { then: id }, ["Battle"]);
+      b.board.shotHits = 0;
+      return M().roll(state, game, shotCheck(state, b, gs[0]), "shot", { then: id, gun: 0 }, ["Battle"]);
     }
     return rollAction(state, game, a);
   }
@@ -991,13 +1002,30 @@
   // Rare swords (§32.8) can read it.
   function rollAction(state, game, a) {
     var cond = ["Battle"].concat(a.check && a.check.cond || []);
-    return M().roll(state, game, a.check, "act_" + a.id, {}, cond);
+    var check = a.check;
+    // A hit opening a duel: +2 edge (+3 with the Mahogany Pistol); two hits
+    // with the Brace double it (§32.10).
+    var bd = game.battle.board;
+    if (a.id === "duel" && bd && bd.shotHits) {
+      var per = bd.shotBonus || 2;
+      check = Object.assign({}, check, { extra: (check.extra || []).concat([{ label: "Your shot", value: per * bd.shotHits }]) });
+      bd.shotHits = 0;
+    }
+    if (a.id === "duel" && bd) bd.shotKills = 0; // a shot opening a duel adds edge, not casualties
+    return M().roll(state, game, check, "act_" + a.id, {}, cond);
   }
 
   function settleShot(state, game, p) {
     var b = game.battle;
-    say(state, game, String(L().shot[p.outcome]).replace(/\{weapon\}/g, gunName(state)));
-    b.board.shotHit = p.outcome === "clean";
+    var gs = PC.items.guns(state), g = gs[p.data.gun || 0];
+    say(state, game, String(L().shot[p.outcome]).replace(/\{weapon\}/g, gunName(g)));
+    if (p.outcome === "clean" && g) {
+      b.board.shotHits = (b.board.shotHits || 0) + 1;
+      b.board.shotKills = (b.board.shotKills || 0) + (g.def.shotKills || 1);
+      b.board.shotBonus = Math.max(b.board.shotBonus || 2, g.def.duelHit || 2);
+    }
+    // The braced second pistol fires next (§32.10).
+    if ((p.data.gun || 0) === 0 && gs[1]) return M().roll(state, game, shotCheck(state, b, gs[1]), "shot", { then: p.data.then, gun: 1 }, ["Battle"]);
     var a = actions(state, b).filter(function (x) { return x.id === p.data.then; })[0];
     return rollAction(state, game, a);
   }
@@ -1016,11 +1044,14 @@
     var mod = 0, hold = false;
     if (id === "lead") {
       say(state, game, L().lead[p.outcome]);
-      if (bd.shotHit) { loseCrew(state, game, b, e.id, 1); bd.shotHit = false; }
+      // The boarding shot's hits (a musket kills two, §32.10).
+      if (bd.shotKills) { loseCrew(state, game, b, e.id, bd.shotKills); bd.shotKills = 0; bd.shotHits = 0; }
       if (p.outcome === "clean") mod = 2; else if (p.outcome === "partial") mod = 1;
       else woundCaptain(state, game);
-      // Freddy's Cutlass: a clean Lead the Charge kills one extra enemy (§32.8).
-      if (p.outcome === "clean" && (state.captain.items || []).indexOf("Freddy's Cutlass") >= 0) loseCrew(state, game, b, e.id, 1);
+      // The heavy weapons and Freddy's Cutlass: a clean Lead the Charge kills
+      // one extra enemy (§32.8, §32.9; the Barnacle Buster with Brute, §32.13).
+      var xk = PC.items.extraKill(state);
+      if (p.outcome === "clean" && xk) loseCrew(state, game, b, e.id, xk);
     } else if (id === "rally") {
       say(state, game, L().rally[p.outcome]);
       if (p.outcome !== "setback") bd.rallyNext = 1;
@@ -1269,7 +1300,7 @@
     fleetSpeed: fleetSpeed, fleetCA: fleetCA, pairCA: pairCA, fleeChance: fleeChance, effResolve: effResolve,
     begin: begin, engage: engage, setTarget: setTarget, assignFleetShip: assignFleetShip, showOfForce: showOfForce,
     hunterChoice: hunterChoice, doPosition: doPosition, choosePosition: choosePosition, doExchange: doExchange,
-    decide: decide, doChase: doChase, press: press, doGrapple: doGrapple, doRepel: doRepel, doAction: doAction,
+    decide: decide, doChase: doChase, press: press, doGrapple: doGrapple, doRepel: doRepel, doAction: doAction, grenade: grenade,
     doEndure: doEndure, startRound: startRound, settle: settle, view: view, actions: actions,
     setFleetOrder: function (state, game, o) { game.battle.fleetOrder = o === "sink" ? "sink" : "take"; },
     retarget: function (state, game, id) { var b = game.battle; if (b.step !== "retarget") throw new Error("Not the moment for that."); setTarget(state, game, id); startRound(state, game); },
